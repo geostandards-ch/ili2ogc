@@ -109,6 +109,8 @@ def text_sign_to_label(
     height: float | None = None,
     italic: bool | None = None,
     underline: bool | None = None,
+    color: RGBColor | None = None,
+    opacity: float | None = None,
     h_alignment: str | None = None,
     v_alignment: str | None = None,
 ) -> Label:
@@ -129,7 +131,7 @@ def text_sign_to_label(
         if h_alignment or v_alignment
         else None
     )
-    font = Font(face=font_face, size=meters(height), italic=italic, underline=underline)
+    font = Font(face=font_face, size=meters(height), italic=italic, underline=underline, color=color, opacity=opacity)
     transform = Transform2D(orientation=rotation) if rotation is not None else None
     graphic = TextGraphic(text=text, font=font, alignment=alignment, transform=transform)
     return Label(elements=[graphic])
@@ -295,15 +297,17 @@ def symbol_sign_object_to_marker(library: SignLibrary, obj: XtfObject) -> Marker
 
 
 def text_sign_object_to_font_kwargs(library: SignLibrary, obj: XtfObject) -> dict[str, Any]:
-    """Build `text_sign_to_label` kwargs (`font_face`/`height`/`italic`) from a real `TextSign` data object.
+    """Build `text_sign_to_label` kwargs (`font_face`/`height`/`italic`/`color`/`opacity`) from a `TextSign` object.
 
     `Font` (`TextSignFontAssoc`) gives the face; `Height`/`Slanted` are
-    `TextSign`'s own attributes directly (not references). `Underlined`
-    is deliberately NOT read: pycartosym's SLD writer raises
-    `NotImplementedError` for `Font.underline` unconditionally (confirmed
-    reading its source) - wiring it would only ever produce a crash, not
-    a silently-wrong value, but there is no real `TextSign` data to
-    verify against either way.
+    `TextSign`'s own attributes directly (not references). `Color`
+    (`TextSignColorAssoc`) resolves via the same `Color` wire mechanism as
+    `SurfaceSign.FillColor`/`PolylineSign.Color`, now that `Font.color`/
+    `opacity` exist in pycartosym (v0.3.0). `Underlined` is deliberately
+    NOT read: pycartosym's SLD writer raises `NotImplementedError` for
+    `Font.underline` unconditionally (confirmed reading its source) -
+    wiring it would only ever produce a crash, not a silently-wrong value,
+    but there is no real `TextSign` data to verify against either way.
     """
     kwargs: dict[str, Any] = {}
     font_obj = library.resolve_ref(obj, "Font")
@@ -317,6 +321,11 @@ def text_sign_object_to_font_kwargs(library: SignLibrary, obj: XtfObject) -> dic
     slanted = library.scalar(obj, "Slanted")
     if slanted is not None:
         kwargs["italic"] = slanted == "true"
+    color, opacity = library.resolve_color(obj, "Color")
+    if color is not None:
+        kwargs["color"] = color
+    if opacity is not None:
+        kwargs["opacity"] = opacity
     return kwargs
 
 

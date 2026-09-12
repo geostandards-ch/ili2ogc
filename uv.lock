@@ -358,7 +358,7 @@ requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.0" },
     { name = "jsonschema", specifier = ">=4.23.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
-    { name = "pycartosym", extras = ["sld"], specifier = ">=0.2.2" },
+    { name = "pycartosym", extras = ["sld"], specifier = ">=0.3.0" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0.0" },
@@ -823,16 +823,16 @@ wheels = [
 
 [[package]]
 name = "pycartosym"
-version = "0.2.2"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "antlr4-python3-runtime" },
     { name = "jsonschema" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/35/4b/1806c5d25227ffaa8eef7dffc78a7f693aacd2ac1e1e28e1a48ec7989c60/pycartosym-0.2.2.tar.gz", hash = "sha256:8873277f127949afa24119b34263ac696a287ee4ecb88e50f0c1abb146bd8101", size = 335522, upload-time = "2026-09-12T13:18:59.762Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/be/e7/d62436896057dc92f83b61907d773c625831af673c2efc9c90c4aca15783/pycartosym-0.3.0.tar.gz", hash = "sha256:95da58c0f0d6726558429a25110cf1193bb6fa072bc8726a9f13c87d2cea9a46", size = 338736, upload-time = "2026-09-12T20:04:07.69Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/98/81/04f0f07c3e850485755785856bab75577ee99135739495836ce34d0e5576/pycartosym-0.2.2-py3-none-any.whl", hash = "sha256:76029ee525ea263b549139f1766dd7a47e6b1c158b4612e51f5486c7b409393e", size = 275370, upload-time = "2026-09-12T13:18:58.453Z" },
+    { url = "https://files.pythonhosted.org/packages/ce/23/fa8d499b46f558874f7e865bea164df7696c71088f9bcaf618945639895a/pycartosym-0.3.0-py3-none-any.whl", hash = "sha256:b9ee25bce4251b33fbdc4476bc5e9315150f16d98270f5774673c1dbe216f9f2", size = 277348, upload-time = "2026-09-12T20:04:06.178Z" },
 ]
 
 [package.optional-dependencies]

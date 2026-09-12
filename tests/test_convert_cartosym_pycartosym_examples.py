@@ -81,15 +81,14 @@ def test_example_2_line_stroke_dash():
 
 
 def test_example_4_text_label():
-    """Target: `examples/sld/4-text-label.sld` - `se:TextSymbolizer`/`se:Font`(Arial/12)/`se:AnchorPoint`.
+    """Target: `examples/sld/4-text-label.sld` - `se:TextSymbolizer`/`se:Font`(Arial/12)/`se:AnchorPoint`/`se:Fill`.
 
-    `se:Fill` on the text itself (its color) is NOT reproduced -
-    `pycartosym`'s SLD writer reads `font.color`/`font.opacity` but its
-    own `Font` pydantic model has neither field (`extra="forbid"`,
-    confirmed empirically) - a real, current gap in `pycartosym`, not an
-    INTERLIS mapping question. `se:Displacement` also has no INTERLIS
-    `TextSign` PARAMETER to source it from (only `HAli`/`VAli`, i.e.
-    `AnchorPoint`) - not attempted.
+    `se:Fill` on the text itself (`TextSign.Color`, `Color ili:ref="3"`
+    = midgray `#a9a9a9`/opacity 1 in the fixture) is now reproduced via
+    `Font.color`/`opacity` (`pycartosym` v0.3.0 added both fields to its
+    `Font` model). `se:Displacement` still has no INTERLIS `TextSign`
+    PARAMETER to source it from (only `HAli`/`VAli`, i.e. `AnchorPoint`) -
+    not attempted.
     """
     rules, graphic = _drawing_rules("Amenities_Graphics")
     styling_rule = styling_rule_from_drawing_rule(
@@ -102,6 +101,8 @@ def test_example_4_text_label():
     assert '"font-size">12<' in xml
     assert "<se:AnchorPointX>0</se:AnchorPointX>" in xml
     assert "<se:AnchorPointY>0.5</se:AnchorPointY>" in xml
+    assert '"fill">#a9a9a9<' in xml
+    assert '"fill-opacity">1<' in xml
 
 
 def test_example_3_point_dot_mark():

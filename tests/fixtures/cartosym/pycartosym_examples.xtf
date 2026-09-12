@@ -74,6 +74,12 @@
             <H>73.1350</H>
             <T>1.0</T>
          </Color>
+         <Color ili:tid="9"><!-- #000000, T omitted on purpose (target SLD has no fill-opacity) -->
+            <Name>black</Name>
+            <L>0.0000</L>
+            <C>0.0000</C>
+            <H>0.0000</H>
+         </Color>
 
          <!-- PolylineAttrs (Width) -->
          <PolylineAttrs ili:tid="10">
@@ -148,11 +154,13 @@
             <ili:Name>AmenityLabel</ili:Name>
             <Height>12</Height>
             <Font ili:ref="300"></Font>
+            <Color ili:ref="3"></Color>
          </TextSign>
          <TextSign ili:tid="401">
             <ili:Name>LanduseLabel</ili:Name>
             <Height>10</Height>
             <Font ili:ref="300"></Font>
+            <Color ili:ref="9"></Color>
          </TextSign>
 
          <!-- FontSymbol composite geometry (Font.Type = symbol, 2 stacked

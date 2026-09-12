@@ -70,6 +70,14 @@ def test_text_sign_label_from_roadsexgm2ien_streetname():
     assert "<se:AnchorPointY>0.5</se:AnchorPointY>" in xml
 
 
+def test_text_sign_label_carries_color_and_opacity_to_fill():
+    """`TextSign.Color` (`TextSignColorAssoc`), wired via `Font.color`/`opacity` (pycartosym v0.3.0)."""
+    label = text_sign_to_label(text="Main Street", color=color_to_rgb(0.0, 0.0, 0.0), opacity=1.0)
+    xml = _write(Symbolizer(label=label))
+    assert '"fill">#000000' in xml
+    assert '"fill-opacity">1' in xml
+
+
 def test_text_sign_cap_and_base_valignment_approximate_to_top_and_bottom():
     """`VALIGNMENT`'s 5 levels (`Top`/`Cap`/`Half`/`Base`/`Bottom`) collapse onto pycartosym's 3 (top/middle/bottom)."""
     cap_xml = _write(Symbolizer(label=text_sign_to_label(text="x", v_alignment="Cap")))
