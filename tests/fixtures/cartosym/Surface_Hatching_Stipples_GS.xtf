@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- File Surface_Hatching_Stipples_GS.xtf 2024-04-17 -->
+
+<ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS"
+  xmlns:geom="http://www.interlis.ch/geometry/1.0"
+  xmlns="http://www.interlis.ch/xtf/2.4/StandardSymbology"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+   <ili:headersection>
+      <ili:models>
+         <ili:model>Surface_Graphics</ili:model>
+      </ili:models>
+      <ili:sender>HEIG-VD</ili:sender>
+      <ili:comment>Basic example of Surface Hatching Signatures</ili:comment>
+   </ili:headersection>
+   <ili:datasection>
+      <StandardSigns ili:bid="Surface_Graphics_Hatching">
+         <!-- Color Library -->
+         <Color ili:tid="1">
+            <Name>white</Name>
+            <L>100.0</L>
+            <C>0.0</C>
+            <H>0.0</H>
+            <T>1.0</T>
+         </Color>
+         <Color ili:tid="2">
+            <Name>black</Name>
+            <L>0.0</L>
+            <C>0.0</C>
+            <H>0.0</H>
+            <T>1.0</T>
+         </Color>
+         <!-- Polyline attributes -->
+         <PolylineAttrs ili:tid="4001">
+           <Width>0.01</Width>
+           <Join>round</Join>
+           <Caps>butt</Caps>
+         </PolylineAttrs>
+         <!-- Line Styles -->
+         <LineStyle_Solid ili:tid="21">
+            <Name>LineSolid_01</Name>
+            <Color ili:ref="2"></Color>
+            <LineAttrs ili:ref="4001"></LineAttrs>
+         </LineStyle_Solid>
+         <!-- Surface Signs -->
+         <SurfaceSign ili:tid="5001">
+            <ili:Name>fill</ili:Name>
+            <FillColor ili:ref="1"></FillColor>
+            <!-- Hatches -->
+            <HatchOffset>2</HatchOffset>
+            <!-- Hatch Symbol -->
+            <HatchSymb ili:ref="3001"></HatchSymb>
+            <!-- Border Style definition -->
+            <Border ili:ref="3001"></Border>
+         </SurfaceSign>
+         <!-- Polyline Signs -->
+         <PolylineSign ili:tid="3001">
+            <ili:Name>continuous</ili:Name>
+            <Style ili:ref="21">
+              <PolylineSignLineStyleAssoc>
+                <Offset>0.0</Offset>
+              </PolylineSignLineStyleAssoc>
+            </Style>
+         </PolylineSign>
+      </StandardSigns>
+   </ili:datasection>
+</ili:transfer>

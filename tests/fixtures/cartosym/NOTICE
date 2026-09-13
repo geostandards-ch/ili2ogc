@@ -24,7 +24,8 @@ the INTERLIS reference manual's own canonical `GRAPHIC` example (eCH-0031
 `SIGN BASKET` data file (`RoadsExgm2ien_Symbols.xtf`, refman Appendix E) -
 the first REAL (not hand-built) `.ili`/`.xtf` pair exercising this whole
 pipeline end to end, used by `interlis convert-sld` (`cmd_convert_sld`,
-`cli.py`) and `tests/test_convert_cartosym_roadsexgm2ien.py`.
+`cli.py`) and `tests/test_convert_cartosym_graphic_to_style.py`/
+`tests/test_cli_convert_sld.py`.
 `roadsexgm2ien_repo/` holds its base models, resolved via `--repo`
 (RULE #9): `RoadsExdm2ben.ili`/`RoadsExdm2ien.ili` fetched from
 `https://models.interlis.ch/refhb24/` (the official INTERLIS models
@@ -32,3 +33,10 @@ catalog - the reference manual's own companion example models, openly
 published for reuse) ; `StandardSymbology.ili`/`AbstractSymbology.ili`
 likewise, same catalog/URL prefix (not from FGDM4GS - those are the
 official upstream originals FGDM4GS itself imports).
+
+`Surface_Hatching_Stipples_GS.xtf` (2026-09-13): same source/provenance
+as `Point_Graphics_Signatures.xtf` above (`FGDM4GS`,
+`WP2-WP3/model/symbology/`) - a real `SurfaceSign` ("fill") with a
+`HatchSymb` reference to a `PolylineSign` ("continuous") and a
+`HatchOffset`, used by `tests/test_convert_cartosym_hatch.py` to verify
+`surface_sign_object_to_hatch_pattern` end to end.

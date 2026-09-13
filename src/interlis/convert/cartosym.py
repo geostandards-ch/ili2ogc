@@ -111,9 +111,11 @@ def polyline_sign_to_stroke(
     )
 
 
-def surface_sign_to_fill(*, fill_color: RGBColor | None = None, opacity: float | None = None) -> Fill:
-    """Build a `Fill` from a `SurfaceSign`'s resolved `FillColor` - `HatchSymb`/`Clip`/`HatchOrg` have no target."""
-    return Fill(color=fill_color, opacity=opacity)
+def surface_sign_to_fill(
+    *, fill_color: RGBColor | None = None, opacity: float | None = None, pattern: ImageGraphic | None = None
+) -> Fill:
+    """Build a `Fill` from `SurfaceSign.FillColor`/`HatchSymb` - `Clip`/`HatchOrg`/`HatchOffset` have no target."""
+    return Fill(color=fill_color, opacity=opacity, pattern=pattern)
 
 
 def font_symbol_text_to_graphic(*, character: str, font_face: str | None = None) -> TextGraphic:
@@ -545,16 +547,56 @@ def text_sign_object_to_font_kwargs(library: SignLibrary, obj: XtfObject) -> dic
     return kwargs
 
 
+def surface_sign_object_to_hatch_pattern(library: SignLibrary, obj: XtfObject) -> ImageGraphic | None:
+    """Build a `Fill.pattern` `ImageGraphic` from `SurfaceSign.HatchSymb` (a `PolylineSign` reference).
+
+    `Fill.pattern`/`Stroke.pattern` write correctly as of `pycartosym`
+    v0.3.0 (`se:GraphicFill`/`se:GraphicStroke`, confirmed against the
+    published wheel - a previous "blocked, NotImplementedError" note here
+    was stale, tested against 0.2.2 and never rechecked after this
+    project bumped past it) - but only `Dot`/`Circle`/`Rectangle`/`Image`
+    graphic types are supported in that position (confirmed reading the
+    writer source), never the free-form `ShapeGraphic` (`type: str`,
+    e.g. a "vertline"/"cross" WKN) that would otherwise be the obvious
+    match for a repeated hachure LINE. `Image` is the only viable target
+    left - a single horizontal line across a `viewBox="-0.5 -0.5 1 1"`
+    tile (same convention as `font_symbol_geometry_to_svg_data_uri`),
+    tiled by `se:GraphicFill`. `HatchAng` (`SS_Angle`, default 0.0)
+    rotates the whole tile via `Transform2D.orientation` - real corpus
+    data (`Surface_Hatching_Stipples_GS.xtf`) never actually sets it, so
+    the 0deg (untransformed) case is what's verified, not the rotated
+    one. `HatchOffset`/`HatchOrg` have no target - `se:GraphicFill` has
+    no separate pattern-spacing/anchor knob beyond the tile's own
+    `se:Size`, so a value here couldn't be expressed without inventing a
+    tiling convention `pycartosym`/SE doesn't have.
+    """
+    polyline_obj = library.resolve_ref(obj, "HatchSymb")
+    if polyline_obj is None:
+        return None
+    stroke = polyline_sign_object_to_stroke(library, polyline_obj)
+    color = stroke.color if isinstance(stroke.color, RGBColor) else None
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-0.5 -0.5 1 1">'
+        f'<line x1="-0.5" y1="0" x2="0.5" y2="0" stroke="{_rgb_to_hex(color)}"/></svg>'
+    )
+    encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    hatch_ang = library.scalar(obj, "HatchAng")
+    transform = Transform2D(orientation=float(hatch_ang)) if hatch_ang else None
+    resource = Resource(uri=f"data:image/svg+xml;base64,{encoded}", type="image/svg+xml")
+    return ImageGraphic(image=resource, transform=transform)
+
+
 def surface_sign_object_to_fill(library: SignLibrary, obj: XtfObject) -> Fill:
-    """Build a `Fill` from a real `SurfaceSign` data object's `FillColor` - `HatchSymb`/`Clip`/`HatchOrg` not resolved.
+    """Build a `Fill` from `SurfaceSign.FillColor`/`HatchSymb` - `Clip`/`HatchOrg`/`HatchOffset` not resolved.
 
     Same `Color` wire mechanism as `symbol_sign_object_to_marker`
     (verified there against real data) applied to a different attribute
-    name (`FillColor` vs `Color`) - not itself corpus-verified (no real
-    `SurfaceSign` data object found in the fixtures fetched so far).
+    name (`FillColor` vs `Color`) - verified end to end against real
+    `SurfaceSign` data (`Surface_Hatching_Stipples_GS.xtf`).
     """
     color, opacity = library.resolve_color(obj, "FillColor")
-    return surface_sign_to_fill(fill_color=color, opacity=opacity)
+    pattern = surface_sign_object_to_hatch_pattern(library, obj)
+    return surface_sign_to_fill(fill_color=color, opacity=opacity, pattern=pattern)
 
 
 def surface_sign_object_border_to_stroke(library: SignLibrary, obj: XtfObject) -> Stroke | None:
