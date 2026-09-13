@@ -786,8 +786,8 @@ def _validate_attrs(
                     tid,
                     qualified_class,
                     path,
-                    "attribut absent du schema (classe connue) - inconnu, ou herite via EXTENDS depuis un "
-                    "modele importe non charge (non couvert actuellement)",
+                    "attribute absent from schema (class known) - unknown, or inherited via EXTENDS from an "
+                    "imported model not loaded (not covered currently)",
                 )
             )
             continue
@@ -820,7 +820,7 @@ def _validate_attrs(
                     tid,
                     qualified_class,
                     path,
-                    f"{qualified_class}[{tid}].{path}: attribut MANDATORY {attr_name!r} absent",
+                    f"{qualified_class}[{tid}].{path}: MANDATORY attribute {attr_name!r} absent",
                 )
             )
     return issues

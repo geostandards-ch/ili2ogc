@@ -87,9 +87,9 @@ def test_numeric_within_rounding_tolerance_has_no_issue(builder):
 
 
 def test_numeric_beyond_rounding_tolerance_still_flagged(builder):
-    """Regression-guard : au-dela de la demi-unite de tolerance (0.5 pour 0
-    decimale), une valeur qui arrondit encore HORS plage reste une erreur -
-    1799.4 arrondit a 1799, toujours < Min 1800."""
+    """Beyond the half-unit rounding tolerance (0.5 for 0 decimals), a
+    value that still rounds OUTSIDE the range stays an error - 1799.4
+    rounds to 1799, still < Min 1800."""
     transfer = _transfer(_object("t1", {"Name": "Alice", "BirthYear": "1799.4"}))
     issues = validate_transfer(transfer, symbol_table=builder.symbol_table)
     msgs = _messages(issues, attribute="BirthYear", severity="error")
@@ -114,7 +114,7 @@ def test_unknown_attribute_flagged(builder):
     transfer = _transfer(_object("t1", {"Name": "Alice", "Nickname": "Al"}))
     issues = validate_transfer(transfer, symbol_table=builder.symbol_table)
     msgs = _messages(issues, attribute="Nickname", severity="warning")
-    assert any("absent du schema" in m for m in msgs)
+    assert any("absent from schema" in m for m in msgs)
 
 
 def test_unknown_class_flagged(builder):
@@ -328,10 +328,9 @@ def test_embedded_role_from_base_class_is_inherited_by_subclass(ref_builder):
 
 
 def test_embedded_role_from_base_class_resolved_on_subclass_instance_has_no_issue(ref_builder):
-    """Regression bout-en-bout (RULE #4, meme forme que le corpus reel
-    IVS_V2_1) : un objet de la SOUS-CLASSE porte le REF du role embarque
-    declare sur la classe de BASE - doit resoudre sans issue, PAS
-    "attribut absent du schema"."""
+    """A subclass instance whose embedded-role REF is inherited from the
+    base class must resolve without issue, not "attribute absent from
+    schema" (real corpus shape, IVS_V2_1)."""
     note = XtfObject(
         tid="note-1", qualified_class="RefTest.MainTopic.Note", attributes=dict([_text_attr("Text", "hello")])
     )
@@ -582,9 +581,9 @@ def test_coord_within_rounding_tolerance_has_no_issue(geometry_builder):
 
 
 def test_coord_beyond_rounding_tolerance_still_flagged(geometry_builder):
-    """Regression-guard : au-dela de la tolerance (0.0005 pour 3
-    decimales), la valeur arrondit encore AU-DELA du Max declare -
-    100.0006 -> 100.001, toujours hors plage."""
+    """Beyond the rounding tolerance (0.0005 for 3 decimals), the value
+    still rounds BEYOND the declared Max - 100.0006 -> 100.001, still out
+    of range."""
     obj = _obj(POINT_CLASS, "p1", _geom_attr("Pos", _coord_node("100.0006", "100.0")))
     issues = _validate_one(obj, geometry_builder.symbol_table)
     msgs = _messages(issues, attribute="Pos", severity="error")
@@ -950,7 +949,7 @@ def test_nested_structure_unknown_sub_attribute_flagged(struct_content_builder):
     obj = _obj(PERSON_CLASS, "p1", _text_attr("Name", "Alice"), _geom_attr("HomeAddress", wrapper))
     issues = _validate_struct_person(obj, struct_content_builder.symbol_table)
     msgs = _messages(issues, attribute="HomeAddress.Ghost", severity="warning")
-    assert any("absent du schema" in m for m in msgs)
+    assert any("absent from schema" in m for m in msgs)
 
 
 def test_multivalue_root_attribute_each_occurrence_validated(struct_content_builder):
