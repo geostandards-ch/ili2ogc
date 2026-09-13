@@ -81,14 +81,18 @@ def polyline_sign_to_stroke(
     exact `stroke-linejoin`/`stroke-linecap` keywords pycartosym's SLD
     writer expects.
 
-    KNOWN LOSSY: `Stroke.dash_pattern` is typed `list[int]` in pycartosym
-    (v0.3.2), with no `UnitValue`/unit-aware alternative like `width` has -
-    `DashRec.DLength` values below 1.0 (real corpus, `RoadsExgm2ien_
-    Symbols.xtf`'s `LineStyle_Dashed`: 0.1m dashes) round straight to 0,
-    collapsing the whole pattern to indistinguishable-from-solid. Not
-    worked around here (no INTERLIS-side fix possible, and any scaling
-    convention on our end would be a guess pycartosym itself doesn't
-    document) - to report upstream if real 0.1-range dash data recurs.
+    KNOWN LOSSY: `Stroke.dash_pattern` is `list[int]`, matching the OGC
+    CartoSym-JSON standard's own `dashPattern` definition exactly (verified
+    against the standard's schema, not a pycartosym gap - it has no
+    `unitValue`/`numericExpression` alternative there either, unlike
+    `width`). `DashRec.DLength` values below 1.0 (real corpus,
+    `RoadsExgm2ien_Symbols.xtf`'s `LineStyle_Dashed`: 0.1m dashes) round
+    straight to 0 with a bare `round()`, collapsing the whole pattern to
+    indistinguishable-from-solid - `round()` used as-is for now (no scaling
+    applied), since SE 1.1.0's `stroke-dasharray` has no per-value unit
+    either way (only a whole-symbolizer `uom`) so some precision loss is
+    unavoidable at this layer regardless. Picking a target scale (e.g. mm)
+    before rounding would reduce it - not done yet, backlog.
     """
     return Stroke(
         color=color,
