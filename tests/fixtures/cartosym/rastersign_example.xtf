@@ -49,6 +49,19 @@
                </RasterColorMapEntry>
             </ColorMapEntries>
          </RasterSign>
+
+         <RasterSign ili:tid="101">
+            <ili:Name>Orthophoto</ili:Name>
+            <RedBand>band1</RedBand>
+            <GreenBand>band2</GreenBand>
+            <BlueBand>band3</BlueBand>
+         </RasterSign>
+
+         <RasterSign ili:tid="102">
+            <ili:Name>Hillshade</ili:Name>
+            <GrayBand>band1</GrayBand>
+            <HillShadeFactor>1.8</HillShadeFactor>
+         </RasterSign>
       </T>
    </ili:datasection>
 </ili:transfer>

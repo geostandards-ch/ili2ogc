@@ -16,7 +16,7 @@ VERSION "2026-09-13" =
     END RasterSign;
 
     SIGN BASKET MyBasket ~ T
-      OBJECTS OF RasterSign: Elevation;
+      OBJECTS OF RasterSign: Elevation, Orthophoto, Hillshade;
 
     CLASS Coverage =
       Geometry: TEXT*1;
@@ -27,6 +27,16 @@ VERSION "2026-09-13" =
           Sign := {Elevation};
           Geometry := Geometry;
           Priority := 1
+        );
+      OrthophotoRule OF RasterSign: (
+          Sign := {Orthophoto};
+          Geometry := Geometry;
+          Priority := 2
+        );
+      HillshadeRule OF RasterSign: (
+          Sign := {Hillshade};
+          Geometry := Geometry;
+          Priority := 3
         );
     END Coverage_Graphics;
   END T;

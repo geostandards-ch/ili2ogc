@@ -702,8 +702,50 @@ def raster_sign_object_to_color_map(library: SignLibrary, obj: XtfObject) -> lis
     return entries or None
 
 
+def raster_sign_object_to_channel_selection(library: SignLibrary, obj: XtfObject) -> dict[str, Any]:
+    """Build `Symbolizer.color_channels`/`single_channel` kwargs from `RasterSign`'s `*Band` attributes.
+
+    Mutually exclusive per `pycartosym`'s own writer constraint
+    (`Symbolizer.colorChannels and Symbolizer.singleChannel cannot both
+    be set`) - mirrored as a `MANDATORY CONSTRAINT` on the proposed
+    `RasterSign` class. `{"property": <band name>}` is the only channel
+    reference form the writer accepts (`_channel_source_name`) - band
+    names are plain `TEXT` attributes, since INTERLIS carries no pixel
+    data itself, only a reference to an external raster resource's bands.
+    `GrayBand` wins if both happen to be set (the model's own constraint
+    should already rule that out).
+    """
+    gray = library.scalar(obj, "GrayBand")
+    if gray is not None:
+        return {"single_channel": {"property": gray}}
+    red, green, blue = (library.scalar(obj, name) for name in ("RedBand", "GreenBand", "BlueBand"))
+    if red is not None and green is not None and blue is not None:
+        return {"color_channels": [{"property": red}, {"property": green}, {"property": blue}]}
+    return {}
+
+
+def raster_sign_object_to_hill_shading(library: SignLibrary, obj: XtfObject) -> dict[str, Any] | None:
+    """Build a `Symbolizer.hill_shading` dict from `RasterSign.HillShadeFactor` - the one non-blocked field.
+
+    `hill_shading.sun`/`.colorMap`/`.opacityMap` are NOT proposed on
+    `RasterSign` at all - confirmed blocked by SE 1.1.0's own Annex B
+    (`_build_shaded_relief` raises for each, regardless of dialect), so
+    there is nothing to gain from adding INTERLIS attributes for them.
+    """
+    factor = library.scalar(obj, "HillShadeFactor")
+    return {"factor": float(factor)} if factor is not None else None
+
+
 def _raster_sign_kwargs(library: SignLibrary, obj: XtfObject) -> dict[str, Any]:
-    return {"color_map": raster_sign_object_to_color_map(library, obj)}
+    kwargs: dict[str, Any] = {}
+    color_map = raster_sign_object_to_color_map(library, obj)
+    if color_map is not None:
+        kwargs["color_map"] = color_map
+    kwargs.update(raster_sign_object_to_channel_selection(library, obj))
+    hill_shading = raster_sign_object_to_hill_shading(library, obj)
+    if hill_shading is not None:
+        kwargs["hill_shading"] = hill_shading
+    return kwargs
 
 
 _SIGN_OBJECT_BUILDERS = {

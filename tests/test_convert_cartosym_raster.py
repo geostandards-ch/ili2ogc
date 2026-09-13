@@ -1,11 +1,9 @@
-"""`convert/cartosym.py::raster_sign_object_to_color_map` - the `RasterSign` extension proposal's `ColorMap` support.
+"""`convert/cartosym.py`'s `RasterSign` extension proposal - `ColorMap`, RGB/gray channel selection, hill-shading.
 
 `RasterSign` is a project-proposed `StandardSymbology` extension (not the
-official model - see `tests/fixtures/cartosym/rastersign_repo/NOTICE`),
-covering only `Symbolizer.color_map` (a value->color ramp) for now -
-confirmed to write a real `se:CoverageStyle/se:RasterSymbolizer/
-se:ColorMap`. Channel selection (`color_channels`/`single_channel`) and
-`hill_shading.factor` are later phases, deliberately not built yet.
+official model - see `tests/fixtures/cartosym/rastersign_repo/NOTICE`).
+All 3 targets (`Symbolizer.color_map`/`color_channels`/`single_channel`/
+`hill_shading.factor`) are confirmed to write a real `se:RasterSymbolizer`.
 """
 
 from pathlib import Path
@@ -15,7 +13,9 @@ from pycartosym.models.styles import Style
 
 from interlis.convert.cartosym import (
     SignLibrary,
+    raster_sign_object_to_channel_selection,
     raster_sign_object_to_color_map,
+    raster_sign_object_to_hill_shading,
     styling_rule_from_drawing_rule,
     write_sld,
 )
@@ -31,11 +31,11 @@ def _sign_library() -> SignLibrary:
     return SignLibrary(transfer.baskets[0])
 
 
-def _drawing_rule():
+def _drawing_rule(name: str = "ElevationRule"):
     builder = build_from_text(_ILI.read_text())
     graphic = builder.symbol_table.resolve("RasterSignExample.T.Coverage_Graphics")
     rules = graphic.DrawingRule if isinstance(graphic.DrawingRule, list) else [graphic.DrawingRule]
-    return rules[0], graphic
+    return next(r for r in rules if r.Name == name), graphic
 
 
 def test_color_map_entries_become_value_color_pairs_in_wire_order():
@@ -65,3 +65,41 @@ def test_no_color_map_entries_returns_none():
         attributes: dict = {}
 
     assert raster_sign_object_to_color_map(_sign_library(), _NoEntries()) is None
+
+
+def test_rgb_bands_become_color_channels():
+    library = _sign_library()
+    orthophoto = library.by_name["Orthophoto"]
+    assert raster_sign_object_to_channel_selection(library, orthophoto) == {
+        "color_channels": [{"property": "band1"}, {"property": "band2"}, {"property": "band3"}]
+    }
+
+
+def test_gray_band_becomes_single_channel():
+    library = _sign_library()
+    hillshade = library.by_name["Hillshade"]
+    assert raster_sign_object_to_channel_selection(library, hillshade) == {"single_channel": {"property": "band1"}}
+
+
+def test_hill_shade_factor():
+    library = _sign_library()
+    hillshade = library.by_name["Hillshade"]
+    assert raster_sign_object_to_hill_shading(library, hillshade) == {"factor": 1.8}
+    assert raster_sign_object_to_hill_shading(library, library.by_name["Elevation"]) is None
+
+
+def test_writes_a_real_se_channel_selection_rgb():
+    rule, graphic = _drawing_rule("OrthophotoRule")
+    styling_rule = styling_rule_from_drawing_rule(rule, sign_library=_sign_library(), feature_type=graphic.Base.Name)
+    xml = write_sld(Style(styling_rules=[styling_rule]))
+    assert "<se:RedChannel>" in xml
+    assert "<se:SourceChannelName>band2</se:SourceChannelName>" in xml
+
+
+def test_writes_a_real_se_gray_channel_and_shaded_relief():
+    rule, graphic = _drawing_rule("HillshadeRule")
+    styling_rule = styling_rule_from_drawing_rule(rule, sign_library=_sign_library(), feature_type=graphic.Base.Name)
+    xml = write_sld(Style(styling_rules=[styling_rule]))
+    assert "<se:GrayChannel>" in xml
+    assert "<se:ShadedRelief>" in xml
+    assert "<se:ReliefFactor>1.8</se:ReliefFactor>" in xml

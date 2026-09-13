@@ -327,10 +327,16 @@ SYMBOLOGY MODEL StandardSymbologyRasterSignExt (en)
 
     !! Raster interface (PROJECT EXTENSION, not in the official model)
     !! ================================================================
-    !! A raster/coverage styling proposal covering only a value->color
-    !! ramp so far (pycartosym's Symbolizer.colorMap, confirmed to write a
-    !! real se:RasterSymbolizer/se:ColorMap). Channel selection and
-    !! hill-shading are deliberately not added here yet.
+    !! A raster/coverage styling proposal: a value->color ramp
+    !! (pycartosym's Symbolizer.colorMap), RGB/gray channel selection
+    !! (colorChannels/singleChannel), and a hill-shading relief factor
+    !! (hillShading.factor) - all 3 confirmed to write a real
+    !! se:RasterSymbolizer. RedBand/GreenBand/BlueBand/GrayBand are plain
+    !! band names (TEXT), not pixel data - INTERLIS carries no raster
+    !! pixels itself, only a reference to an external resource's bands.
+    !! hillShading.sun/colorMap/opacityMap and Symbolizer.alphaChannel/
+    !! opacityMap are NOT proposed here - confirmed blocked by SE 1.1.0's
+    !! own Annex B regardless of what this model would provide.
 
     STRUCTURE RasterColorMapEntry =
       Value : SS_Float;
@@ -340,8 +346,19 @@ SYMBOLOGY MODEL StandardSymbologyRasterSignExt (en)
 
     CLASS RasterSign EXTENDS INTERLIS.SIGN =
       ColorMapEntries : LIST OF RasterColorMapEntry;
+      RedBand         : TEXT*40;
+      GreenBand       : TEXT*40;
+      BlueBand        : TEXT*40;
+      GrayBand        : TEXT*40;
+      HillShadeFactor : SS_Float;
     PARAMETER
       Priority    : MANDATORY SS_Priority;
+    MANDATORY CONSTRAINT
+      NOT (DEFINED(GrayBand) AND
+           (DEFINED(RedBand) OR DEFINED(GreenBand) OR DEFINED(BlueBand)));
+      !! RGB and gray channel selection are mutually exclusive, mirroring
+      !! pycartosym's own writer constraint ("Symbolizer.colorChannels and
+      !! Symbolizer.singleChannel cannot both be set").
     END RasterSign;
 
   END StandardSigns;

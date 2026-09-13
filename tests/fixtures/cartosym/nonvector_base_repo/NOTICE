@@ -1,0 +1,22 @@
+# NOTICE
+
+`NonVector_Base_V3_1.ili` sourced unmodified from
+`https://github.com/MediaComem/FGDM4GS`, path
+`WP2-WP3/model/symbology/NonVector_Base_V3_1.ili` (same provenance/license
+situation as `Point_Graphics_Signatures.xtf` - see
+`tests/fixtures/cartosym/NOTICE`). It is itself the official geo.admin.ch
+`NonVector_Base_LV03_V3_1`/`NonVector_Base_LV95_V3_1` model (raster/
+non-vector geodata description, `ImageGraphicRasterObject`) - not adapted
+in any way.
+
+`CHBase_Part1_GEOMETRY_V1.ili`/`Units.ili` are its own real dependencies
+(`GeometryCHLV95_V1`/`Units.Angle_Degree`), copied unmodified from
+`ili_corpus/` and `~/.ilicache/models.interlis.ch/refhb24/` respectively.
+
+Used by `../rastersign_graphic_example.ili` to prove a `GRAPHIC` can be
+`BASED ON` a real (not synthetic) raster dataset class extending
+`ImageGraphicRasterObject`, reaching its inherited `SpatialReference_Polygon`
+attribute via `Geometry := SpatialReference_Polygon` - the `RasterSign`
+extension proposal (`../rastersign_repo/`) itself stays synthetic (no
+real `.xtf` can exist yet for a class this project just proposed), so
+`../rastersign_example.xtf`'s `SIGN BASKET` data is reused here too.

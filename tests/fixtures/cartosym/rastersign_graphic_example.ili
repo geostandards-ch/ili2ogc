@@ -1,0 +1,39 @@
+INTERLIS 2.4;
+
+!! Wires the RasterSign proposal (tests/fixtures/cartosym/rastersign_repo/)
+!! to a real class from the OFFICIAL NonVector_Base_V3_1.ili
+!! (geo.admin.ch/FGDM4GS, unmodified - tests/fixtures/cartosym/
+!! nonvector_base_repo/NOTICE) - not a synthetic "Coverage" class like
+!! rastersign_example.ili used. Only the .xtf wire shape matters for
+!! SignLibrary/cartosym.py (raw XTF tags, never this file's own class
+!! declarations) - the point here is proving a GRAPHIC can be BASED ON a
+!! real raster dataset class and reach its inherited Geometry attribute.
+
+MODEL RasterSignGraphicExample (en)
+AT "mailto:test@example.org"
+VERSION "2026-09-13" =
+  IMPORTS NonVector_Base_LV95_V3_1;
+
+  TOPIC T =
+    !! A concrete raster dataset, extending the official abstract
+    !! ImageGraphicRasterObject (case B: irregular referencing via
+    !! SpatialReference_Polygon, inherited here).
+    CLASS OrthophotoDataset EXTENDS NonVector_Base_LV95_V3_1.NonVector.ImageGraphicRasterObject =
+    END OrthophotoDataset;
+
+    CLASS RasterSign =
+      Dummy: TEXT*1;
+    END RasterSign;
+
+    SIGN BASKET MyBasket ~ T
+      OBJECTS OF RasterSign: Orthophoto;
+
+    GRAPHIC Orthophoto_Graphics BASED ON OrthophotoDataset =
+      OrthophotoRule OF RasterSign: (
+          Sign := {Orthophoto};
+          Geometry := SpatialReference_Polygon;
+          Priority := 1
+        );
+    END Orthophoto_Graphics;
+  END T;
+END RasterSignGraphicExample.
