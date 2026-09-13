@@ -1172,7 +1172,20 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
             node = ca.call(ctx, "type_")
             if node is not None:
                 return self.visit(node)
-        name = ctx.getText()
+        if has_structure_ref:
+            # The base type is always structureRef(0) - an optional trailing
+            # `RESTRICTION(structureRef (,|;) structureRef...)` clause sits in
+            # the SAME rule, so `ctx.getText()` concatenated the base ref with
+            # the whole RESTRICTION clause into one bogus name (real
+            # StandardSymbology.ili: `FontSymbol.Geometry: LIST OF
+            # FontSymbol_Geometry RESTRICTION(FontSymbol_Polyline;
+            # FontSymbol_Surface);` produced
+            # "FontSymbol_GeometryRESTRICTION(FontSymbol_Polyline;FontSymbol_Surface)"
+            # instead of "FontSymbol_Geometry" - never hit before since
+            # nothing had built this class until now).
+            name = ca.call(ctx, "structureRef", 0).getText()
+        else:
+            name = ctx.getText()
         # `resolves_to` is already a short name (e.g. "Class"); `target`
         # (fallback) is a full qualified name (e.g.
         # "IlisMeta16.ModelData.Class") - SymbolTable always compares

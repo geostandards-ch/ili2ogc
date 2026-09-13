@@ -524,6 +524,7 @@ metaObjectRef:
   grammar:
     rule: metaObjectRef
   kind: Reference
+  resolves_to: MetaObjectDef
   attribute_bindings:
     _resolution:
       source:
@@ -531,13 +532,20 @@ metaObjectRef:
         Name: null
       note: No own class; '(metaDataBasketRef DOT)? Name' resolves a meta-object by name, optionally qualified
         by a metaDataBasketRef. Used as the target of the LCBR metaObjectRef RCBR alternatives in signParamAssignment/enumAssignment
-        (both marked unresolved there) and elsewhere - the resolved object's actual type depends
-        entirely on call-site context, not on metaObjectRef itself.
+        and elsewhere - see the rule-level note below for why every real call site resolves to
+        the SAME class.
   note: '"MetaObject" (without the Def suffix) does not exist either - same category of naming error as
-    metaDataBasketRef above. Unlike metaDataBasketRef, there is no single fixed class to put in its place:
-    the actual type resolved by this rule depends entirely on the call site (signParamAssignment,
-    enumAssignment, bare METAOBJECT parameterDef...), never on the metaObjectRef rule itself - so there
-    is no single target to document here.'
+    metaDataBasketRef above. A previous version of this note claimed "the actual type resolved by this
+    rule depends entirely on the call site" and left `resolves_to` unset - corrected 2026-09-12, real
+    corpus data (RoadsExgm2ien.ili real StandardSymbology.ili, not the synthetic fixtures used until then):
+    every actual call site (signParamAssignment.metaobjectref_alt, enumAssignment, refSys) explicitly
+    resolves the SAME MetaObjectDef branch (06_types.yml refSys note: "metaObjectRef resolves the
+    MetaObjectDef branch"), never anything else. Missing `resolves_to` meant `ForwardRef.resolves_to_hint`
+    stayed `None`, so `SymbolTable.resolve`''s kind-based disambiguation (`forward_refs.py::resolve`,
+    `kind_hint is not None and len(candidates) > 1`) never engaged - a real DrawingRule named the same
+    as the SIGN BASKET member it references (`Building OF ... SurfaceSign: WHERE ... (Sign := {Building};
+    ...)`, both legitimately named "Building") produced 2 short-name candidates with no way to pick the
+    MetaObjectDef one, a BuildError on data no earlier fixture had exercised.'
 objectOrAttributePath:
   grammar:
     rule: objectOrAttributePath

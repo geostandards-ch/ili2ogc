@@ -144,7 +144,48 @@ class ModelRepository:
         table = self._get_table(model_name)
         if table is None:
             return None
-        return table.resolve(full_dotted_name, kind_hint=kind_hint)
+        found = table.resolve(full_dotted_name, kind_hint=kind_hint)
+        if found is not None:
+            return found
+        return self._resolve_via_topic_inheritance(table, full_dotted_name, kind_hint)
+
+    def _resolve_via_topic_inheritance(self, table: Any, full_dotted_name: str, kind_hint) -> Any | None:
+        """A qualified name through a `TOPIC EXTENDS` chain the topic inherits but never redeclares.
+
+        `<Model>.<Topic>.<Name>` finds nothing directly when `<Name>` only
+        lives in a base topic (`<Topic> EXTENDS <base>`), possibly in
+        ANOTHER model - real corpus pattern (`RoadsExgm2ien.ili`'s `GRAPHIC
+        ... BASED ON RoadsExdm2ien.RoadsExtended.LandCover`: `LandCover` is
+        only declared in `RoadsExdm2ben.Roads`). Within one file this is
+        already covered (`ForwardRefResolver._resolve_via_topic_extends` -
+        one shared symbol table, no per-topic scoping); this is the
+        cross-model equivalent, walking `DataUnit.Super` (the topic's own
+        inheritance link, already resolved by its own sub-build) via each
+        topic's SubModel/DataUnit twin.
+        """
+        if "." not in full_dotted_name:
+            return None
+        topic_qualified, member_name = full_dotted_name.rsplit(".", 1)
+        data_unit = getattr(table.resolve(topic_qualified), "_twin", None)
+        visited: set[int] = set()
+        while data_unit is not None and id(data_unit) not in visited:
+            visited.add(id(data_unit))
+            super_topic = getattr(getattr(data_unit, "Super", None), "_twin", None)
+            if super_topic is None:
+                return None
+            elements = getattr(super_topic, "Element", None) or []
+            if not isinstance(elements, list):
+                elements = [elements]
+            for element in elements:
+                if getattr(element, "Name", None) != member_name:
+                    continue
+                if kind_hint is None:
+                    return element
+                hints = kind_hint if isinstance(kind_hint, list) else [kind_hint]
+                if getattr(element, "_qualified_class", "").rsplit(".", 1)[-1] in hints:
+                    return element
+            data_unit = getattr(super_topic, "_twin", None)
+        return None
 
     def symbol_table_for(self, model_name: str):
         """Return a loaded model's complete symbol table.
