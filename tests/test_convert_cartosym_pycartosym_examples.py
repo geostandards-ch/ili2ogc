@@ -12,13 +12,15 @@ examples. Every wire shape used here matches that real corpus usage
 LCh conversions of each target example's own hex values
 (`tests/test_convert_color.py`'s independent inverse pipeline).
 
-Not attempted, with reasons: `15-image-marker` (tiled/arbitrary external
-graphics - `StandardSymbology` has no external-image reference mechanism
-at all, only a font glyph or a composite vector geometry), `5-else-rule`
-(CartoSym-CSS cascade vs. SLD `ElseFilter` - a structural mismatch, not
-an INTERLIS mapping question), `8-comparisons` (`Between`/`Like` - the
-INTERLIS grammar itself has neither operator), `9-metadata`/`10-14`
-raster (no `StandardSymbology` equivalent at all).
+`15-image-marker` is now attempted too (`test_example_15_image_marker`)
+via `FontSymbol_Image`, a project-proposed extension of
+`FontSymbol.Geometry`'s `RESTRICTION` - see that test's own docstring.
+
+Not attempted, with reasons: `5-else-rule` (CartoSym-CSS cascade vs. SLD
+`ElseFilter` - a structural mismatch, not an INTERLIS mapping question),
+`8-comparisons` (`Between`/`Like` - the INTERLIS grammar itself has
+neither operator), `9-metadata`/`10-14` raster (no `StandardSymbology`
+equivalent at all).
 """
 
 from pathlib import Path
@@ -130,6 +132,30 @@ def test_example_3_point_dot_mark():
     assert '"fill">#ffa500<' in xml
     assert "<se:Size>10</se:Size>" in xml
     assert "<se:Size>8</se:Size>" in xml
+
+
+def test_example_15_image_marker():
+    """Target: `examples/sld/15-image-marker.sld` - `se:PointSymbolizer/se:Graphic/se:ExternalGraphic`.
+
+    `FontSymbol_Image` (`Uri: TEXT`) is a project-proposed 3rd
+    `FontSymbol.Geometry` `RESTRICTION` variant, not part of the official
+    `StandardSymbology.ili` (see `tests/fixtures/cartosym/fontsymbol_image_repo/NOTICE`)
+    - validated conditionally pending `pycartosym` `ImageGraphic.hotSpot`
+    support, confirmed working in v0.3.2. `se:Format` (MIME type) is NOT
+    reproduced - the proposed
+    model has no attribute to source it from, so it's omitted rather than
+    guessed from the URI's file extension; no `se:AnchorPoint` either (no
+    anchor-point attribute proposed on `FontSymbol_Image`).
+    """
+    rules, graphic = _drawing_rules("Amenities_Icon_Graphics")
+    styling_rule = styling_rule_from_drawing_rule(
+        rules[0], sign_library=_sign_library(), feature_type=graphic.Base.Name
+    )
+    xml = _write_rules([styling_rule])
+    assert "<se:PointSymbolizer>" in xml
+    assert "<ogc:PropertyName>FunctionCode</ogc:PropertyName>" in xml
+    assert "<ogc:Literal>parking</ogc:Literal>" in xml
+    assert 'xlink:href="http://example.com/parkingIcon.png"' in xml
 
 
 def test_example_6_feature_type_name():

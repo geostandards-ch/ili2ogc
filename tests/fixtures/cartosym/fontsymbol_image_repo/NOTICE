@@ -1,0 +1,19 @@
+# NOTICE
+
+`AbstractSymbology.ili` is unmodified, fetched from
+`https://models.interlis.ch/refhb24/AbstractSymbology.ili` (the official
+INTERLIS models catalog - openly published for reuse).
+
+`StandardSymbology_ext.ili` is an ADAPTED copy of
+`https://models.interlis.ch/refhb24/StandardSymbology.ili` -
+**not the official model**. It renames `MODEL StandardSymbology` to
+`StandardSymbologyFontSymbolImageExt` (so it is never confused with, or
+accidentally loaded alongside, the real one - see
+`tests/fixtures/cartosym/roadsexgm2ien_repo/StandardSymbology.ili` for
+that) and adds one project-proposed extension: a 3rd
+`FontSymbol.Geometry` `RESTRICTION` variant, `FontSymbol_Image EXTENDS
+FontSymbol_Geometry = Uri: TEXT; END FontSymbol_Image;`, matching
+`pycartosym`'s own `examples/sld/15-image-marker.sld` fixture. Proposed
+and validated conditionally by the maintainer, implemented 2026-09-13
+once `pycartosym` v0.3.2 made `ImageGraphic.hotSpot` usable via the typed
+API. No other content was changed.

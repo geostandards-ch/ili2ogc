@@ -19,8 +19,10 @@ from pycartosym.models.symbolizers import (
     CircleGraphic,
     Fill,
     Font,
+    ImageGraphic,
     Label,
     Marker,
+    Resource,
     Stroke,
     TextAlignment,
     TextGraphic,
@@ -286,15 +288,51 @@ def font_symbol_geometry_to_circle_graphics(
     return graphics or None
 
 
+def font_symbol_geometry_to_image_graphics(symbol_obj: XtfObject) -> list[ImageGraphic] | None:
+    """Build one `ImageGraphic` per `FontSymbol_Image` item in a `Font.Type = symbol` `FontSymbol`.
+
+    `FontSymbol_Image` (`Uri: TEXT`) is a PROJECT EXTENSION of
+    `FontSymbol.Geometry`'s `RESTRICTION`, not part of the official
+    `StandardSymbology.ili` - proposed for "15-image-marker" and validated
+    conditionally by the user pending `pycartosym` `ImageGraphic.hotSpot`
+    support (confirmed working in v0.3.2 - see
+    `tests/fixtures/cartosym/fontsymbol_image_repo/StandardSymbology_ext.ili`
+    for the adapted model this was checked to actually build against).
+    Only the case where EVERY item is a `FontSymbol_Image` is handled -
+    same all-or-nothing contract as `font_symbol_geometry_to_circle_graphics`,
+    a mix with `FontSymbol_Polyline`/`_Surface` aborts rather than
+    guessing which one wins. No `Resource.type` (MIME type) is set - the
+    official model proposal has no attribute to source it from, so
+    `se:Format` is simply omitted rather than guessed from the URI's file
+    extension. No `hot_spot` either, for the same reason (no anchor-point
+    attribute proposed on `FontSymbol_Image`).
+    """
+    occurrences = symbol_obj.attributes.get("Geometry") or []
+    graphics: list[ImageGraphic] = []
+    for occurrence in occurrences:
+        if not occurrence.children:
+            return None
+        structure_node = occurrence.children[0]
+        if not structure_node.tag.endswith("FontSymbol_Image"):
+            return None
+        uri_node = next((c for c in structure_node.children if c.tag == "Uri"), None)
+        if uri_node is None or uri_node.text is None:
+            return None
+        graphics.append(ImageGraphic(image=Resource(uri=uri_node.text)))
+    return graphics or None
+
+
 def symbol_sign_object_to_marker(library: SignLibrary, obj: XtfObject) -> Marker:
     """Build a `Marker` from a real `SymbolSign` data object (`Color`/`Symbol` resolved within the same SIGN BASKET).
 
     `Font.Type = text` (`Symbol` -> `FontSymbol` -> `Font`) builds a
-    single glyph `TextGraphic`; `Font.Type = symbol` builds one or more
-    `CircleGraphic`s via `font_symbol_geometry_to_circle_graphics` (any
-    other composite geometry falls through to no marker element).
-    Verified against real corpus data (`Point_Graphics_Signatures.xtf`'s
-    `SymbolSign`/`FontSymbol`/`Font`) for the text case.
+    single glyph `TextGraphic`; `Font.Type = symbol` tries
+    `font_symbol_geometry_to_circle_graphics` first, then
+    `font_symbol_geometry_to_image_graphics` (a project-extension
+    `FontSymbol_Image`, see its own docstring) - any other composite
+    geometry falls through to no marker element. Verified against real
+    corpus data (`Point_Graphics_Signatures.xtf`'s `SymbolSign`/
+    `FontSymbol`/`Font`) for the text case.
     """
     # `color` (from `SymbolSignColorAssoc`) has no confirmed pycartosym
     # target for a text-glyph Marker yet (neither `TextGraphic` nor `Font`
@@ -315,7 +353,9 @@ def symbol_sign_object_to_marker(library: SignLibrary, obj: XtfObject) -> Marker
         elif font_type == "symbol":
             scale_text = library.scalar(obj, "Scale")
             scale = float(scale_text) if scale_text else 1.0
-            elements = font_symbol_geometry_to_circle_graphics(library, symbol_obj, scale=scale)
+            elements = font_symbol_geometry_to_circle_graphics(
+                library, symbol_obj, scale=scale
+            ) or font_symbol_geometry_to_image_graphics(symbol_obj)
     return Marker(elements=elements, opacity=opacity)
 
 

@@ -210,6 +210,27 @@
             <ili:Name>AmenityDots</ili:Name>
             <Symbol ili:ref="310"></Symbol>
          </SymbolSign>
+
+         <!-- FontSymbol_Image (project extension, see StandardSymbology_ext.ili
+              in tests/fixtures/cartosym/fontsymbol_image_repo/) - "15-image-marker.sld" -->
+         <Font ili:tid="302">
+            <Name>ParkingIconFont</Name>
+            <Internal>false</Internal>
+            <Type>symbol</Type>
+         </Font>
+         <FontSymbol ili:tid="311">
+            <Name>ParkingIconSymbol</Name>
+            <Font ili:ref="302"></Font>
+            <Geometry>
+               <FontSymbol_Image>
+                  <Uri>http://example.com/parkingIcon.png</Uri>
+               </FontSymbol_Image>
+            </Geometry>
+         </FontSymbol>
+         <SymbolSign ili:tid="501">
+            <ili:Name>ParkingIcon</ili:Name>
+            <Symbol ili:ref="311"></Symbol>
+         </SymbolSign>
       </T>
    </ili:datasection>
 </ili:transfer>

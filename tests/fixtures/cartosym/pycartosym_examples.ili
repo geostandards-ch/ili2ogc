@@ -35,7 +35,7 @@ VERSION "2024-01-01" =
       OBJECTS OF SurfaceSign: ParkingFill, BuildingsFill, LanduseFill
       OBJECTS OF PolylineSign: ParkingBorder, HighwayLine, LanduseBorder
       OBJECTS OF TextSign: AmenityLabel, LanduseLabel
-      OBJECTS OF SymbolSign: AmenityDots;
+      OBJECTS OF SymbolSign: AmenityDots, ParkingIcon;
 
     !! example 1: 1-polygon-fill-stroke.sld
     CLASS Landuse1 =
@@ -67,9 +67,10 @@ VERSION "2024-01-01" =
         );
     END Roads_Graphics;
 
-    !! example 4: 4-text-label.sld
+    !! example 4: 4-text-label.sld ; FunctionCode added for example 15 below
     CLASS Amenities =
       Name: TEXT*40;
+      FunctionCode: (parking, other);
       Geometry: TEXT*1;
     END Amenities;
 
@@ -93,6 +94,20 @@ VERSION "2024-01-01" =
           Priority := 1
         );
     END Amenities_Dots_Graphics;
+
+    !! example 15: 15-image-marker.sld - FontSymbol_Image, a project
+    !! extension of FontSymbol.Geometry's RESTRICTION not in the official
+    !! StandardSymbology.ili (see fontsymbol_image_repo/NOTICE) - only the
+    !! .xtf wire shape matters here (SignLibrary/cartosym.py read raw XTF
+    !! tags, never this file's own synthetic class declarations).
+    GRAPHIC Amenities_Icon_Graphics BASED ON Amenities =
+      ParkingIconRule OF SymbolSign:
+        WHERE FunctionCode == #parking (
+          Sign := {ParkingIcon};
+          Geometry := Geometry;
+          Priority := 1
+        );
+    END Amenities_Icon_Graphics;
 
     !! example 6: 6-feature-type-name.sld
     CLASS Buildings =

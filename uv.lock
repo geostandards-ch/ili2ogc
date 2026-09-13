@@ -358,7 +358,7 @@ requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.0" },
     { name = "jsonschema", specifier = ">=4.23.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
-    { name = "pycartosym", extras = ["sld"], specifier = ">=0.3.0" },
+    { name = "pycartosym", extras = ["sld"], specifier = ">=0.3.2" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0.0" },
@@ -823,16 +823,16 @@ wheels = [
 
 [[package]]
 name = "pycartosym"
-version = "0.3.0"
+version = "0.3.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "antlr4-python3-runtime" },
     { name = "jsonschema" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/be/e7/d62436896057dc92f83b61907d773c625831af673c2efc9c90c4aca15783/pycartosym-0.3.0.tar.gz", hash = "sha256:95da58c0f0d6726558429a25110cf1193bb6fa072bc8726a9f13c87d2cea9a46", size = 338736, upload-time = "2026-09-12T20:04:07.69Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a3/29/7b77c6fa9256366940983d2697a6ca513d9e3489205ad65401f634c8254d/pycartosym-0.3.2.tar.gz", hash = "sha256:8f2d4c912cc3e3a441f3724c64302205573c841f8effda28e397210c1b66ce47", size = 340444, upload-time = "2026-09-12T20:49:48.343Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ce/23/fa8d499b46f558874f7e865bea164df7696c71088f9bcaf618945639895a/pycartosym-0.3.0-py3-none-any.whl", hash = "sha256:b9ee25bce4251b33fbdc4476bc5e9315150f16d98270f5774673c1dbe216f9f2", size = 277348, upload-time = "2026-09-12T20:04:06.178Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/cb/a6b1d7e6666509a80ca782758e0d20c860819d1a37f52f7f663edbbeb6ff/pycartosym-0.3.2-py3-none-any.whl", hash = "sha256:50e77f958a728a2ed81c8abb6b7c7f7a0e16ab68e6cb93be14b91110b41e4218", size = 278166, upload-time = "2026-09-12T20:49:46.829Z" },
 ]
 
 [package.optional-dependencies]
