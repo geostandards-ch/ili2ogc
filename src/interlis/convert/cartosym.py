@@ -676,12 +676,14 @@ def raster_sign_object_to_color_map(library: SignLibrary, obj: XtfObject) -> lis
     `{colors, values}` shape). `RasterColorMapEntry.Label` is deliberately
     NOT included here: `pycartosym`'s default `sld` dialect renders
     `se:Categorize`, which has no label/name slot at all in SE 1.1.0 (only
-    `se:Threshold`/`se:Value`) - passing a 3-element `[value, color,
-    label]` entry crashes its writer (`_build_categorize` unpacks `pairs[1:]`
-    as plain 2-tuples) rather than dropping the label gracefully, confirmed
-    empirically and reported upstream. Entirely synthetic (no real `.xtf`
-    can exist yet for a class this project just proposed) -
-    `tests/fixtures/cartosym/rastersign_repo/`.
+    `se:Threshold`/`se:Value`) - a 3-element `[value, color, label]` entry
+    past the first used to crash its writer outright, now fixed upstream
+    to a clean `NotImplementedError` instead (not yet released). Only the
+    `sld:1.0.0`/`sld:geoserver` dialects (`se:ColorMapEntry`) support a
+    label at all - staying on the default `sld` dialect and omitting
+    `Label` is the choice made here, not a workaround for a bug anymore.
+    Entirely synthetic (no real `.xtf` can exist yet for a class this
+    project just proposed) - `tests/fixtures/cartosym/rastersign_repo/`.
     """
     occurrences = obj.attributes.get("ColorMapEntries") or []
     entries: list[list[Any]] = []
