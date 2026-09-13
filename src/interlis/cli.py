@@ -23,6 +23,7 @@ from interlis.builder.repository import ModelRepository
 from interlis.cli_style import ExitCode, use_color
 from interlis.cli_style import error as _error
 from interlis.cli_style import warn as _warn
+from interlis.convert import cartosym as _cartosym_mod
 from interlis.convert import cql2 as _cql2_mod
 from interlis.convert import jsonfg as _jsonfg_mod
 from interlis.convert import jsonschema as _jsonschema_mod
@@ -918,6 +919,91 @@ def cmd_write_xtf(args: argparse.Namespace) -> int:
     return ExitCode.OK
 
 
+def cmd_convert_sld(args: argparse.Namespace) -> int:
+    """Convert an .ili `GRAPHIC`'s `DrawingRule`s to SLD - one file per `GRAPHIC` (SLD is inherently per-layer).
+
+    `Sign := {name}` PARAMETER assignments resolve against `--sign-xtf`'s
+    first basket (a real `SIGN BASKET` data section) when given; omitted,
+    they're simply left unresolved (the same documented degrade path
+    `styling_rule_from_drawing_rule`/`SignLibrary` already use elsewhere).
+    A `GRAPHIC` whose every `DrawingRule` ends up with no SLD-representable
+    symbolizer content (pycartosym's writer refuses a `se:Rule` with none)
+    is skipped with a diagnostic rather than aborting every other GRAPHIC
+    in the same model.
+    """
+    model_path = Path(args.model)
+    if not model_path.exists():
+        _error(f".ili file not found: {model_path}")
+        return ExitCode.NOT_FOUND
+
+    tree, syntax_errors = parse_file(model_path)
+    if syntax_errors:
+        _error(f"{len(syntax_errors)} syntax error(s) in {model_path}:")
+        for e in syntax_errors:
+            print(f"  {e}", file=sys.stderr)
+        return ExitCode.INVALID
+
+    repository = ModelRepository([Path(d) for d in args.repo]) if args.repo else None
+    builder = _open_builder(repository)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        builder.build(tree)
+
+    graphics = [
+        inst
+        for inst in builder.symbol_table.all_registered()
+        if isinstance(inst, MetaInstance) and inst._qualified_class.rsplit(".", 1)[-1] == "Graphic"
+    ]
+    if args.graphic:
+        graphics = [g for g in graphics if getattr(g, "Name", None) == args.graphic]
+        if not graphics:
+            _error(f"no GRAPHIC named {args.graphic!r} in {model_path}")
+            return ExitCode.NOT_FOUND
+    elif not graphics:
+        _error(f"no GRAPHIC found in {model_path}")
+        return ExitCode.NOT_FOUND
+
+    sign_library = None
+    if args.sign_xtf:
+        sign_xtf_path = Path(args.sign_xtf)
+        if not sign_xtf_path.exists():
+            _error(f".xtf file not found: {sign_xtf_path}")
+            return ExitCode.NOT_FOUND
+        transfer = parse_xtf(sign_xtf_path)
+        if transfer.baskets:
+            sign_library = _cartosym_mod.SignLibrary(transfer.baskets[0])
+
+    if len(graphics) > 1 and not args.output:
+        names = ", ".join(sorted(getattr(g, "Name", None) or "?" for g in graphics))
+        _error(f"{len(graphics)} GRAPHICs in {model_path} - pick one with --graphic, or pass -o DIR: {names}")
+        return ExitCode.USAGE
+
+    rendered: dict[str, str] = {}
+    for graphic in graphics:
+        name = getattr(graphic, "Name", None) or "graphic"
+        try:
+            rendered[name] = _cartosym_mod.write_sld(_cartosym_mod.graphic_to_style(graphic, sign_library))
+        except NotImplementedError as exc:
+            _warn(f"GRAPHIC {name!r}: {exc} - skipped")
+    if not rendered:
+        _error("no GRAPHIC produced any SLD-representable content")
+        return ExitCode.INVALID
+
+    if args.output:
+        out_path = Path(args.output)
+        if len(rendered) == 1 and not out_path.is_dir():
+            (text,) = rendered.values()
+            out_path.write_text(text + "\n", encoding="utf-8")
+        else:
+            out_path.mkdir(parents=True, exist_ok=True)
+            for name, text in rendered.items():
+                (out_path / f"{name}.sld").write_text(text + "\n", encoding="utf-8")
+    else:
+        (text,) = rendered.values()
+        print(text)
+    return ExitCode.OK
+
+
 def cmd_convert_cql2(args: argparse.Namespace) -> int:
     """Compile every per-Feature CONSTRAINT of an .ili model to a CQL2-JSON filter.
 
@@ -1218,6 +1304,42 @@ def main(argv: list[str] | None = None) -> int:
         help="Write to FILE instead of stdout.",
     )
     write_xtf_parser.set_defaults(func=cmd_write_xtf)
+
+    convert_sld_parser = subparsers.add_parser(
+        "convert-sld",
+        help="Convert an .ili GRAPHIC's DrawingRules to SLD (OGC Styled Layer Descriptor) - one file per GRAPHIC.",
+    )
+    convert_sld_parser.add_argument("model", help="Path to the .ili file declaring the GRAPHIC(s) to convert.")
+    convert_sld_parser.add_argument(
+        "--repo",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="Directory of .ili models to resolve the model's IMPORTS (its base model - repeatable).",
+    )
+    convert_sld_parser.add_argument(
+        "--sign-xtf",
+        default=None,
+        metavar="FILE",
+        help="Path to an .xtf whose first basket is a real SIGN BASKET data section, resolving any "
+        "Sign := {name} PARAMETER assignment. Omitted: such assignments are left unresolved.",
+    )
+    convert_sld_parser.add_argument(
+        "--graphic",
+        default=None,
+        metavar="NAME",
+        help="Name of the GRAPHIC to convert, when the model declares more than one. Omitted: every "
+        "GRAPHIC in the model is converted.",
+    )
+    convert_sld_parser.add_argument(
+        "-o",
+        "--output",
+        default=None,
+        metavar="FILE_OR_DIR",
+        help="Write to FILE when exactly one GRAPHIC is converted (stdout if omitted), or to DIR "
+        "(one <GraphicName>.sld per GRAPHIC) when more than one is - required in that case.",
+    )
+    convert_sld_parser.set_defaults(func=cmd_convert_sld)
 
     convert_cql2_parser = subparsers.add_parser(
         "convert-cql2",
