@@ -90,10 +90,12 @@ def test_styling_rule_from_drawing_rule_resolves_sign_to_a_real_marker_with_the_
     assert graphic.font.face == "CadastraSymbol-Regular"
 
     xml = write_sld(Style(styling_rules=[styling_rule]))
-    # A Marker wrapping a TextGraphic writes as a TextSymbolizer (character +
-    # symbol-font family), not a PointSymbolizer - pycartosym's own real
-    # convention for a font-glyph-based point icon, confirmed empirically.
-    assert "<se:TextSymbolizer>" in xml
-    assert "<se:Label>M</se:Label>" in xml
-    assert '"font-family">CadastraSymbol-Regular<' in xml
+    # A Marker wrapping a single-character TextGraphic writes as
+    # se:Mark/OnlineResource(ttf://<face>)/MarkIndex (a font-glyph
+    # reference, SE 1.1.0 Annex B "Text (inside Marker)"), not a
+    # TextSymbolizer - pycartosym's own real convention, confirmed
+    # empirically against pycartosym>=0.3.4.
+    assert "<se:Mark>" in xml
+    assert 'xlink:href="ttf://CadastraSymbol-Regular"' in xml
+    assert "<se:MarkIndex>77</se:MarkIndex>" in xml  # ord("M")
     assert "z_order" not in xml  # confirms the earlier "no visible effect" finding still holds
