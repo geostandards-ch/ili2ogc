@@ -1,13 +1,16 @@
 """INTERLIS models/signatures for 5 of pycartosym's own `examples/sld/*.sld` fixtures, round-tripped through ili2ogc.
 
-`tests/fixtures/cartosym/pycartosym_examples.ili`/`.xtf` are hand-built
-(see the `.ili`'s own header and `tests/fixtures/cartosym/NOTICE` for why
-- no real `.ili` pairs a live `SIGN BASKET`+`Sign := {name}` with a
-buildable schema), but every wire shape they use matches real corpus
-usage found elsewhere this session (`RoadsExgm2ien.ili`,
-`Point_Graphics_Signatures.xtf`). Colors are real LCh conversions of each
-target example's own hex values (`tests/test_convert_color.py`'s
-independent inverse pipeline).
+`tests/fixtures/cartosym/pycartosym_examples.ili`/`.xtf` are hand-built to
+reproduce pycartosym's OWN target `.sld` fixtures specifically (see the
+`.ili`'s own header and `tests/fixtures/cartosym/NOTICE`) - a real `.ili`
+pairing a live `SIGN BASKET`+`Sign := {name}` with a buildable schema DOES
+exist now (`tests/fixtures/cartosym/roadsexgm2ien/`, added 2026-09-12,
+`test_convert_cartosym_graphic_to_style.py`/`test_cli_convert_sld.py`),
+but it doesn't happen to line up with any of these specific pycartosym
+examples. Every wire shape used here matches that real corpus usage
+(`RoadsExgm2ien.ili`, `Point_Graphics_Signatures.xtf`). Colors are real
+LCh conversions of each target example's own hex values
+(`tests/test_convert_color.py`'s independent inverse pipeline).
 
 Not attempted, with reasons: `15-image-marker` (tiled/arbitrary external
 graphics - `StandardSymbology` has no external-image reference mechanism

@@ -4,11 +4,12 @@
 unmodified FGDM4GS corpus data (see its NOTICE) - a `SymbolSign`
 (`ili:Name = Symbol`) referencing a `Color`/text-`FontSymbol`/`ClipSymbol`
 by `ili:ref` within the same `SIGN BASKET`. The `.ili` model below is
-synthetic (no real `.ili` ever pairs a live `Sign := {name}` assignment
-with a schema this project can build standalone - `Point_Graphics.ili`
-itself has this exact `DrawingRule` commented out) but mirrors the real
-shape exactly (`SIGN BASKET ... OBJECTS OF SymbolSign: Symbol`, `Sign :=
-{Symbol}`).
+synthetic (`Point_Graphics.ili` itself has this exact `DrawingRule`
+commented out, and doesn't line up with this particular `.xtf` anyway) but
+mirrors the real shape exactly (`SIGN BASKET ... OBJECTS OF SymbolSign:
+Symbol`, `Sign := {Symbol}`) - see `test_convert_cartosym_graphic_to_style.py`
+for a fully real (not synthetic) `.ili`+`.xtf` pair exercising this same
+mechanism end to end (`tests/fixtures/cartosym/roadsexgm2ien/`).
 """
 
 from pathlib import Path

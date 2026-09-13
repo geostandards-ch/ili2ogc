@@ -14,7 +14,7 @@ from typing import Any
 
 from lxml import etree
 from pycartosym import get_codec
-from pycartosym.models.styles import Style, StylingRule, Symbolizer
+from pycartosym.models.styles import Metadata, Style, StylingRule, Symbolizer
 from pycartosym.models.symbolizers import (
     CircleGraphic,
     Fill,
@@ -80,6 +80,15 @@ def polyline_sign_to_stroke(
     (`bevel`/`round`/`miter`) and `.Caps` (`round`/`butt`) already use the
     exact `stroke-linejoin`/`stroke-linecap` keywords pycartosym's SLD
     writer expects.
+
+    KNOWN LOSSY: `Stroke.dash_pattern` is typed `list[int]` in pycartosym
+    (v0.3.2), with no `UnitValue`/unit-aware alternative like `width` has -
+    `DashRec.DLength` values below 1.0 (real corpus, `RoadsExgm2ien_
+    Symbols.xtf`'s `LineStyle_Dashed`: 0.1m dashes) round straight to 0,
+    collapsing the whole pattern to indistinguishable-from-solid. Not
+    worked around here (no INTERLIS-side fix possible, and any scaling
+    convention on our end would be a guess pycartosym itself doesn't
+    document) - to report upstream if real 0.1-range dash data recurs.
     """
     return Stroke(
         color=color,
@@ -190,15 +199,25 @@ class SignLibrary:
         return color, (float(t) if t else None)
 
     def dash_pattern(self, obj: XtfObject) -> list[float] | None:
-        """Read a `LineStyle_Dashed.Dashes` (`LIST OF DashRec`) as a flat `DLength` list, in wire order."""
-        nodes = obj.attributes.get("Dashes")
-        if not nodes:
-            return None
+        """Read a `LineStyle_Dashed.Dashes` (`LIST OF DashRec`) as a flat `DLength` list, in wire order.
+
+        Each `LIST OF` occurrence is its own top-level `<Dashes>` sibling
+        element (one `DashRec` inside), not one `<Dashes>` wrapper holding
+        every `DashRec` as a child - confirmed against real refman data
+        (`RoadsExgm2ien_Symbols.xtf`'s `LineStyle_Dashed`, 2 separate
+        `<Dashes>` elements), same convention already used correctly by
+        `font_symbol_geometry_to_circle_graphics` for `FontSymbol.Geometry`.
+        Reading only the first occurrence's children (a hand-built
+        synthetic fixture had assumed the single-wrapper shape) silently
+        dropped every dash length after the first on real data.
+        """
+        occurrences = obj.attributes.get("Dashes") or []
         lengths = []
-        for occurrence in nodes[0].children:
-            length_node = next((c for c in occurrence.children if c.tag == "DLength"), None)
-            if length_node is not None and length_node.text is not None:
-                lengths.append(float(length_node.text))
+        for occurrence in occurrences:
+            for dash_rec in occurrence.children:
+                length_node = next((c for c in dash_rec.children if c.tag == "DLength"), None)
+                if length_node is not None and length_node.text is not None:
+                    lengths.append(float(length_node.text))
         return lengths or None
 
 
@@ -359,14 +378,22 @@ def polyline_sign_object_to_stroke(library: SignLibrary, obj: XtfObject) -> Stro
     `_Dashed` object; its own `LineAttrs` association
     (`LineStyle_SolidPolylineAttrsAssoc`/`_DashedLineAttrsAssoc`) gives
     `Width`/`Join`/`Caps`, and a `LineStyle_Dashed` additionally gives its
-    own `Dashes` (`LIST OF DashRec`) as the dash pattern. Same `Color`
-    wire mechanism as `symbol_sign_object_to_marker` (verified there)
-    applied to `PolylineSign.Color`.
+    own `Dashes` (`LIST OF DashRec`) as the dash pattern. `PolylineSign.Color`
+    (`PolylineSignColorAssoc`) and `LineStyle_Solid`/`_Dashed.Color`
+    (`LineStyle_SolidColorAssoc`/`_DashedColorAssoc`) are BOTH `{0..1}` per
+    `StandardSymbology.ili` - genuinely separate associations, not a
+    redundant duplicate. Real corpus data (`RoadsExgm2ien_Symbols.xtf`'s
+    `continuous`/`dotted` `PolylineSign`) sets only the `LineStyle`'s own
+    `Color`, leaving `PolylineSign.Color` unset - `PolylineSign.Color`
+    wins when both are set (no real corpus example exercises that case
+    either way), the `LineStyle`'s is the fallback.
     """
     color, opacity = library.resolve_color(obj, "Color")
     width = join = cap = dashes = None
     style_obj = library.resolve_ref(obj, "Style")
     if style_obj is not None:
+        if color is None:
+            color, opacity = library.resolve_color(style_obj, "Color")
         attrs_obj = library.resolve_ref(style_obj, "LineAttrs")
         if attrs_obj is not None:
             width_text = library.scalar(attrs_obj, "Width")
@@ -481,6 +508,37 @@ def styling_rule_from_drawing_rule(
         selector=selector,
         symbolizer=Symbolizer(**symbolizer_kwargs),
     )
+
+
+def _priority_sort_key(rule: StylingRule) -> tuple[bool, float]:
+    """Ascending `Priority` draws last/on top - this project's own convention, undocumented in `StandardSymbology.ili`.
+
+    A rule whose `Priority` isn't a literal number (attribute-driven, no
+    real corpus example) sorts after every literal one rather than being
+    dropped or guessed at.
+    """
+    z_order = rule.symbolizer.z_order if rule.symbolizer else None
+    return (not isinstance(z_order, (int, float)), z_order if isinstance(z_order, (int, float)) else 0.0)
+
+
+def graphic_to_style(graphic: MetaInstance, sign_library: SignLibrary | None = None) -> Style:
+    """Build one pycartosym `Style` from a built INTERLIS `GRAPHIC`, one `StylingRule` per `DrawingRule`.
+
+    `feature_type` (`Graphic.Base.Name`) is prepended to every rule's
+    selector (see `styling_rule_from_drawing_rule`). Rules are sorted by
+    `Priority`, ascending (`_priority_sort_key`) - SLD/SE has no explicit
+    z-order attribute, only document order, so this is where that ordering
+    is actually realized.
+    """
+    feature_type = getattr(getattr(graphic, "Base", None), "Name", None)
+    drawing_rules = graphic.DrawingRule if isinstance(graphic.DrawingRule, list) else [graphic.DrawingRule]
+    styling_rules = [
+        styling_rule_from_drawing_rule(rule, sign_library=sign_library, feature_type=feature_type)
+        for rule in drawing_rules
+    ]
+    styling_rules.sort(key=_priority_sort_key)
+    name = getattr(graphic, "Name", None)
+    return Style(styling_rules=styling_rules, metadata=Metadata(title=name) if name else None)
 
 
 def write_sld(style: Style) -> str:
