@@ -76,3 +76,17 @@ def test_dash_pattern_reads_every_repeated_dashes_occurrence_not_just_the_first(
     dashed = library.resolve_ref(library.by_name["dotted"], "Style")
     assert dashed.qualified_class.endswith("LineStyle_Dashed")
     assert library.dash_pattern(dashed) == [0.1, 0.1]
+
+
+def test_point_graphics_composite_font_symbol_renders_as_svg():
+    """`Tree`/`GP` `SymbolSign`s reference composite `FontSymbol`s mixing `_Polyline` and `_Surface` items.
+
+    `font_symbol_geometry_to_circle_graphics` aborts on these (not
+    all-`FontSymbol_Surface`-circular) - `font_symbol_geometry_to_svg_data_uri`
+    picks up the fallback, previously left this GRAPHIC with no
+    representable content at all.
+    """
+    xml = write_sld(graphic_to_style(_graphic("Point_Graphics"), _sign_library()))
+    assert xml.count("<se:PointSymbolizer>") == 2
+    assert xml.count('xlink:href="data:image/svg+xml;base64,') == 2
+    assert xml.count("<se:Format>image/svg+xml</se:Format>") == 2

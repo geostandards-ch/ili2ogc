@@ -1,15 +1,19 @@
 """Convert a resolved INTERLIS `StandardSymbology` sign instance into a pycartosym `Symbolizer`/`StylingRule`.
 
-`FontSymbol`'s composite geometry (`Font.Type = symbol`) only has a
-target for the case where every geometry item is a circular
-`FontSymbol_Surface` (see `font_symbol_geometry_to_circle_graphics`) - a
-`FontSymbol_Polyline` item, or a non-circular `FontSymbol_Surface`
-boundary, has none yet. `Fill.hatch`/`Stroke.casing`/`centerLine`/
-`pattern` are not attempted at all - they raise `NotImplementedError` in
-pycartosym's current SLD writer regardless of dialect (confirmed
-empirically), so no value built here for them could ever be written out.
+`FontSymbol`'s composite geometry (`Font.Type = symbol`) tries, in order:
+a circular `FontSymbol_Surface` composite (native `CircleGraphic`s, see
+`font_symbol_geometry_to_circle_graphics`), an all-`FontSymbol_Image`
+composite (see `font_symbol_geometry_to_image_graphics`), then a general
+SVG render of any mix of `FontSymbol_Polyline`/`FontSymbol_Surface`
+(see `font_symbol_geometry_to_svg_data_uri`). `Fill.hatch`/`Stroke.casing`/
+`centerLine`/`pattern` are not attempted at all - they raise
+`NotImplementedError` in pycartosym's current SLD writer regardless of
+dialect (confirmed empirically), so no value built here for them could
+ever be written out.
 """
 
+import base64
+import math
 from typing import Any
 
 from lxml import etree
@@ -33,9 +37,10 @@ from pycartosym.models.value_expressions import PropertyRef
 
 from interlis.convert.color import lch_to_srgb
 from interlis.convert.cql2 import to_cql2
+from interlis.convert.jsonfg import _read_arc, _read_coord
 from interlis.metamodel.instance import MetaInstance
 from interlis.xtf.parse import RawNode, XtfBasket, XtfObject
-from interlis.xtf.validate import _extract_reference, _find_child, _geom_tag
+from interlis.xtf.validate import _BOUNDARY_TAGS, _extract_reference, _find_child, _geom_tag
 
 _SE_NS = "http://www.opengis.net/se"
 _OGC_NS = "http://www.opengis.net/ogc"
@@ -322,6 +327,150 @@ def font_symbol_geometry_to_image_graphics(symbol_obj: XtfObject) -> list[ImageG
     return graphics or None
 
 
+def _rgb_to_hex(color: RGBColor | None) -> str:
+    return f"#{color.r:02x}{color.g:02x}{color.b:02x}" if color is not None else "black"
+
+
+def _svg_arc_command(prev: tuple[float, float], mid: tuple[float, float], end: tuple[float, float]) -> str | None:
+    """SVG elliptical-arc `A` command from `prev` to `end` through `mid` - all 3 points already in SVG (Y-down) space.
+
+    Derives the circumcircle radius and the large-arc/sweep flags from
+    the 3 points directly (INTERLIS's own 3-point arc encoding, eCH-0031
+    V2.1.0 SS4.3.11.14) rather than trusting the optional `<R>` on the
+    wire. `None` for 3 collinear/degenerate points - aborts the whole
+    symbol rather than guessing a geometry (RULE #7 spirit).
+    """
+    (ax, ay), (bx, by), (cx, cy) = prev, mid, end
+    d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
+    if abs(d) < 1e-9:
+        return None
+    ux = ((ax**2 + ay**2) * (by - cy) + (bx**2 + by**2) * (cy - ay) + (cx**2 + cy**2) * (ay - by)) / d
+    uy = ((ax**2 + ay**2) * (cx - bx) + (bx**2 + by**2) * (ax - cx) + (cx**2 + cy**2) * (bx - ax)) / d
+    radius = math.hypot(ax - ux, ay - uy)
+    if radius < 1e-9:
+        return None
+    a0 = math.atan2(ay - uy, ax - ux)
+    r1 = (math.atan2(by - uy, bx - ux) - a0) % (2 * math.pi)
+    r2 = (math.atan2(cy - uy, cx - ux) - a0) % (2 * math.pi)
+    # In SVG's y-down space, an increasing atan2 angle sweeps visually
+    # clockwise (sweep-flag 1) - r1 < r2 means the increasing (clockwise)
+    # direction from `prev` reaches `mid` before `end`, so that's the
+    # right direction; otherwise the decreasing (sweep-flag 0) direction
+    # is, spanning (2*pi - r2) instead of r2.
+    sweep, span = (1, r2) if r1 < r2 else (0, (2 * math.pi) - r2)
+    large_arc = 1 if span > math.pi else 0
+    return f"A {radius:.6g} {radius:.6g} 0 {large_arc} {sweep} {cx:.6g} {cy:.6g}"
+
+
+def _svg_path_d(node: RawNode) -> str | None:
+    """Build an SVG path `d` string from a POLYLINE SegmentSequence (COORD start, then COORD/ARC segments).
+
+    Y is negated throughout - SVG's y-axis points down, an INTERLIS local
+    symbol space is a standard y-up 2D plane (`FontSymbol`'s own comment:
+    "defined for size 1.0 and scale 1.0" in user units). `_svg_arc_command`
+    only ever sees already-flipped points, so its own flag derivation
+    stays entirely within SVG's coordinate convention.
+    """
+    if _geom_tag(node) != "POLYLINE" or not node.children:
+        return None
+    segments = node.children
+    if _geom_tag(segments[0]) != "COORD":
+        return None
+    start = _read_coord(segments[0])
+    if start is None:
+        return None
+    current = (start[0], -start[1])
+    parts = [f"M {current[0]:.6g} {current[1]:.6g}"]
+    for seg in segments[1:]:
+        tag = _geom_tag(seg)
+        if tag == "COORD":
+            pos = _read_coord(seg)
+            if pos is None:
+                return None
+            current = (pos[0], -pos[1])
+            parts.append(f"L {current[0]:.6g} {current[1]:.6g}")
+        elif tag == "ARC":
+            arc = _read_arc(seg)
+            if arc is None:
+                return None
+            mid = (arc[0][0], -arc[0][1])
+            end = (arc[1][0], -arc[1][1])
+            command = _svg_arc_command(current, mid, end)
+            if command is None:
+                return None
+            parts.append(command)
+            current = end
+        else:
+            return None  # custom LINE FORM segment - not representable here
+    return " ".join(parts)
+
+
+def _svg_boundary_path_d(node: RawNode) -> str | None:
+    """Like `_svg_path_d`, for a BOUNDARY/EXTERIOR/INTERIOR wrapping a single POLYLINE, closed with `Z`."""
+    polyline = _find_child(node, "POLYLINE")
+    if polyline is None:
+        return None
+    d = _svg_path_d(polyline)
+    return f"{d} Z" if d is not None else None
+
+
+def font_symbol_geometry_to_svg_data_uri(library: SignLibrary, symbol_obj: XtfObject) -> str | None:
+    """Render a `FontSymbol`'s composite geometry as an inline `data:image/svg+xml` URI.
+
+    Covers what `font_symbol_geometry_to_circle_graphics` doesn't (a
+    `FontSymbol_Polyline` item, or a `FontSymbol_Surface` whose boundary
+    isn't a plain circle) - real corpus data (`RoadsExgm2ien_Symbols.xtf`'s
+    `FontSymbol ili:tid="101"/"102"`, "Triangle"/"NoParking") mixes both
+    item kinds. `viewBox="-0.5 -0.5 1 1"` matches the model's own stated
+    convention ("All font symbols are defined for size 1.0 and scale
+    1.0") rather than a data-dependent bounding box, so every symbol
+    renders at the same visual scale regardless of its own extent.
+    `FontSymbol_Surface`'s 2nd+ boundary is a hole (`fill-rule="evenodd"`,
+    same "first ring exterior, rest holes" convention as
+    `convert/jsonfg.py::_read_surface`). `FontSymbol_Polyline.LineAttrs`
+    (width/join/cap) is not read - a hairline default stroke is used, no
+    real corpus example yet needs a specific width here.
+    """
+    occurrences = symbol_obj.attributes.get("Geometry") or []
+    if not occurrences:
+        return None
+    layers: list[str] = []
+    for occurrence in occurrences:
+        if not occurrence.children:
+            return None
+        structure_node = occurrence.children[0]
+        geometry_node = next((c for c in structure_node.children if c.tag == "Geometry"), None)
+        if geometry_node is None:
+            return None
+        if structure_node.tag.endswith("FontSymbol_Polyline"):
+            polyline_node = _find_child(geometry_node, "POLYLINE")
+            d = _svg_path_d(polyline_node) if polyline_node is not None else None
+            if d is None:
+                return None
+            color_node = next((c for c in structure_node.children if c.tag == "Color"), None)
+            color, _opacity = library._color_from_ref_node(color_node) if color_node is not None else (None, None)
+            layers.append(f'<path d="{d}" fill="none" stroke="{_rgb_to_hex(color)}"/>')
+        elif structure_node.tag.endswith("FontSymbol_Surface"):
+            surface_node = _find_child(geometry_node, "SURFACE")
+            boundaries = [c for c in surface_node.children if _geom_tag(c) in _BOUNDARY_TAGS] if surface_node else []
+            if not boundaries:
+                return None
+            boundary_ds = [_svg_boundary_path_d(b) for b in boundaries]
+            if any(d is None for d in boundary_ds):
+                return None
+            fillcolor_node = next((c for c in structure_node.children if c.tag == "FillColor"), None)
+            fill, _opacity = (
+                library._color_from_ref_node(fillcolor_node) if fillcolor_node is not None else (None, None)
+            )
+            joined_d = " ".join(d for d in boundary_ds if d is not None)
+            layers.append(f'<path d="{joined_d}" fill="{_rgb_to_hex(fill)}" fill-rule="evenodd"/>')
+        else:
+            return None
+    svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="-0.5 -0.5 1 1">{"".join(layers)}</svg>'
+    encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded}"
+
+
 def symbol_sign_object_to_marker(library: SignLibrary, obj: XtfObject) -> Marker:
     """Build a `Marker` from a real `SymbolSign` data object (`Color`/`Symbol` resolved within the same SIGN BASKET).
 
@@ -356,6 +505,10 @@ def symbol_sign_object_to_marker(library: SignLibrary, obj: XtfObject) -> Marker
             elements = font_symbol_geometry_to_circle_graphics(
                 library, symbol_obj, scale=scale
             ) or font_symbol_geometry_to_image_graphics(symbol_obj)
+            if elements is None:
+                svg_uri = font_symbol_geometry_to_svg_data_uri(library, symbol_obj)
+                if svg_uri is not None:
+                    elements = [ImageGraphic(image=Resource(uri=svg_uri, type="image/svg+xml"))]
     return Marker(elements=elements, opacity=opacity)
 
 

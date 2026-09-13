@@ -55,27 +55,42 @@ def test_convert_sld_multi_graphic_writes_one_file_per_graphic(tmp_path):
     )
     assert exit_code == ExitCode.OK
     written = {p.stem for p in out_dir.glob("*.sld")}
-    # Point_Graphics has no representable content yet (FontSymbol_Polyline
-    # composite geometry, tracked separately in docs/cartosym-mapping-
-    # strategy.md) - skipped with a diagnostic, not a hard failure.
-    assert written == {"Surface_Graphics", "SurfaceBoundary_Graphics", "Polyline_Graphics", "Text_Graphics"}
+    assert written == {
+        "Surface_Graphics",
+        "SurfaceBoundary_Graphics",
+        "Polyline_Graphics",
+        "Text_Graphics",
+        "Point_Graphics",
+    }
 
 
-def test_convert_sld_skips_a_graphic_with_no_representable_content(capsys, tmp_path):
-    exit_code = main(
-        [
-            "convert-sld",
-            str(_MODEL),
-            "--repo",
-            str(_REPO),
-            "--sign-xtf",
-            str(_SIGN_XTF),
-            "-o",
-            str(tmp_path / "sld"),
-        ]
-    )
-    assert exit_code == ExitCode.OK
-    assert "GRAPHIC 'Point_Graphics'" in capsys.readouterr().err
+_NO_CONTENT_MODEL = """INTERLIS 2.4;
+MODEL Foo AT "http://x" VERSION "1" =
+  TOPIC T =
+    CLASS SurfaceSign = Dummy: TEXT*1; END SurfaceSign;
+    CLASS LandCover = Type: (building, other); Geometry: TEXT*1; END LandCover;
+    GRAPHIC G BASED ON LandCover =
+      Building OF SurfaceSign:
+        WHERE Type == #building (
+          Geometry := Geometry;
+          Priority := 1
+        );
+    END G;
+  END T;
+END Foo.
+"""
+
+
+def test_convert_sld_skips_a_graphic_with_no_representable_content(tmp_path, capsys):
+    """No `Sign := {...}` at all - every rule ends up symbolizer-less (only `z_order`, `Priority`)."""
+    model_path = tmp_path / "Foo.ili"
+    model_path.write_text(_NO_CONTENT_MODEL, encoding="utf-8")
+
+    exit_code = main(["convert-sld", str(model_path), "--graphic", "G"])
+    assert exit_code == ExitCode.INVALID
+    err = capsys.readouterr().err
+    assert "GRAPHIC 'G'" in err
+    assert "no GRAPHIC produced any SLD-representable content" in err
 
 
 def test_convert_sld_unknown_graphic_name_exits_not_found(capsys):
