@@ -1,0 +1,30 @@
+# NOTICE
+
+`AbstractSymbology.ili` is unmodified, fetched from
+`https://models.interlis.ch/refhb24/AbstractSymbology.ili` (the official
+INTERLIS models catalog - openly published for reuse). Not actually
+needed by `RasterSign` itself (a standalone class, no abstract base), kept
+alongside `StandardSymbology_ext.ili` only because it was copied from the
+same source directory as `roadsexgm2ien_repo/` - harmless, not imported
+by anything that matters here.
+
+`StandardSymbology_ext.ili` is an ADAPTED copy of
+`https://models.interlis.ch/refhb24/StandardSymbology.ili` -
+**not the official model**. It renames `MODEL StandardSymbology` to
+`StandardSymbologyRasterSignExt` (so it is never confused with, or
+accidentally loaded alongside, the real one, or the separate
+`FontSymbol_Image` extension in `../fontsymbol_image_repo/`) and adds one
+project-proposed extension: `STRUCTURE RasterColorMapEntry` (`Value`/
+`Color`/`Label`) and `CLASS RasterSign` (`ColorMapEntries: LIST OF
+RasterColorMapEntry`) - a raster/coverage styling proposal covering only
+a value->color ramp so far, matching `pycartosym`'s `Symbolizer.color_map`
+(confirmed to write a real `se:CoverageStyle/se:RasterSymbolizer/
+se:ColorMap`). Proposed and validated by the maintainer 2026-09-13.
+Channel selection and hill-shading are not built yet. No other content
+was changed.
+
+`../rastersign_example.ili`/`.xtf` are hand-built synthetic fixtures
+(same convention as `pycartosym_examples.ili` - only the `.xtf` wire
+shape matters, `SignLibrary` never reads the built schema) exercising
+`RasterSign`/`Sign := {name}` end to end - no real `.xtf` can exist yet
+for a class this project just proposed.

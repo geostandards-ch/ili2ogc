@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- Synthetic SIGN BASKET data for rastersign_example.ili - see
+     tests/fixtures/cartosym/rastersign_repo/NOTICE. Colors reuse the
+     already-verified LCh(ab) conversions from pycartosym_examples.xtf
+     (white/orange, tid 7/8 there), not new arbitrary numbers. -->
+
+<ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS"
+  xmlns="http://www.interlis.ch/xtf/2.4/RasterSignExample">
+   <ili:headersection>
+      <ili:models>
+         <ili:model>RasterSignExample</ili:model>
+      </ili:models>
+      <ili:sender>ili2ogc test fixture</ili:sender>
+      <ili:comment>Sign library data for the RasterSign ColorMap round-trip test</ili:comment>
+   </ili:headersection>
+   <ili:datasection>
+      <T ili:bid="RasterSignExample">
+         <!-- Colors (LCh, same conversions as pycartosym_examples.xtf's white/orange) -->
+         <Color ili:tid="1"><!-- #ffffff -->
+            <Name>white</Name>
+            <L>100.0000</L>
+            <C>0.0117</C>
+            <H>296.8129</H>
+            <T>1.0</T>
+         </Color>
+         <Color ili:tid="2"><!-- #ffa500 -->
+            <Name>orange</Name>
+            <L>74.9322</L>
+            <C>82.5047</C>
+            <H>73.1350</H>
+            <T>1.0</T>
+         </Color>
+
+         <RasterSign ili:tid="100">
+            <ili:Name>Elevation</ili:Name>
+            <ColorMapEntries>
+               <RasterColorMapEntry>
+                  <Value>0</Value>
+                  <Color ili:ref="1"></Color>
+                  <Label>Low</Label>
+               </RasterColorMapEntry>
+            </ColorMapEntries>
+            <ColorMapEntries>
+               <RasterColorMapEntry>
+                  <Value>1000</Value>
+                  <Color ili:ref="2"></Color>
+                  <Label>High</Label>
+               </RasterColorMapEntry>
+            </ColorMapEntries>
+         </RasterSign>
+      </T>
+   </ili:datasection>
+</ili:transfer>

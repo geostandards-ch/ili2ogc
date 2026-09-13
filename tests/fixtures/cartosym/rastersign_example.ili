@@ -1,0 +1,33 @@
+INTERLIS 2.4;
+
+!! Synthetic model exercising RasterSign (a project extension of
+!! StandardSymbology, not the official model - see
+!! tests/fixtures/cartosym/rastersign_repo/NOTICE). Only the .xtf wire
+!! shape matters here (SignLibrary/cartosym.py read raw XTF tags, never
+!! this file's own class declarations) - same convention as
+!! pycartosym_examples.ili.
+
+MODEL RasterSignExample (en)
+AT "mailto:test@example.org"
+VERSION "2026-09-13" =
+  TOPIC T =
+    CLASS RasterSign =
+      Dummy: TEXT*1;
+    END RasterSign;
+
+    SIGN BASKET MyBasket ~ T
+      OBJECTS OF RasterSign: Elevation;
+
+    CLASS Coverage =
+      Geometry: TEXT*1;
+    END Coverage;
+
+    GRAPHIC Coverage_Graphics BASED ON Coverage =
+      ElevationRule OF RasterSign: (
+          Sign := {Elevation};
+          Geometry := Geometry;
+          Priority := 1
+        );
+    END Coverage_Graphics;
+  END T;
+END RasterSignExample.

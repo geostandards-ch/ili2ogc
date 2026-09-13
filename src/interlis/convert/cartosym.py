@@ -49,6 +49,7 @@ _STROKE_SIGN_CLASS = "PolylineSign"
 _FILL_SIGN_CLASS = "SurfaceSign"
 _TEXT_SIGN_CLASS = "TextSign"
 _MARKER_SIGN_CLASS = "SymbolSign"
+_RASTER_SIGN_CLASS = "RasterSign"
 
 _H_ALIGNMENT = {"Left": "left", "Center": "center", "Right": "right"}
 # VALIGNMENT has 5 levels (Top/Cap/Half/Base/Bottom), pycartosym's v_alignment
@@ -660,10 +661,54 @@ def _surface_sign_kwargs(library: SignLibrary, obj: XtfObject) -> dict[str, Any]
     return kwargs
 
 
+def raster_sign_object_to_color_map(library: SignLibrary, obj: XtfObject) -> list[list[Any]] | None:
+    """Build a `Symbolizer.color_map` from `RasterSign.ColorMapEntries` (a `LIST OF RasterColorMapEntry`).
+
+    `RasterSign` is a PROJECT EXTENSION of `StandardSymbology` (a
+    raster/coverage styling proposal covering only `ColorMap` so far, the
+    one target confirmed to write a real `se:CoverageStyle/
+    se:RasterSymbolizer/se:ColorMap` in `pycartosym`; channel selection
+    and hill-shading are deliberately not built yet). `Symbolizer.color_map`
+    is untyped (`Any`) - a plain list of `[value, color]` entries, in wire
+    order, is what the writer actually expects (`_validated_map_pairs`,
+    confirmed empirically against the real writer, NOT the separate
+    standalone `ColorMap` Pydantic class which has an unrelated
+    `{colors, values}` shape). `RasterColorMapEntry.Label` is deliberately
+    NOT included here: `pycartosym`'s default `sld` dialect renders
+    `se:Categorize`, which has no label/name slot at all in SE 1.1.0 (only
+    `se:Threshold`/`se:Value`) - passing a 3-element `[value, color,
+    label]` entry crashes its writer (`_build_categorize` unpacks `pairs[1:]`
+    as plain 2-tuples) rather than dropping the label gracefully, confirmed
+    empirically and reported upstream. Entirely synthetic (no real `.xtf`
+    can exist yet for a class this project just proposed) -
+    `tests/fixtures/cartosym/rastersign_repo/`.
+    """
+    occurrences = obj.attributes.get("ColorMapEntries") or []
+    entries: list[list[Any]] = []
+    for occurrence in occurrences:
+        if not occurrence.children:
+            return None
+        entry_node = occurrence.children[0]
+        value_node = next((c for c in entry_node.children if c.tag == "Value"), None)
+        color_node = next((c for c in entry_node.children if c.tag == "Color"), None)
+        if value_node is None or value_node.text is None or color_node is None:
+            return None
+        color, _opacity = library._color_from_ref_node(color_node)
+        if color is None:
+            return None
+        entries.append([float(value_node.text), color])
+    return entries or None
+
+
+def _raster_sign_kwargs(library: SignLibrary, obj: XtfObject) -> dict[str, Any]:
+    return {"color_map": raster_sign_object_to_color_map(library, obj)}
+
+
 _SIGN_OBJECT_BUILDERS = {
     _MARKER_SIGN_CLASS: _symbol_sign_kwargs,
     _FILL_SIGN_CLASS: _surface_sign_kwargs,
     _STROKE_SIGN_CLASS: _polyline_sign_kwargs,
+    _RASTER_SIGN_CLASS: _raster_sign_kwargs,
 }
 
 
