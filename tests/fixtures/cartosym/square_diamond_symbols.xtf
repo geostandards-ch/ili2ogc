@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- Synthetic SIGN BASKET data: two Font.Type = symbol FontSymbols whose
+     geometry is a straight-segment square boundary, one axis-aligned and
+     one turned 45 degrees (a diamond). Real point-symbol Sachplan
+     symbology (Sachplan Asyl's published SLD) uses both marks; SE 1.1.0
+     has no `diamond` well-known name, so the diamond has to reach SLD as
+     a rotated square. See tests/fixtures/cartosym/NOTICE. -->
+
+<ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS"
+  xmlns="http://www.interlis.ch/xtf/2.4/StandardSymbology">
+   <ili:headersection>
+      <ili:models>
+         <ili:model>StandardSymbology</ili:model>
+      </ili:models>
+      <ili:sender>ili2ogc test fixture</ili:sender>
+   </ili:headersection>
+   <ili:datasection>
+      <StandardSigns ili:bid="StandardSymbology.StandardSigns">
+         <Color ili:tid="1"><!-- #cc0000 -->
+            <Name>red</Name>
+            <L>42.5172</L>
+            <C>88.3896</C>
+            <H>40.0002</H>
+            <T>1.0</T>
+         </Color>
+         <Font ili:tid="10">
+            <Name>SachplanMarks</Name>
+            <Internal>true</Internal>
+            <Type>symbol</Type>
+         </Font>
+         <FontSymbol ili:tid="20">
+            <Name>Square</Name>
+            <Font ili:ref="10"></Font>
+            <Geometry>
+               <FontSymbol_Surface>
+                  <FillColor ili:ref="1"></FillColor>
+                  <Geometry>
+                     <SURFACE>
+                        <BOUNDARY>
+                           <POLYLINE>
+                              <COORD><C1>-0.5</C1><C2>-0.5</C2></COORD>
+                              <COORD><C1>0.5</C1><C2>-0.5</C2></COORD>
+                              <COORD><C1>0.5</C1><C2>0.5</C2></COORD>
+                              <COORD><C1>-0.5</C1><C2>0.5</C2></COORD>
+                              <COORD><C1>-0.5</C1><C2>-0.5</C2></COORD>
+                           </POLYLINE>
+                        </BOUNDARY>
+                     </SURFACE>
+                  </Geometry>
+               </FontSymbol_Surface>
+            </Geometry>
+         </FontSymbol>
+         <FontSymbol ili:tid="21">
+            <Name>Diamond</Name>
+            <Font ili:ref="10"></Font>
+            <Geometry>
+               <FontSymbol_Surface>
+                  <FillColor ili:ref="1"></FillColor>
+                  <Geometry>
+                     <SURFACE>
+                        <BOUNDARY>
+                           <POLYLINE>
+                              <COORD><C1>0</C1><C2>0.5</C2></COORD>
+                              <COORD><C1>0.5</C1><C2>0</C2></COORD>
+                              <COORD><C1>0</C1><C2>-0.5</C2></COORD>
+                              <COORD><C1>-0.5</C1><C2>0</C2></COORD>
+                           </POLYLINE>
+                        </BOUNDARY>
+                     </SURFACE>
+                  </Geometry>
+               </FontSymbol_Surface>
+            </Geometry>
+         </FontSymbol>
+         <FontSymbol ili:tid="22">
+            <Name>Oblong</Name>
+            <Font ili:ref="10"></Font>
+            <Geometry>
+               <FontSymbol_Surface>
+                  <FillColor ili:ref="1"></FillColor>
+                  <Geometry>
+                     <SURFACE>
+                        <BOUNDARY>
+                           <POLYLINE>
+                              <COORD><C1>-1</C1><C2>-0.5</C2></COORD>
+                              <COORD><C1>1</C1><C2>-0.5</C2></COORD>
+                              <COORD><C1>1</C1><C2>0.5</C2></COORD>
+                              <COORD><C1>-1</C1><C2>0.5</C2></COORD>
+                           </POLYLINE>
+                        </BOUNDARY>
+                     </SURFACE>
+                  </Geometry>
+               </FontSymbol_Surface>
+            </Geometry>
+         </FontSymbol>
+         <SymbolSign ili:tid="100">
+            <ili:Name>DiamondMark</ili:Name>
+            <Color ili:ref="1"></Color>
+            <Symbol ili:ref="21"></Symbol>
+         </SymbolSign>
+      </StandardSigns>
+   </ili:datasection>
+</ili:transfer>

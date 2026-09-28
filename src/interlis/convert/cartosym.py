@@ -2,7 +2,9 @@
 
 `FontSymbol`'s composite geometry (`Font.Type = symbol`) tries, in order:
 a circular `FontSymbol_Surface` composite (native `CircleGraphic`s, see
-`font_symbol_geometry_to_circle_graphics`), an all-`FontSymbol_Image`
+`font_symbol_geometry_to_circle_graphics`), a square one (native
+`RectangleGraphic`s, which is also how a diamond mark is expressed - see
+`font_symbol_geometry_to_rectangle_graphics`), an all-`FontSymbol_Image`
 composite (see `font_symbol_geometry_to_image_graphics`), then a general
 SVG render of any mix of `FontSymbol_Polyline`/`FontSymbol_Surface`
 (see `font_symbol_geometry_to_svg_data_uri`). `Fill.hatch`/`Stroke.casing`/
@@ -26,6 +28,7 @@ from pycartosym.models.symbolizers import (
     ImageGraphic,
     Label,
     Marker,
+    RectangleGraphic,
     Resource,
     Stroke,
     TextAlignment,
@@ -50,6 +53,10 @@ _FILL_SIGN_CLASS = "SurfaceSign"
 _TEXT_SIGN_CLASS = "TextSign"
 _MARKER_SIGN_CLASS = "SymbolSign"
 _RASTER_SIGN_CLASS = "RasterSign"
+
+# `FontSymbol` geometry is authored at size 1.0 (the model's own
+# convention), so shape recognition compares lengths of order 1.
+_SHAPE_TOLERANCE = 1e-9
 
 _H_ALIGNMENT = {"Left": "left", "Center": "center", "Right": "right"}
 # VALIGNMENT has 5 levels (Top/Cap/Half/Base/Bottom), pycartosym's v_alignment
@@ -262,36 +269,135 @@ def _circle_radius_from_surface(node: RawNode) -> float | None:
     return radii[0] if radii and all(abs(r - radii[0]) < 1e-9 for r in radii) else None
 
 
+def _font_symbol_items(symbol_obj: XtfObject, structure_suffix: str) -> list[RawNode] | None:
+    """Every `FontSymbol.Geometry` item's structure node, or `None` unless all of them are `structure_suffix`.
+
+    A `FontSymbol` is "a collection of lines and surfaces" (its own model
+    comment), so a composite of several stacked items is intended, not an
+    edge case; every native-shape builder below is all-or-nothing on it -
+    one foreign item aborts the whole symbol instead of silently dropping
+    just that item, leaving the SVG fallback to render the mix.
+    """
+    occurrences = symbol_obj.attributes.get("Geometry") or []
+    nodes: list[RawNode] = []
+    for occurrence in occurrences:
+        if not occurrence.children or not occurrence.children[0].tag.endswith(structure_suffix):
+            return None
+        nodes.append(occurrence.children[0])
+    return nodes or None
+
+
+def _surface_fill(library: SignLibrary, structure_node: RawNode) -> Fill:
+    """`Fill` from a `FontSymbol_Surface` item's own `FillColor` reference."""
+    fillcolor_node = next((c for c in structure_node.children if c.tag == "FillColor"), None)
+    color, opacity = library._color_from_ref_node(fillcolor_node) if fillcolor_node is not None else (None, None)
+    return Fill(color=color, opacity=opacity)
+
+
+def _boundary_ring(node: RawNode) -> list[tuple[float, float]] | None:
+    """Read a single-boundary `SS_Surface` as a straight-segment ring, without the repeated closing vertex.
+
+    `None` for anything that is not one BOUNDARY of one all-COORD
+    POLYLINE - an ARC segment, a hole, or a custom LINE FORM is not a
+    polygon ring this way.
+    """
+    surface = _find_child(node, "SURFACE")
+    boundaries = [c for c in surface.children if _geom_tag(c) in _BOUNDARY_TAGS] if surface is not None else []
+    if len(boundaries) != 1:
+        return None
+    polyline = _find_child(boundaries[0], "POLYLINE")
+    if polyline is None or not polyline.children:
+        return None
+    ring: list[tuple[float, float]] = []
+    for segment in polyline.children:
+        position = _read_coord(segment)
+        if position is None:
+            return None
+        ring.append((position[0], position[1]))
+    if len(ring) > 1 and math.dist(ring[0], ring[-1]) < _SHAPE_TOLERANCE:
+        ring.pop()
+    return ring or None
+
+
+def _square_from_surface(node: RawNode) -> tuple[float, float] | None:
+    """Read a `FontSymbol_Surface` boundary as `(side, orientation in degrees)` - a square, possibly rotated.
+
+    Deliberately limited to the square case. A square's own 90-degree
+    symmetry makes the rotation SIGN immaterial, so the emitted
+    `Transform2D.orientation` is correct whichever way round CartoSym
+    Part 2 means it (its `transform2D.orientation` carries no documented
+    clockwise/counter-clockwise convention, and `se:Rotation` is
+    clockwise while an INTERLIS symbol space is y-up); for an oblong
+    rectangle the two conventions give visibly different results and
+    nothing settles which is right, so those keep falling through to the
+    SVG fallback. This is what renders a diamond: SE 1.1.0 has no
+    `diamond` well-known mark name, and a diamond is a square turned 45
+    degrees.
+    """
+    ring = _boundary_ring(node)
+    if ring is None or len(ring) != 4:
+        return None
+    edges = [(ring[(i + 1) % 4][0] - ring[i][0], ring[(i + 1) % 4][1] - ring[i][1]) for i in range(4)]
+    sides = [math.hypot(*edge) for edge in edges]
+    if sides[0] < _SHAPE_TOLERANCE or any(abs(side - sides[0]) > _SHAPE_TOLERANCE for side in sides):
+        return None
+    if any(abs(edges[i][0] * edges[i + 1][0] + edges[i][1] * edges[i + 1][1]) > _SHAPE_TOLERANCE for i in range(3)):
+        return None
+    # Modulo 90 degrees: any of the 4 edges describes the same square.
+    return sides[0], math.degrees(math.atan2(edges[0][1], edges[0][0])) % 90.0
+
+
+def font_symbol_geometry_to_rectangle_graphics(
+    library: SignLibrary, symbol_obj: XtfObject, *, scale: float = 1.0
+) -> list[RectangleGraphic] | None:
+    """Build one `RectangleGraphic` per square `FontSymbol_Surface` item in a `Font.Type = symbol` `FontSymbol`.
+
+    Gives a native `se:Mark`/`se:WellKnownName` square - and, rotated 45
+    degrees, the diamond mark real Sachplan symbology uses - instead of
+    the inline-SVG `ImageGraphic` the generic fallback would produce.
+    See `_square_from_surface` for why only squares qualify.
+    """
+    structure_nodes = _font_symbol_items(symbol_obj, "FontSymbol_Surface")
+    if structure_nodes is None:
+        return None
+    graphics: list[RectangleGraphic] = []
+    for structure_node in structure_nodes:
+        geometry_node = next((c for c in structure_node.children if c.tag == "Geometry"), None)
+        square = _square_from_surface(geometry_node) if geometry_node is not None else None
+        if square is None:
+            return None
+        side, orientation = square
+        graphics.append(
+            RectangleGraphic(
+                type="Rectangle",
+                width=meters(side * scale),
+                height=meters(side * scale),
+                fill=_surface_fill(library, structure_node),
+                transform=Transform2D(orientation=orientation) if orientation > _SHAPE_TOLERANCE else None,
+            )
+        )
+    return graphics or None
+
+
 def font_symbol_geometry_to_circle_graphics(
     library: SignLibrary, symbol_obj: XtfObject, *, scale: float = 1.0
 ) -> list[CircleGraphic] | None:
     """Build one `CircleGraphic` per circular `FontSymbol_Surface` item in a `Font.Type = symbol` `FontSymbol`.
 
-    A `FontSymbol` is "a collection of lines and surfaces" (its own
-    model comment) - several stacked `FontSymbol_Surface` items are a
-    genuine, intended composite symbol, not an edge case. Only the case
-    where EVERY item is a `FontSymbol_Surface` whose boundary is a real
-    circle (`_circle_radius_from_surface`) is handled - a
-    `FontSymbol_Polyline` item, or a non-circular boundary, aborts the
-    whole symbol rather than silently dropping just that item.
+    Only the case where EVERY item is a `FontSymbol_Surface` whose
+    boundary is a real circle (`_circle_radius_from_surface`) is handled
+    - see `_font_symbol_items` for that all-or-nothing contract.
     """
-    occurrences = symbol_obj.attributes.get("Geometry") or []
+    structure_nodes = _font_symbol_items(symbol_obj, "FontSymbol_Surface")
+    if structure_nodes is None:
+        return None
     graphics: list[CircleGraphic] = []
-    for occurrence in occurrences:
-        if not occurrence.children:
-            return None
-        structure_node = occurrence.children[0]
-        if not structure_node.tag.endswith("FontSymbol_Surface"):
-            return None
+    for structure_node in structure_nodes:
         geometry_node = next((c for c in structure_node.children if c.tag == "Geometry"), None)
         radius = _circle_radius_from_surface(geometry_node) if geometry_node is not None else None
         if radius is None:
             return None
-        fillcolor_node = next((c for c in structure_node.children if c.tag == "FillColor"), None)
-        fill_color, fill_opacity = (
-            library._color_from_ref_node(fillcolor_node) if fillcolor_node is not None else (None, None)
-        )
-        fill = Fill(color=fill_color, opacity=fill_opacity)
+        fill = _surface_fill(library, structure_node)
         graphics.append(CircleGraphic(type="Circle", radius=meters(radius * scale), fill=fill))
     return graphics or None
 
@@ -315,14 +421,11 @@ def font_symbol_geometry_to_image_graphics(symbol_obj: XtfObject) -> list[ImageG
     extension. No `hot_spot` either, for the same reason (no anchor-point
     attribute proposed on `FontSymbol_Image`).
     """
-    occurrences = symbol_obj.attributes.get("Geometry") or []
+    structure_nodes = _font_symbol_items(symbol_obj, "FontSymbol_Image")
+    if structure_nodes is None:
+        return None
     graphics: list[ImageGraphic] = []
-    for occurrence in occurrences:
-        if not occurrence.children:
-            return None
-        structure_node = occurrence.children[0]
-        if not structure_node.tag.endswith("FontSymbol_Image"):
-            return None
+    for structure_node in structure_nodes:
         uri_node = next((c for c in structure_node.children if c.tag == "Uri"), None)
         if uri_node is None or uri_node.text is None:
             return None
@@ -478,13 +581,13 @@ def symbol_sign_object_to_marker(library: SignLibrary, obj: XtfObject) -> Marker
     """Build a `Marker` from a real `SymbolSign` data object (`Color`/`Symbol` resolved within the same SIGN BASKET).
 
     `Font.Type = text` (`Symbol` -> `FontSymbol` -> `Font`) builds a
-    single glyph `TextGraphic`; `Font.Type = symbol` tries
-    `font_symbol_geometry_to_circle_graphics` first, then
+    single glyph `TextGraphic`; `Font.Type = symbol` tries the native
+    shape builders (circle, then square/diamond), then
     `font_symbol_geometry_to_image_graphics` (a project-extension
-    `FontSymbol_Image`, see its own docstring) - any other composite
-    geometry falls through to no marker element. Verified against real
-    corpus data (`Point_Graphics_Signatures.xtf`'s `SymbolSign`/
-    `FontSymbol`/`Font`) for the text case.
+    `FontSymbol_Image`, see its own docstring), and finally an inline-SVG
+    render of any remaining mix. Verified against real corpus data
+    (`Point_Graphics_Signatures.xtf`'s `SymbolSign`/`FontSymbol`/`Font`)
+    for the text case.
     """
     # `color` (from `SymbolSignColorAssoc`) has no confirmed pycartosym
     # target for a text-glyph Marker yet (neither `TextGraphic` nor `Font`
@@ -505,9 +608,11 @@ def symbol_sign_object_to_marker(library: SignLibrary, obj: XtfObject) -> Marker
         elif font_type == "symbol":
             scale_text = library.scalar(obj, "Scale")
             scale = float(scale_text) if scale_text else 1.0
-            elements = font_symbol_geometry_to_circle_graphics(
-                library, symbol_obj, scale=scale
-            ) or font_symbol_geometry_to_image_graphics(symbol_obj)
+            elements = (
+                font_symbol_geometry_to_circle_graphics(library, symbol_obj, scale=scale)
+                or font_symbol_geometry_to_rectangle_graphics(library, symbol_obj, scale=scale)
+                or font_symbol_geometry_to_image_graphics(symbol_obj)
+            )
             if elements is None:
                 svg_uri = font_symbol_geometry_to_svg_data_uri(library, symbol_obj)
                 if svg_uri is not None:
