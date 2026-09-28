@@ -86,6 +86,18 @@ class ModelRepository:
         # in progress - see anti-cycle guard below), or None if attempted
         # and not found/failed - never retried.
         self._cache: dict[str, Any] = {}
+        # Reverse of `_index`, built on first use: `_get_table` asks for a
+        # file's sibling models on every miss, and resolving the whole
+        # index each time is O(index) stat calls per built model.
+        self._names_by_path: dict[Path, list[str]] | None = None
+        # Names actually ASKED for, as opposed to merely present in
+        # `_cache` because a sibling model of the same file was built.
+        # `loaded_models` must report only the former: a caller scoping
+        # itself to the models an IMPORTS really named (see
+        # `convert/jsonfg.py::_context_instances`, where an unrelated
+        # sibling CONTEXT would otherwise shadow the imported one's
+        # rebinding) has no other way to tell them apart.
+        self._requested: set[str] = set()
         self._make_sub_builder = None  # injected by InterlisModelBuilder
 
     def path_for(self, model_name: str) -> Path | None:
@@ -98,6 +110,23 @@ class ModelRepository:
         """
         return self._index.get(model_name)
 
+    def declared_model_names(self, path: Path) -> list[str]:
+        """Every MODEL/REFSYSTEM name this repository indexed to `path`, in declaration order.
+
+        A single `.ili` can declare several models (e.g.
+        `BaseModel_SectoralPlans_V1_4.ili`: a catalogues model plus an
+        LV03 and an LV95 variant); a caller holding only the file (e.g.
+        `convert-sql --catalog`) needs those names to reach the same
+        built table as `--repo` resolution, instead of building the file
+        a second time into an unrelated object graph.
+        """
+        if self._names_by_path is None:
+            by_path: dict[Path, list[str]] = {}
+            for name, indexed in self._index.items():
+                by_path.setdefault(indexed.resolve(), []).append(name)
+            self._names_by_path = by_path
+        return self._names_by_path.get(path.resolve(), [])
+
     def register_prebuilt(self, model_name: str, symbol_table) -> None:
         """Register an already-built model in the resolution cache.
 
@@ -108,6 +137,7 @@ class ModelRepository:
         during the header completeness check (`availability` below).
         """
         self._cache[model_name] = symbol_table
+        self._requested.add(model_name)
 
     def availability(self, model_name: str) -> str:
         """Return a named model's resolvability status.
@@ -207,7 +237,7 @@ class ModelRepository:
         into `CREATE TABLE`s in the SAME conversion without the caller
         having to name each one again via `--catalog`.
         """
-        return {name: table for name, table in self._cache.items() if table is not None}
+        return {name: table for name, table in self._cache.items() if table is not None and name in self._requested}
 
     def _get_table(self, model_name: str):
         """Build (or return the cached) SymbolTable for `model_name`.
@@ -222,8 +252,10 @@ class ModelRepository:
         locally, so without this the CRS meta-attribute mechanism used by
         `.xtf` -> JSON-FG geometry conversion had zero real coverage.
         """
+        self._requested.add(model_name)
         if model_name in self._cache:
             return self._cache[model_name]
+        sibling_names: list[str] = []
         if model_name in _BUILTIN_SOURCES:
             source = _BUILTIN_SOURCES[model_name]
             tree, syntax_errors = parse_text(source)
@@ -233,6 +265,20 @@ class ModelRepository:
             if path is None:
                 self._cache[model_name] = None
                 return None
+            # One build populates EVERY model the file declares, so they
+            # must all share its table. Caching under the requested name
+            # alone rebuilds the whole file when a sibling model is asked
+            # for later, and the two builds' instances are then never
+            # `is`-identical - an EXTENDS/REFERENCE TO resolved through
+            # one build points at an object the other build's table has
+            # no entry for, which is how `convert-sql --catalog` used to
+            # emit a FOREIGN KEY onto a table its own subclass rows never
+            # reach.
+            sibling_names = self.declared_model_names(path)
+            for sibling in sibling_names:
+                if sibling in self._cache:
+                    self._cache[model_name] = self._cache[sibling]
+                    return self._cache[sibling]
             tree, syntax_errors = parse_file(path)
             meta_attributes = meta_attribute_comments_in_file(path)
         if syntax_errors or self._make_sub_builder is None:
@@ -245,7 +291,8 @@ class ModelRepository:
         # import, e.g. A imports B which references A) finds its
         # partially-populated table instead of endlessly restarting the
         # load of the same file.
-        self._cache[model_name] = builder.symbol_table
+        for name in {model_name, *sibling_names}:
+            self._cache[name] = builder.symbol_table
         try:
             result = builder.build(tree, meta_attributes=meta_attributes)
         except BuildError:
@@ -257,7 +304,8 @@ class ModelRepository:
             # crashing the whole root `validate`/`build` - the placeholder
             # already cached (anti-cycle guard above) stays empty, never
             # retried.
-            self._cache[model_name] = None
+            for name in {model_name, *sibling_names}:
+                self._cache[name] = None
             return None
         if model_name in _BUILTIN_SOURCES:
             # The Model actually declared carries an internal name

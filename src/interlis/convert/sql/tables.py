@@ -154,7 +154,7 @@ def _columns_for_class(
             target_table = _sql_identifier(getattr(target, "Name", None) or "")
             columns.append(Column(col_name, "text", nullable=not resolved.mandatory))
             fk_name = _truncate_identifier(_sql_identifier(f"fk_{getattr(cls, 'Name', '')}_{label}"))
-            foreign_keys.append(ForeignKey(fk_name, [col_name], target_table, [OID_COLUMN]))
+            foreign_keys.append(ForeignKey(fk_name, [col_name], target_table, [OID_COLUMN], ref_class_id=id(target)))
             continue
 
         if resolved.type_kind in _GEOMETRY_KINDS:
@@ -256,6 +256,7 @@ def _build_child_table(
                 ["value"],
                 target_table,
                 [OID_COLUMN],
+                ref_class_id=id(target),
             )
         )
     elif base_kind in _GEOMETRY_KINDS:
@@ -583,6 +584,7 @@ def build_tables(
     """
     tables = []
     used_table_names: set[str] = set()
+    table_name_by_class_id: dict[int, str] = {}
     # For abstract-STRUCTURE subclass discovery: the root table plus every
     # distinct per-class table (--catalog / folded-in models) - a concrete
     # subclass can be registered in a different model's table than the
@@ -599,6 +601,7 @@ def build_tables(
             table_name = f"{base_name}_{suffix}"
             suffix += 1
         used_table_names.add(table_name)
+        table_name_by_class_id[id(cls)] = table_name
         if class_table_names is not None:
             class_table_names[id(cls)] = table_name
 
@@ -778,6 +781,17 @@ def build_tables(
     # (a valid OID string either way) is kept; only the now-dangling
     # `FOREIGN KEY` constraint - which would `ALTER TABLE ... REFERENCES` a
     # table this conversion never creates - is dropped.
+    # A FK built from the target's bare Name (`_columns_for_class` cannot
+    # know the suffix a name collision forces) is retargeted by identity
+    # here - without it, a `REFERENCE TO` across two same-named classes
+    # (`BaseModel_SectoralPlans_V1_4.ili`'s LV03 and LV95 `Facility`) both
+    # point at whichever one happened to take the unsuffixed table name.
+    for table in tables:
+        for fk in table.foreign_keys:
+            resolved_name = table_name_by_class_id.get(fk.ref_class_id) if fk.ref_class_id is not None else None
+            if resolved_name is not None:
+                fk.ref_table = resolved_name
+
     final_table_names = {t.name for t in tables}
     for table in tables:
         kept_fks = []

@@ -388,6 +388,24 @@ def _fold_in_dependency_models(classes, views, root_table, repository, class_sym
             class_symbol_tables.setdefault(instance_id, loaded[instance_id][1])
 
 
+def _catalog_symbol_table(catalog_path: Path, repository: ModelRepository | None) -> SymbolTable | None:
+    """The `--repo`-built table for a `--catalog` file, or `None` if the repository cannot reach it.
+
+    Reusing it is what keeps identity: building the file a second time
+    with its own builder yields classes that are never `is`-identical to
+    the ones the converted model's own `EXTENDS`/`REFERENCE TO` already
+    resolved through `--repo`, so the promoted copy ends up as a separate
+    table no subclass row ever reaches.
+    """
+    if repository is None:
+        return None
+    for model_name in repository.declared_model_names(catalog_path):
+        table = repository.symbol_table_for(model_name)
+        if table is not None:
+            return table
+    return None
+
+
 def cmd_convert_sql(args: argparse.Namespace) -> int:
     """Convert an .ili model to SQL DDL, PostgreSQL or GeoPackage/SQLite.
 
@@ -500,23 +518,26 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
         if catalog_path == path.resolve() or catalog_path in seen_catalog_paths:
             continue  # the same file given twice (as `file` or across --catalog) would otherwise duplicate its table
         seen_catalog_paths.add(catalog_path)
-        catalog_tree, catalog_syntax_errors = parse_file(catalog_path)
-        if catalog_syntax_errors:
-            _error(f"{len(catalog_syntax_errors)} syntax error(s) in {catalog_path}:")
-            for e in catalog_syntax_errors:
-                print(f"  {e}", file=sys.stderr)
-            return ExitCode.INVALID
-        catalog_builder = _open_builder(repository)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            catalog_builder.build(catalog_tree, meta_attributes=meta_attribute_comments_in_file(catalog_path))
+        catalog_table = _catalog_symbol_table(catalog_path, repository)
+        if catalog_table is None:
+            catalog_tree, catalog_syntax_errors = parse_file(catalog_path)
+            if catalog_syntax_errors:
+                _error(f"{len(catalog_syntax_errors)} syntax error(s) in {catalog_path}:")
+                for e in catalog_syntax_errors:
+                    print(f"  {e}", file=sys.stderr)
+                return ExitCode.INVALID
+            catalog_builder = _open_builder(repository)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                catalog_builder.build(catalog_tree, meta_attributes=meta_attribute_comments_in_file(catalog_path))
+            catalog_table = catalog_builder.symbol_table
         catalog_classes = [
             instance
-            for instance in catalog_builder.symbol_table.all_registered()
+            for instance in catalog_table.all_registered()
             if isinstance(instance, MetaInstance) and instance._qualified_class.rsplit(".", 1)[-1] == "Class"
         ]
         classes.extend(catalog_classes)
-        class_symbol_tables.update({id(instance): catalog_builder.symbol_table for instance in catalog_classes})
+        class_symbol_tables.update({id(instance): catalog_table for instance in catalog_classes})
 
     # An imported model this conversion actually depends on - a VIEW's
     # JOIN OF/PROJECTION OF base classes, or the target of a cross-model

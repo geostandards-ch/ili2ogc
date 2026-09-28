@@ -32,6 +32,13 @@ class ForeignKey:
     columns: list[str]
     ref_table: str
     ref_columns: list[str]
+    # Identity of the target Class, when the FK points at another class's
+    # table rather than its own parent's. `ref_table` is first filled from
+    # the target's bare Name, which two classes of the same name (an LV03
+    # and an LV95 variant of one base model, say) share - `build_tables`
+    # rewrites it from this id once it knows which of them got the
+    # suffixed table name.
+    ref_class_id: int | None = None
 
 
 @dataclass
