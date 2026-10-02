@@ -183,6 +183,12 @@ concepts:
       table: REFERENCE TO touches ~30% of the real corpus). An unresolved
       target class (declared target not reachable, e.g. no `--repo` given)
       gets a `-- NOTE` comment instead of a column - never a dangling FK.
+      Tables are one per concrete class, so a target with converted concrete
+      subclasses is polymorphic: one nullable FK column per target table
+      (a concrete base keeps the plain column, every other target gets
+      `<column>_<table>`) plus a CHECK that at most one - exactly one when
+      MANDATORY - is set. An ABSTRACT target with a single concrete subclass
+      just retargets the plain FK to it.
 
   Role:
     qualified_name: IlisMeta16.ModelData.Role

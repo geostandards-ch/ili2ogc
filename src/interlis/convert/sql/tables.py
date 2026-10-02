@@ -15,6 +15,7 @@ from interlis.xtf.schema import (
     ResolvedAttribute,
     attributes_of,
     concrete_structure_subclasses,
+    is_class_compatible,
     reference_target_class,
     resolve_attribute,
     schema_members_of,
@@ -566,6 +567,54 @@ def _local_unique_constraints_for_class(cls: MetaInstance) -> tuple[dict[str, li
     return result, notes
 
 
+def _reference_target_classes(target: MetaInstance, converted: list[MetaInstance]) -> list[MetaInstance]:
+    """Every converted concrete class a `REFERENCE TO target` may point at: `target` unless ABSTRACT, then its
+    concrete subclasses by name.
+
+    Tables are one per concrete class with inherited columns inlined, so a
+    subclass instance has a row in its own table only, never in its base's.
+    """
+    subclasses = sorted(
+        (
+            c
+            for c in converted
+            if c is not target and not getattr(c, "Abstract", False) and is_class_compatible(c, target)
+        ),
+        key=lambda c: getattr(c, "Name", None) or "",
+    )
+    return ([] if getattr(target, "Abstract", False) else [target]) + subclasses
+
+
+def _split_polymorphic_fk(
+    table: Table, fk: ForeignKey, targets: list[tuple[MetaInstance, str]], *, keeps_column: bool
+) -> None:
+    """Replace `fk`'s single column by one nullable FK column per target table, plus a CHECK that at most one (exactly
+    one when MANDATORY) is set.
+
+    A concrete base keeps the original column; every other target gets
+    `<column>_<table>`, the per-target column layout ili2db also uses.
+    """
+    column = next(c for c in table.columns if c.name == fk.columns[0])
+    used = {c.name for c in table.columns} - {column.name}
+    new_columns: list[Column] = []
+    new_fks: list[ForeignKey] = []
+    for index, (target, ref_table) in enumerate(targets):
+        if index == 0 and keeps_column:
+            name, fk_name = column.name, fk.name
+        else:
+            name = _dedup_name(_truncate_identifier(_sql_identifier(f"{column.name}_{ref_table}")), used)
+            fk_name = _truncate_identifier(_sql_identifier(f"{fk.name}_{ref_table}"))
+        new_columns.append(Column(name, column.sql_type, nullable=True))
+        new_fks.append(ForeignKey(fk_name, [name], ref_table, fk.ref_columns, ref_class_id=id(target)))
+    position = table.columns.index(column)
+    table.columns[position : position + 1] = new_columns
+    position = table.foreign_keys.index(fk)
+    table.foreign_keys[position : position + 1] = new_fks
+    count = " + ".join(f'CASE WHEN "{c.name}" IS NOT NULL THEN 1 ELSE 0 END' for c in new_columns)
+    check_name = _truncate_identifier(_sql_identifier(f"chk_{table.name}_{column.name}_target"))
+    table.check_constraints.append(CheckConstraint(check_name, f"({count}) {'<=' if column.nullable else '='} 1"))
+
+
 def build_tables(
     classes: list[MetaInstance],
     symbol_table: SymbolTable | None = None,
@@ -784,13 +833,22 @@ def build_tables(
     # A FK built from the target's bare Name (`_columns_for_class` cannot
     # know the suffix a name collision forces) is retargeted by identity
     # here - without it, a `REFERENCE TO` across two same-named classes
-    # (`BaseModel_SectoralPlans_V1_4.ili`'s LV03 and LV95 `Facility`) both
-    # point at whichever one happened to take the unsuffixed table name.
+    # (an LV03 and an LV95 `Facility`) both point at whichever one happened
+    # to take the unsuffixed table name.
+    converted = [c for c in classes if getattr(c, "Kind", None) == "Class"]
+    class_by_id = {id(c): c for c in converted}
     for table in tables:
-        for fk in table.foreign_keys:
-            resolved_name = table_name_by_class_id.get(fk.ref_class_id) if fk.ref_class_id is not None else None
-            if resolved_name is not None:
-                fk.ref_table = resolved_name
+        for fk in list(table.foreign_keys):
+            target = class_by_id.get(fk.ref_class_id) if fk.ref_class_id is not None else None
+            if target is None:
+                continue
+            targets = _reference_target_classes(target, converted)
+            if len(targets) <= 1:
+                fk.ref_table = table_name_by_class_id[id(targets[0] if targets else target)]
+                continue
+            _split_polymorphic_fk(
+                table, fk, [(t, table_name_by_class_id[id(t)]) for t in targets], keeps_column=targets[0] is target
+            )
 
     final_table_names = {t.name for t in tables}
     for table in tables:
