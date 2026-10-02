@@ -2,9 +2,10 @@
 
 `FontSymbol`'s composite geometry (`Font.Type = symbol`) tries, in order:
 a circular `FontSymbol_Surface` composite (native `CircleGraphic`s, see
-`font_symbol_geometry_to_circle_graphics`), a square one (native
-`RectangleGraphic`s, which is also how a diamond mark is expressed - see
-`font_symbol_geometry_to_rectangle_graphics`), an all-`FontSymbol_Image`
+`font_symbol_geometry_to_circle_graphics`), a square/triangle one (native
+`RectangleGraphic`s - also how a diamond mark is expressed - and
+`ClosedPathGraphic` triangles, see
+`font_symbol_geometry_to_polygon_graphics`), an all-`FontSymbol_Image`
 composite (see `font_symbol_geometry_to_image_graphics`), then a general
 SVG render of any mix of `FontSymbol_Polyline`/`FontSymbol_Surface`
 (see `font_symbol_geometry_to_svg_data_uri`). `Fill.hatch`/`Stroke.casing`/
@@ -23,6 +24,7 @@ from pycartosym import get_codec
 from pycartosym.models.styles import Metadata, Style, StylingRule, Symbolizer
 from pycartosym.models.symbolizers import (
     CircleGraphic,
+    ClosedPathGraphic,
     Fill,
     Font,
     ImageGraphic,
@@ -34,6 +36,7 @@ from pycartosym.models.symbolizers import (
     TextAlignment,
     TextGraphic,
     Transform2D,
+    UnitPoint,
 )
 from pycartosym.models.types import Angle, AngleUnit, RGBColor, UnitType, UnitValue
 from pycartosym.models.value_expressions import PropertyRef
@@ -347,35 +350,80 @@ def _square_from_surface(node: RawNode) -> tuple[float, float] | None:
     return sides[0], math.degrees(math.atan2(edges[0][1], edges[0][0])) % 90.0
 
 
-def font_symbol_geometry_to_rectangle_graphics(
-    library: SignLibrary, symbol_obj: XtfObject, *, scale: float = 1.0
-) -> list[RectangleGraphic] | None:
-    """Build one `RectangleGraphic` per square `FontSymbol_Surface` item in a `Font.Type = symbol` `FontSymbol`.
+# pycartosym's own canonical `triangle` (apex up, base as wide as the
+# height, in the unit box `se:Size` scales) - the only vertex order its
+# SLD writer maps back to `se:WellKnownName` triangle.
+_UNIT_TRIANGLE = [(0.0, 0.5), (-0.5, -0.5), (0.5, -0.5)]
 
-    Gives a native `se:Mark`/`se:WellKnownName` square - and, rotated 45
-    degrees, the diamond mark real Sachplan symbology uses - instead of
-    the inline-SVG `ImageGraphic` the generic fallback would produce.
-    See `_square_from_surface` for why only squares qualify.
+
+def _triangle_from_surface(node: RawNode) -> float | None:
+    """Read a `FontSymbol_Surface` boundary as the size of an SE `triangle` mark, or `None` for any other triangle.
+
+    Matched as a vertex set around the bounding-box centre, so neither
+    the ring's start vertex, its winding nor its offset matters.
+    """
+    ring = _boundary_ring(node)
+    if ring is None or len(ring) != 3:
+        return None
+    xs, ys = [p[0] for p in ring], [p[1] for p in ring]
+    size = max(ys) - min(ys)
+    if size < _SHAPE_TOLERANCE:
+        return None
+    cx, cy = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2
+    remaining = [((x - cx) / size, (y - cy) / size) for x, y in ring]
+    for expected in _UNIT_TRIANGLE:
+        match = next((p for p in remaining if math.dist(p, expected) < _SHAPE_TOLERANCE), None)
+        if match is None:
+            return None
+        remaining.remove(match)
+    return size
+
+
+def _polygon_mark_graphic(
+    library: SignLibrary, structure_node: RawNode, scale: float
+) -> RectangleGraphic | ClosedPathGraphic | None:
+    geometry_node = next((c for c in structure_node.children if c.tag == "Geometry"), None)
+    if geometry_node is None:
+        return None
+    square = _square_from_surface(geometry_node)
+    if square is not None:
+        side, orientation = square
+        return RectangleGraphic(
+            type="Rectangle",
+            width=meters(side * scale),
+            height=meters(side * scale),
+            fill=_surface_fill(library, structure_node),
+            transform=Transform2D(orientation=orientation) if orientation > _SHAPE_TOLERANCE else None,
+        )
+    size = _triangle_from_surface(geometry_node)
+    if size is not None:
+        return ClosedPathGraphic(
+            type="ClosedPath",
+            nodes=[UnitPoint(x=meters(x * size * scale), y=meters(y * size * scale)) for x, y in _UNIT_TRIANGLE],
+            fill=_surface_fill(library, structure_node),
+        )
+    return None
+
+
+def font_symbol_geometry_to_polygon_graphics(
+    library: SignLibrary, symbol_obj: XtfObject, *, scale: float = 1.0
+) -> list[RectangleGraphic | ClosedPathGraphic] | None:
+    """Build one native mark per `FontSymbol_Surface` item that is a square or an SE `triangle`, else `None`.
+
+    Gives a native `se:Mark`/`se:WellKnownName` - a square, the diamond
+    real Sachplan symbology uses (a square turned 45 degrees), or a
+    triangle - instead of the inline-SVG `ImageGraphic` fallback. See
+    `_square_from_surface` for why oblong rectangles don't qualify.
     """
     structure_nodes = _font_symbol_items(symbol_obj, "FontSymbol_Surface")
     if structure_nodes is None:
         return None
-    graphics: list[RectangleGraphic] = []
+    graphics: list[RectangleGraphic | ClosedPathGraphic] = []
     for structure_node in structure_nodes:
-        geometry_node = next((c for c in structure_node.children if c.tag == "Geometry"), None)
-        square = _square_from_surface(geometry_node) if geometry_node is not None else None
-        if square is None:
+        graphic = _polygon_mark_graphic(library, structure_node, scale)
+        if graphic is None:
             return None
-        side, orientation = square
-        graphics.append(
-            RectangleGraphic(
-                type="Rectangle",
-                width=meters(side * scale),
-                height=meters(side * scale),
-                fill=_surface_fill(library, structure_node),
-                transform=Transform2D(orientation=orientation) if orientation > _SHAPE_TOLERANCE else None,
-            )
-        )
+        graphics.append(graphic)
     return graphics or None
 
 
@@ -582,7 +630,7 @@ def symbol_sign_object_to_marker(library: SignLibrary, obj: XtfObject) -> Marker
 
     `Font.Type = text` (`Symbol` -> `FontSymbol` -> `Font`) builds a
     single glyph `TextGraphic`; `Font.Type = symbol` tries the native
-    shape builders (circle, then square/diamond), then
+    shape builders (circle, then square/diamond/triangle), then
     `font_symbol_geometry_to_image_graphics` (a project-extension
     `FontSymbol_Image`, see its own docstring), and finally an inline-SVG
     render of any remaining mix. Verified against real corpus data
@@ -610,7 +658,7 @@ def symbol_sign_object_to_marker(library: SignLibrary, obj: XtfObject) -> Marker
             scale = float(scale_text) if scale_text else 1.0
             elements = (
                 font_symbol_geometry_to_circle_graphics(library, symbol_obj, scale=scale)
-                or font_symbol_geometry_to_rectangle_graphics(library, symbol_obj, scale=scale)
+                or font_symbol_geometry_to_polygon_graphics(library, symbol_obj, scale=scale)
                 or font_symbol_geometry_to_image_graphics(symbol_obj)
             )
             if elements is None:

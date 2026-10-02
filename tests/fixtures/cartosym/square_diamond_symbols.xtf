@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<!-- Synthetic SIGN BASKET data: two Font.Type = symbol FontSymbols whose
-     geometry is a straight-segment square boundary, one axis-aligned and
-     one turned 45 degrees (a diamond). Real point-symbol Sachplan
-     symbology (Sachplan Asyl's published SLD) uses both marks; SE 1.1.0
-     has no `diamond` well-known name, so the diamond has to reach SLD as
-     a rotated square. See tests/fixtures/cartosym/NOTICE. -->
+<!-- Synthetic SIGN BASKET data: Font.Type = symbol FontSymbols whose
+     geometry is a straight-segment polygon boundary - an axis-aligned
+     square, the same square turned 45 degrees (a diamond), an oblong
+     rectangle, and an apex-up triangle. Real point-symbol Sachplan
+     symbology (Sachplan Asyl's published SLD) uses the diamond and the
+     triangle; SE 1.1.0 has no `diamond` well-known name, so the diamond
+     has to reach SLD as a rotated square. See tests/fixtures/cartosym/NOTICE. -->
 
 <ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS"
   xmlns="http://www.interlis.ch/xtf/2.4/StandardSymbology">
@@ -93,10 +94,57 @@
                </FontSymbol_Surface>
             </Geometry>
          </FontSymbol>
+         <FontSymbol ili:tid="23">
+            <Name>Triangle</Name>
+            <Font ili:ref="10"></Font>
+            <Geometry>
+               <FontSymbol_Surface>
+                  <FillColor ili:ref="1"></FillColor>
+                  <Geometry>
+                     <SURFACE>
+                        <BOUNDARY>
+                           <POLYLINE>
+                              <COORD><C1>2</C1><C2>1</C2></COORD>
+                              <COORD><C1>3</C1><C2>3</C2></COORD>
+                              <COORD><C1>4</C1><C2>1</C2></COORD>
+                              <COORD><C1>2</C1><C2>1</C2></COORD>
+                           </POLYLINE>
+                        </BOUNDARY>
+                     </SURFACE>
+                  </Geometry>
+               </FontSymbol_Surface>
+            </Geometry>
+         </FontSymbol>
+         <FontSymbol ili:tid="24">
+            <Name>FlatTriangle</Name>
+            <Font ili:ref="10"></Font>
+            <Geometry>
+               <FontSymbol_Surface>
+                  <FillColor ili:ref="1"></FillColor>
+                  <Geometry>
+                     <SURFACE>
+                        <BOUNDARY>
+                           <POLYLINE>
+                              <COORD><C1>-1</C1><C2>-0.5</C2></COORD>
+                              <COORD><C1>1</C1><C2>-0.5</C2></COORD>
+                              <COORD><C1>0</C1><C2>0.5</C2></COORD>
+                           </POLYLINE>
+                        </BOUNDARY>
+                     </SURFACE>
+                  </Geometry>
+               </FontSymbol_Surface>
+            </Geometry>
+         </FontSymbol>
          <SymbolSign ili:tid="100">
             <ili:Name>DiamondMark</ili:Name>
             <Color ili:ref="1"></Color>
             <Symbol ili:ref="21"></Symbol>
+         </SymbolSign>
+         <SymbolSign ili:tid="101">
+            <ili:Name>TriangleMark</ili:Name>
+            <Color ili:ref="1"></Color>
+            <Symbol ili:ref="23"></Symbol>
+            <Scale>7.5</Scale>
          </SymbolSign>
       </StandardSigns>
    </ili:datasection>

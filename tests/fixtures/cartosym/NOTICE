@@ -42,9 +42,10 @@ as `Point_Graphics_Signatures.xtf` above (`FGDM4GS`,
 `surface_sign_object_to_hatch_pattern` end to end.
 
 `square_diamond_symbols.xtf`: synthetic (not corpus-sourced) `SIGN
-BASKET` data - three straight-segment `FontSymbol_Surface` symbols (an
-axis-aligned square, a diamond, an oblong rectangle) exercising
-`font_symbol_geometry_to_rectangle_graphics`. Hand-built because no
+BASKET` data - straight-segment `FontSymbol_Surface` symbols (an
+axis-aligned square, a diamond, an oblong rectangle, an SE-proportioned
+triangle and a flatter one) exercising
+`font_symbol_geometry_to_polygon_graphics`. Hand-built because no
 vendored corpus `.xtf` carries a polygonal mark of a single shape; the
 marks themselves are real (Sachplan Asyl's published SLD uses a
-`diamond` and a `square` `se:Mark`).
+`diamond` and a `triangle` `se:Mark`).
