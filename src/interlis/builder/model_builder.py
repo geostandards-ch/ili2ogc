@@ -1413,6 +1413,13 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
             role=binding.get("role"),
             rule=rule_name,
         )
+        if isinstance(value, list):
+            # A `multi` reference binding (e.g. roleDef's `A OR B` targets):
+            # each ForwardRef in the list is resolved in place.
+            field = self._resolved_field_name(instance, key, binding)
+            for item in value:
+                if isinstance(item, ForwardRef):
+                    self.forward_refs.register_pending(item, instance, field)
 
     def _resolved_field_name(self, instance: MetaInstance, key: str, binding: dict) -> str:
         role = binding.get("role")

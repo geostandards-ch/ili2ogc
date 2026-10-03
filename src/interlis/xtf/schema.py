@@ -191,16 +191,19 @@ def _role_is_required(role: MetaInstance) -> bool:
 
 
 def _role_is_multi(role: MetaInstance) -> bool:
-    """Check whether the role's cardinality is > 1 (Multiplicity.Max == '*').
+    """Check whether the role's maximum cardinality is > 1.
 
-    Min/Max are TEXT strings (ilismeta16-classes.yml, Multiplicity.own.Max:
-    type TEXT), never absent when a cardinality() clause is present;
-    `Multiplicity is None` (no clause in the .ili) means the default
-    cardinality, never > 1 - e.g. a roleDef with no explicit cardinality(),
-    such as `rMeasurementLocation -<#> MeasurementLocation;`.
+    Min/Max are TEXT strings (`Max` may be `'*'` or `'same_as_Min'`). With no
+    cardinality clause a role is `{0..*}`, except a composition role
+    (`-<#>`), which is `{0..1}` (eCH-0031 V2.1.0 §3.7.3).
     """
     mult = getattr(role, "Multiplicity", None)
-    return isinstance(mult, MetaInstance) and getattr(mult, "Max", None) == "*"
+    if not isinstance(mult, MetaInstance):
+        return getattr(role, "Strongness", None) != "Comp"
+    maximum = getattr(mult, "Max", None)
+    if maximum == "same_as_Min":
+        maximum = getattr(mult, "Min", None)
+    return maximum == "*" or (isinstance(maximum, str) and maximum.isdigit() and int(maximum) > 1)
 
 
 def multi_geometry_element(structure: MetaInstance | None) -> "ResolvedAttribute | None":
@@ -403,6 +406,20 @@ def reference_target_class(resolved: ResolvedAttribute) -> MetaInstance | None:
     if resolved.type_kind == "Class":
         return resolved.type_instance
     return None
+
+
+def reference_target_classes(resolved: ResolvedAttribute) -> list[MetaInstance]:
+    """Every class declared as a reference/role target - several for a role `-- A OR B`."""
+    if resolved.type_kind == "Class" and resolved.attr._qualified_class.rsplit(".", 1)[-1] == "Role":
+        alternatives = _all_class_related_base_classes(resolved.attr)
+    elif resolved.type_kind == "ReferenceType" and resolved.type_instance is not None:
+        alternatives = _all_class_related_base_classes(resolved.type_instance)
+    else:
+        alternatives = []
+    if alternatives:
+        return alternatives
+    first = reference_target_class(resolved)
+    return [first] if first is not None else []
 
 
 def is_class_compatible(actual: MetaInstance, declared: MetaInstance) -> bool:

@@ -34,7 +34,7 @@ from interlis.xtf.schema import (
     is_class_compatible,
     line_coord_type,
     reference_external_status,
-    reference_target_class,
+    reference_target_classes,
     resolve_attribute,
     resolve_class,
     restriction_candidates,
@@ -1024,11 +1024,12 @@ def _validate_resolved_attr(
             # the reference/role. Silent (no issue) if either class can't
             # be established with certainty, or if compatible - never a
             # false positive on cross-model uncertainty.
-            declared = reference_target_class(resolved)
+            alternatives = reference_target_classes(resolved)
+            declared = alternatives[0] if alternatives else None
             if declared is not None:
                 target_obj = tid_index[ref]
                 actual_cls = resolve_class(target_obj.qualified_class, symbol_table=symbol_table, repository=repository)
-                if actual_cls is not None and not is_class_compatible(actual_cls, declared):
+                if actual_cls is not None and not any(is_class_compatible(actual_cls, alt) for alt in alternatives):
                     issues.append(
                         ValidationIssue(
                             "error",

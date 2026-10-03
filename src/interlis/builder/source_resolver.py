@@ -192,6 +192,11 @@ def resolve_source(
                 nodes = []
         if wrap_map:
             return [_resolve_multi_node(n, builder, rule, wrap_map) for n in nodes]
+        if "path" in source:
+            # Each occurrence is a sub-rule bag: extract the same key from all
+            # of them (e.g. roleDef's `A OR B` alternative targets).
+            bags = [_resolve_node(n, builder, rule) for n in nodes]
+            return [bag.get(source["path"]) for bag in bags if isinstance(bag, dict)]
         return [_resolve_node(n, builder, rule) for n in nodes]
 
     # --- alternatives (alt_token / alt_rule / alt_token_or_rule /

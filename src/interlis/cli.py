@@ -347,7 +347,7 @@ def _fold_in_dependency_models(classes, views, root_table, repository, class_sym
     if repository is None:
         return
     from interlis.convert.jsonschema import _nested_class
-    from interlis.xtf.schema import reference_target_class, resolve_attribute, schema_members_of
+    from interlis.xtf.schema import reference_target_classes, resolve_attribute, schema_members_of
 
     needed_ids: set[int] = {
         id(rbv.BaseView)
@@ -364,9 +364,7 @@ def _fold_in_dependency_models(classes, views, root_table, repository, class_sym
         for attr in members.values():
             resolved = resolve_attribute(attr)
             if resolved.type_kind in ("Class", "ReferenceType"):
-                target = reference_target_class(resolved)
-                if isinstance(target, MetaInstance):
-                    needed_ids.add(id(target))
+                needed_ids.update(id(t) for t in reference_target_classes(resolved))
     if not needed_ids:
         return
 
@@ -402,9 +400,7 @@ def _fold_in_dependency_models(classes, views, root_table, repository, class_sym
             if isinstance(nested, MetaInstance):
                 queue.append(nested)
             if resolved.type_kind in ("Class", "ReferenceType"):
-                target = reference_target_class(resolved)
-                if isinstance(target, MetaInstance):
-                    queue.append(target)
+                queue.extend(reference_target_classes(resolved))
 
     # Declaration order, not discovery order: `needed_ids` is a set of
     # `id()`s, so discovery order follows memory addresses - and decides

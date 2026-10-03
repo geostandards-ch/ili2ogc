@@ -21,6 +21,7 @@ from interlis.xtf.schema import (
     is_class_compatible,
     multi_geometry_element,
     reference_target_class,
+    reference_target_classes,
     resolve_attribute,
     schema_members_of,
 )
@@ -197,7 +198,13 @@ def _columns_for_class(
             on_delete = "CASCADE" if getattr(attr, "Strongness", None) == "Comp" else None
             foreign_keys.append(
                 ForeignKey(
-                    fk_name, [col_name], target_table, [OID_COLUMN], ref_class_id=id(target), on_delete=on_delete
+                    fk_name,
+                    [col_name],
+                    target_table,
+                    [OID_COLUMN],
+                    ref_class_id=id(target),
+                    ref_alternative_ids=tuple(id(t) for t in reference_target_classes(resolved)),
+                    on_delete=on_delete,
                 )
             )
             continue
@@ -969,7 +976,12 @@ def build_tables(
             target = class_by_id.get(fk.ref_class_id) if fk.ref_class_id is not None else None
             if target is None:
                 continue
-            targets = _reference_target_classes(target, converted)
+            targets: list[MetaInstance] = []
+            for alternative_id in fk.ref_alternative_ids or (fk.ref_class_id,):
+                alternative = class_by_id.get(alternative_id)
+                for candidate in _reference_target_classes(alternative, converted) if alternative else []:
+                    if all(candidate is not t for t in targets):
+                        targets.append(candidate)
             if len(targets) <= 1:
                 fk.ref_table = table_name_by_class_id[id(targets[0] if targets else target)]
                 continue

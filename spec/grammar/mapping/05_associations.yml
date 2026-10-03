@@ -118,15 +118,18 @@ roleDef:
       source:
         field: restrictedClassOrAssRef
         path: BaseRef
+        multi: true
         optional: true
       note: 'No binding used to cover the target class reference
         of restrictedClassOrAssRef().
         Role EXTENDS ReferenceType EXTENDS ClassRelatedType (ilismeta16-classes.yml): the same
         BaseClass association (CRT{0..*} ClassRelatedType <-> BaseClass{0..*} Class, ilismeta16-associations.yml)
         already used for any other ClassRelatedType applies here. restrictedClassOrAssRef() returns
-        a bag {BaseRef: ForwardRef, AnyClass, Restrictions} - BaseRef is the resolved base name. Covers
-        only the first occurrence (the usual case); the ''(OR restrictedClassOrAssRef)*'' loop for multiple
-        restrictions is out of scope here.'
+        a bag {BaseRef: ForwardRef, AnyClass, Restrictions} - BaseRef is the resolved base name. `multi:
+        true` binds every alternative of `A OR B` (eCH-0031 V2.1.0 §3.7.1: "Einer Rolle können auch
+        alternativ verschiedene Klassen ... zugeordnet sein"), real example CHBase_Part4 V2
+        `Supervisor (EXTERNAL) -<> {1..1} Agency OR ...AdministrativeElement`; BaseClass (0..*) holds them
+        all, the first being the primary target.'
     EmbeddedTransfer:
       source:
         field: EXTERNAL
