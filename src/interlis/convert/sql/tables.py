@@ -29,7 +29,7 @@ from interlis.xtf.schema import (
 from .expressions import _MAX_STRUCT_FLATTEN_DEPTH, _expression_to_sql, _UnsupportedCheckExpression
 from .identifiers import OID_COLUMN, _dedup_name, _sql_identifier, _truncate_identifier
 from .model import CheckConstraint, Column, ForeignKey, Table, UniqueConstraint
-from .types import _GEOMETRY_KINDS, _geometry_column_info, _scalar_sql_type
+from .types import _GEOMETRY_KINDS, _domain_check, _geometry_column_info, _scalar_sql_type
 
 
 def _avoid_identity_collision(columns: list[Column]) -> dict[str, str]:
@@ -229,7 +229,9 @@ def _columns_for_class(
 
         scalar_type = _scalar_sql_type(resolved)
         if scalar_type is not None:
-            columns.append(Column(col_name, scalar_type, nullable=not resolved.mandatory))
+            columns.append(
+                Column(col_name, scalar_type, nullable=not resolved.mandatory, check=_domain_check(resolved))
+            )
             continue
 
         if resolved.type_kind is None:
@@ -323,7 +325,7 @@ def _build_child_table(
         scalar_type = _scalar_sql_type(synthetic)
         if scalar_type is None:
             return None, {}, f"unsupported element type {base_kind!r}", []
-        columns.append(Column("value", scalar_type, nullable=False))
+        columns.append(Column("value", scalar_type, nullable=False, check=_domain_check(synthetic)))
 
     renamed = _avoid_identity_collision(columns)
     table = Table(name=child_table_name, columns=columns, foreign_keys=foreign_keys, notes=notes)

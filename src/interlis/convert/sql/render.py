@@ -34,6 +34,7 @@ def render_postgresql(tables: list[Table], views: tuple[SqlView, ...] = ()) -> s
             lines.append(f"    {_quote(column.name)} {sql_type}{null_clause}")
         for unique in table.unique_constraints:
             lines.append(f"    CONSTRAINT {unique.name} UNIQUE ({_quote_list(unique.columns)})")
+        lines += _domain_checks(table)
         for check in table.check_constraints:
             lines.append(f"    CONSTRAINT {check.name} CHECK ({check.expression})")
         body = ",\n".join(lines)
@@ -63,6 +64,15 @@ def render_postgresql(tables: list[Table], views: tuple[SqlView, ...] = ()) -> s
     statements += _render_views(views)
     statements += _render_view_unique_triggers_postgresql(views)
     return "\n".join(statements) + "\n"
+
+
+def _domain_checks(table: Table) -> list[str]:
+    return [
+        f"    CONSTRAINT {_truncate_identifier(f'chk_{table.name}_{c.name}_domain')} "
+        f"CHECK ({c.check.format(col=_quote(c.name))})"
+        for c in table.columns
+        if c.check
+    ]
 
 
 def _foreign_key_columns(table: Table) -> list[str]:
@@ -119,6 +129,7 @@ def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = ()) -> str:
                 f"REFERENCES {_quote(fk.ref_table)} ({_quote_list(fk.ref_columns)}){_on_delete(fk)} "
                 "DEFERRABLE INITIALLY DEFERRED",
             )
+        lines += _domain_checks(table)
         for check in table.check_constraints:
             lines.append(f"    CONSTRAINT {check.name} CHECK ({check.expression})")
         body = ",\n".join(lines)
@@ -166,6 +177,7 @@ _GPKG_TYPES = {
     "date": "DATE",
     "timestamp": "DATETIME",
     "time": "TEXT",
+    "bytea": "BLOB",
 }
 
 
@@ -173,6 +185,8 @@ def _gpkg_type(sql_type: str) -> str:
     """The GeoPackage 1.3 column type name for a portable SQL type (`varchar(n)` -> `TEXT(n)`); GPKG has no TIME."""
     if sql_type.startswith("varchar(") and sql_type.endswith(")"):
         return f"TEXT{sql_type[len('varchar'):]}"
+    if sql_type.startswith("numeric("):
+        return "DOUBLE"
     return _GPKG_TYPES.get(sql_type, sql_type)
 
 

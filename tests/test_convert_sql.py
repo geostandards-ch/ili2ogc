@@ -292,7 +292,7 @@ END Foo.
     assert types["kategorie"] == "text"
     assert types["active"] == "boolean"
     assert types["created"] == "date"
-    assert types["blob"] == "text"
+    assert types["blob"] == "bytea"
 
 
 def test_name_and_uri_text_kinds_get_exact_bounds():

@@ -24,6 +24,9 @@ class Column:
     """
     srid: int | None = None
     """EPSG numeric code - set ONLY alongside `geometry_type`."""
+    check: str | None = None
+    """A value-domain CHECK on this column alone, `{col}` standing for its quoted name (filled at render time, so a
+    later rename still applies)."""
 
 
 @dataclass

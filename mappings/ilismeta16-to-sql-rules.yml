@@ -34,7 +34,11 @@ concepts:
   NumType:
     qualified_name: IlisMeta16.ModelData.NumType
     status: mapped
-    note: "integer if Min/Max both parse as decimal-point-free integers (reuses convert/jsonschema.py's _is_integer_range), else numeric."
+    note: >
+      integer if Min/Max both parse as decimal-point-free integers (reuses
+      convert/jsonschema.py's _is_integer_range), else numeric(p,s) covering
+      both bounds' digits (as ili2db), plus CHECK (col BETWEEN Min AND Max)
+      when both bounds are plain numbers.
 
   TextType:
     qualified_name: IlisMeta16.ModelData.TextType
@@ -49,9 +53,11 @@ concepts:
     qualified_name: IlisMeta16.ModelData.EnumType
     status: mapped
     note: >
-      Plain `text` column - no CHECK(... IN (...)) enforcing the enum's
-      value set (deliberately deferred, see Constraint entry below - not a
-      technical limit, CHECK(IN(...)) would be dialect-neutral and easy).
+      `text` column with CHECK (col IN (...)) over every dotted path of the
+      enumeration (`xtf.schema.enum_values`, nodes included - eCH-0031
+      §4.3.11.3). A table carries its own class's attribute type, so an
+      EXTENDED attribute's extended enumeration is checked on its subclass
+      table; OTHERS is never a stored value (eCH-0031 §3.8.2).
 
   BooleanType:
     qualified_name: IlisMeta16.ModelData.BooleanType
@@ -70,7 +76,7 @@ concepts:
   BlackboxType:
     qualified_name: IlisMeta16.ModelData.BlackboxType
     status: mapped
-    note: "Plain text column (same conservative choice as the JSON Schema pipeline)."
+    note: "Kind=Binary -> bytea (GeoPackage BLOB); Kind=Xml -> text."
 
   CoordType:
     qualified_name: IlisMeta16.ModelData.CoordType

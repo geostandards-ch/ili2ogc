@@ -9,7 +9,7 @@ from __future__ import annotations
 from interlis.convert.jsonfg import _meta_value
 from interlis.convert.jsonschema import _is_integer_range
 from interlis.metamodel.instance import MetaInstance
-from interlis.xtf.schema import ResolvedAttribute, coord_axes, line_coord_type
+from interlis.xtf.schema import ResolvedAttribute, coord_axes, enum_values, line_coord_type
 
 _GEOMETRY_KINDS = {"CoordType", "LineType"}
 
@@ -58,8 +58,10 @@ def _scalar_sql_type(resolved: ResolvedAttribute) -> str | None:
     kind = resolved.type_kind
     inst = resolved.type_instance
     if kind == "NumType" and inst is not None:
-        is_int = _is_integer_range(getattr(inst, "Min", None), getattr(inst, "Max", None))
-        return "integer" if is_int else "numeric"
+        if _is_integer_range(getattr(inst, "Min", None), getattr(inst, "Max", None)):
+            return "integer"
+        precision = _decimal_precision(getattr(inst, "Min", None), getattr(inst, "Max", None))
+        return f"numeric({precision[0]},{precision[1]})" if precision else "numeric"
     if kind == "TextType" and inst is not None:
         text_kind = getattr(inst, "Kind", None)
         if text_kind == "Name":
@@ -82,5 +84,47 @@ def _scalar_sql_type(resolved: ResolvedAttribute) -> str | None:
             getattr(inst, "Format", None), "text"
         )
     if kind == "BlackboxType":
-        return "text"
+        return "bytea" if getattr(inst, "Kind", None) == "Binary" else "text"
+    return None
+
+
+def _numeric_bound(raw: str | None) -> str | None:
+    """`raw` as a SQL numeric literal (no leading '+'), or `None` when it is not a plain number."""
+    if raw is None:
+        return None
+    text = raw.strip().removeprefix("+")
+    try:
+        float(text)
+    except ValueError:
+        return None
+    return text
+
+
+def _decimal_precision(min_raw: str | None, max_raw: str | None) -> tuple[int, int] | None:
+    """`(precision, scale)` covering both bounds' digits (`0.0 .. 10.0` -> `(3, 1)`), as ili2db derives decimal(p,s)."""
+    bounds = [_numeric_bound(b) for b in (min_raw, max_raw)]
+    if None in bounds or any("e" in b.lower() for b in bounds):
+        return None
+    parts = [b.lstrip("-").partition(".") for b in bounds]
+    scale = max(len(frac) for _, _, frac in parts)
+    integer_digits = max(len(whole.lstrip("0")) or 1 for whole, _, _ in parts)
+    return integer_digits + scale, scale
+
+
+def _domain_check(resolved: ResolvedAttribute) -> str | None:
+    """A CHECK template (`{col}` = the column) for a numeric range or an enumeration, else `None`.
+
+    Each table carries its own class's attribute type (an EXTENDED attribute's extended enumeration in a
+    subclass table), so the values listed are exactly those its rows may hold.
+    """
+    inst = resolved.type_instance
+    if resolved.type_kind == "NumType" and inst is not None:
+        low, high = _numeric_bound(getattr(inst, "Min", None)), _numeric_bound(getattr(inst, "Max", None))
+        return f"{{col}} BETWEEN {low} AND {high}" if low is not None and high is not None else None
+    if resolved.type_kind == "EnumType" and inst is not None:
+        values = enum_values(inst)
+        if not values:
+            return None
+        quoted = ", ".join("'" + v.replace("'", "''") + "'" for v in sorted(values))
+        return f"{{col}} IN ({quoted})"
     return None

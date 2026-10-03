@@ -4,7 +4,9 @@ CREATE TABLE "liegenschaft" (
     "fiktiv" boolean NOT NULL,
     "flaechenmass" integer NOT NULL,
     "qualitaetsstandard" text NOT NULL,
-    "grundstueck" text NOT NULL
+    "grundstueck" text NOT NULL,
+    CONSTRAINT chk_liegenschaft_flaechenmass_domain CHECK ("flaechenmass" BETWEEN 1 AND 999999999),
+    CONSTRAINT chk_liegenschaft_qualitaetsstandard_domain CHECK ("qualitaetsstandard" IN ('AV93', 'PN'))
 );
 -- NOTE (liegenschaft): [SQL-GEOM-NO-CRS] Geometrie: vertex CoordType not resolved - provide the geometry base model via --repo
 -- NOTE (liegenschaft): [BUILD-TYPE-UNRESOLVED] Streitig: attribute type not resolved by the model builder - provide the imported model via --repo
@@ -14,7 +16,8 @@ CREATE TABLE "selbstaendigesdauerndesrecht" (
     "nummerteilgrundstueck" varchar(12),
     "flaechenmass" integer NOT NULL,
     "istbaurecht" boolean,
-    "grundstueck" text NOT NULL
+    "grundstueck" text NOT NULL,
+    CONSTRAINT chk_selbstaendigesdauerndesrecht_flaechenmass_domain CHECK ("flaechenmass" BETWEEN 1 AND 999999999)
 );
 -- NOTE (selbstaendigesdauerndesrecht): [SQL-GEOM-NO-CRS] Geometrie: vertex CoordType not resolved - provide the geometry base model via --repo
 -- NOTE (selbstaendigesdauerndesrecht): [BUILD-TYPE-UNRESOLVED] Streitig: attribute type not resolved by the model builder - provide the imported model via --repo
@@ -23,7 +26,8 @@ CREATE TABLE "bergwerk" (
     "id" text PRIMARY KEY,
     "nummerteilgrundstueck" varchar(12),
     "flaechenmass" integer NOT NULL,
-    "grundstueck" text NOT NULL
+    "grundstueck" text NOT NULL,
+    CONSTRAINT chk_bergwerk_flaechenmass_domain CHECK ("flaechenmass" BETWEEN 1 AND 999999999)
 );
 -- NOTE (bergwerk): [SQL-GEOM-NO-CRS] Geometrie: vertex CoordType not resolved - provide the geometry base model via --repo
 -- NOTE (bergwerk): [BUILD-TYPE-UNRESOLVED] Streitig: attribute type not resolved by the model builder - provide the imported model via --repo
@@ -36,25 +40,31 @@ CREATE TABLE "gsnachfuehrung" (
     "mutationsart" text NOT NULL,
     "gueltigereintrag" timestamp NOT NULL,
     "grundbucheintrag" timestamp,
-    CONSTRAINT uq_gsnachfuehrung_nbident_identifikator UNIQUE ("nbident", "identifikator")
+    CONSTRAINT uq_gsnachfuehrung_nbident_identifikator UNIQUE ("nbident", "identifikator"),
+    CONSTRAINT chk_gsnachfuehrung_mutationsart_domain CHECK ("mutationsart" IN ('AbschlussProjektmutation', 'Normal', 'Projektmutation'))
 );
 -- NOTE (gsnachfuehrung): [SQL-GEOM-NO-CRS] Perimeter: vertex CoordType not resolved - provide the geometry base model via --repo
 CREATE TABLE "grenzpunkt" (
     "id" text PRIMARY KEY,
     "nbident" varchar(12),
     "nummer" varchar(12),
-    "hoehengeometrie" numeric,
-    "lagegenauigkeit" numeric NOT NULL,
+    "hoehengeometrie" numeric(7,3),
+    "lagegenauigkeit" numeric(4,3) NOT NULL,
     "istlagezuverlaessig" boolean NOT NULL,
-    "hoehengenauigkeit" numeric,
+    "hoehengenauigkeit" numeric(4,3),
     "isthoehenzuverlaessig" boolean,
     "punktzeichen" text NOT NULL,
     "isthoheitsgrenzpunkt" boolean NOT NULL,
     "isthoheitsgrenzsteinalt" boolean NOT NULL,
     "istexaktdefiniert" boolean NOT NULL,
-    "symbolori" numeric,
+    "symbolori" numeric(4,1),
     "entstehung" text NOT NULL,
     "untergang" text,
+    CONSTRAINT chk_grenzpunkt_hoehengeometrie_domain CHECK ("hoehengeometrie" BETWEEN -200.000 AND 5000.000),
+    CONSTRAINT chk_grenzpunkt_lagegenauigkeit_domain CHECK ("lagegenauigkeit" BETWEEN 0.001 AND 7.000),
+    CONSTRAINT chk_grenzpunkt_hoehengenauigkeit_domain CHECK ("hoehengenauigkeit" BETWEEN 0.001 AND 7.000),
+    CONSTRAINT chk_grenzpunkt_punktzeichen_domain CHECK ("punktzeichen" IN ('Bolzen', 'Kreuz', 'Kunststoffzeichen', 'Pfahl', 'Rohr', 'Stein', 'unversichert', 'weitere')),
+    CONSTRAINT chk_grenzpunkt_symbolori_domain CHECK ("symbolori" BETWEEN 0.0 AND 399.9),
     CONSTRAINT chk_grenzpunkt_ch040201 CHECK ((("hoehengeometrie" IS NOT NULL) = ("hoehengenauigkeit" IS NOT NULL))),
     CONSTRAINT chk_grenzpunkt_ch040202 CHECK ((("hoehengeometrie" IS NOT NULL) = ("isthoehenzuverlaessig" IS NOT NULL))),
     CONSTRAINT chk_grenzpunkt_ch040203 CHECK (("istexaktdefiniert" OR ("punktzeichen" = 'unversichert')))
@@ -72,16 +82,23 @@ CREATE TABLE "grundstueck" (
     "gesamtflaechenmass" integer,
     "entstehung" text NOT NULL,
     "untergang" text,
+    CONSTRAINT chk_grundstueck_grundstuecksart_domain CHECK ("grundstuecksart" IN ('Bergwerk', 'Liegenschaft', 'SelbstaendigesDauerndesRecht')),
+    CONSTRAINT chk_grundstueck_gesamtflaechenmass_domain CHECK ("gesamtflaechenmass" BETWEEN 1 AND 999999999),
     CONSTRAINT chk_grundstueck_ch040701 CHECK (("istvollstaendig" = (NOT ("gesamtflaechenmass" IS NOT NULL))))
 );
 CREATE TABLE "grundstueck_textposition" (
     "id" text PRIMARY KEY,
     "grundstueck_fk" text NOT NULL,
-    "orientierung" numeric,
+    "orientierung" numeric(4,1),
     "darstellungin" text,
     "textgroesse" text,
     "hreferenzpunkt" text,
-    "vreferenzpunkt" text
+    "vreferenzpunkt" text,
+    CONSTRAINT chk_grundstueck_textposition_orientierung_domain CHECK ("orientierung" BETWEEN 0.0 AND 399.9),
+    CONSTRAINT chk_grundstueck_textposition_darstellungin_domain CHECK ("darstellungin" IN ('Basisplan', 'PlanFuerDasGrundbuch')),
+    CONSTRAINT chk_grundstueck_textposition_textgroesse_domain CHECK ("textgroesse" IN ('Gross', 'Klein', 'Mittel')),
+    CONSTRAINT chk_grundstueck_textposition_hreferenzpunkt_domain CHECK ("hreferenzpunkt" IN ('Center', 'Left', 'Right')),
+    CONSTRAINT chk_grundstueck_textposition_vreferenzpunkt_domain CHECK ("vreferenzpunkt" IN ('Base', 'Bottom', 'Cap', 'Half', 'Top'))
 );
 -- NOTE (grundstueck_textposition): [BUILD-TYPE-UNRESOLVED] Position: attribute type not resolved by the model builder - provide the imported model via --repo
 -- NOTE (grundstueck_textposition): [BUILD-TYPE-UNRESOLVED] Hinweisstrich: attribute type not resolved by the model builder - provide the imported model via --repo

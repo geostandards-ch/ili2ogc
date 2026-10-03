@@ -3,7 +3,9 @@ CREATE TABLE "person" (
     "name" text NOT NULL,
     "birthyear" integer,
     "kind" text,
-    "employer" text
+    "employer" text,
+    CONSTRAINT chk_person_birthyear_domain CHECK ("birthyear" BETWEEN 1800 AND 2100),
+    CONSTRAINT chk_person_kind_domain CHECK ("kind" IN ('Adult', 'Child'))
 );
 CREATE TABLE "company" (
     "id" text PRIMARY KEY,
