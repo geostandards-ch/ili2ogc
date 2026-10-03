@@ -371,6 +371,13 @@ def build_views(
             where = _view_where_conjuncts(getattr(view, "Where", None), resolver)
             if len(bases) > 1 and getattr(view, "Where", None) is None:
                 where += _auto_join_conditions(bases, symbol_for)
+                notes.append(
+                    _diag(
+                        "SQL-VIEW-JOIN-ASSOCIATION",
+                        "JOIN OF without WHERE is a cross product in INTERLIS; joined here along the association "
+                        "linking its bases",
+                    )
+                )
             constraint_notes, triggers = _view_unique_constraint_ddl(
                 view, vname, bases, tables_by_name, attr_col, where, extra_joins_present=bool(resolver.extra_joins)
             )
