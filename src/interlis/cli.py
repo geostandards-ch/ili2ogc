@@ -306,13 +306,37 @@ def cmd_convert(args: argparse.Namespace) -> int:
     return _finish(bag, args)
 
 
+def _inherited_topic_classes(root_table) -> list[MetaInstance]:
+    """Every non-abstract class of the base topics the root file's topics extend, transitively."""
+    found: list[MetaInstance] = []
+    visited: set[int] = set()
+    for instance in root_table.all_registered():
+        if not isinstance(instance, MetaInstance) or instance._qualified_class.rsplit(".", 1)[-1] != "SubModel":
+            continue
+        base = getattr(getattr(getattr(instance, "_twin", None), "Super", None), "_twin", None)
+        while base is not None and id(base) not in visited:
+            visited.add(id(base))
+            elements = getattr(base, "Element", None) or []
+            for element in elements if isinstance(elements, list) else [elements]:
+                if (
+                    isinstance(element, MetaInstance)
+                    and element._qualified_class.rsplit(".", 1)[-1] == "Class"
+                    and not getattr(element, "Abstract", False)
+                ):
+                    found.append(element)
+            base = getattr(getattr(getattr(base, "_twin", None), "Super", None), "_twin", None)
+    return found
+
+
 def _fold_in_dependency_models(classes, views, root_table, repository, class_symbol_tables) -> None:
     """Append the imported-model classes this conversion actually depends on to `classes` (in place).
 
-    "Depends on" = a VIEW base class, or the cross-model target of a
-    REFERENCE TO/embedded role, that lives in an IMPORTED model rather than
-    the root file - PLUS the STRUCTURE-containment closure of those
-    (a nested structure needs its own table too). Only models
+    "Depends on" = a VIEW base class, the cross-model target of a
+    REFERENCE TO/embedded role, or a class of an imported base topic that a
+    root `TOPIC ... EXTENDS` inherits (its baskets carry those objects),
+    that lives in an IMPORTED model rather than the root file - PLUS the
+    STRUCTURE-containment closure of those (a nested structure needs its
+    own table too). Only models
     `builder.build()` already pulled in via `--repo`
     (`repository.loaded_models()`) are considered. A base class reached only
     through inheritance is NOT folded: SQL is table-per-concrete-class with
@@ -331,6 +355,7 @@ def _fold_in_dependency_models(classes, views, root_table, repository, class_sym
         for rbv in (getattr(view, "RenamedBaseView", None) or [])
         if isinstance(getattr(rbv, "BaseView", None), MetaInstance)
     }
+    needed_ids.update(id(cls) for cls in _inherited_topic_classes(root_table))
     for cls in list(classes):
         try:
             members = schema_members_of(cls, root_table)
@@ -363,6 +388,8 @@ def _fold_in_dependency_models(classes, views, root_table, repository, class_sym
         cls = queue.pop()
         if id(cls) in keep or id(cls) in already_ids:
             continue
+        if getattr(cls, "Abstract", False) and getattr(cls, "Kind", None) == "Class":
+            continue  # never instantiated: its concrete subclasses hold the rows (and FK targets)
         keep[id(cls)] = cls
         model_table = loaded.get(id(cls), (None, root_table))[1]
         try:

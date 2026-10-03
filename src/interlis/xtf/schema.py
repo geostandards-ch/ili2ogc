@@ -311,7 +311,11 @@ def resolve_attribute(attr: MetaInstance) -> ResolvedAttribute:
     type_instance = getattr(attr, "Type", None)
     type_instance = type_instance if isinstance(type_instance, MetaInstance) else None
     type_kind = type_instance._qualified_class.rsplit(".", 1)[-1] if type_instance is not None else None
-    mandatory = bool(getattr(type_instance, "Mandatory", False)) if type_instance is not None else False
+    # A MANDATORY STRUCTURE-typed attribute carries the flag itself (its
+    # Type stays the shared declared STRUCTURE, see the builder).
+    mandatory = bool(getattr(attr, "Mandatory", False)) or (
+        bool(getattr(type_instance, "Mandatory", False)) if type_instance is not None else False
+    )
     return ResolvedAttribute(attr=attr, type_instance=type_instance, type_kind=type_kind, mandatory=mandatory)
 
 

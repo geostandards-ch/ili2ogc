@@ -153,11 +153,16 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
         SAME registered instance (real corpus-wide, 292 occurrences).
         Runs AFTER `resolve_all()`: a shallow clone with `Mandatory`
         forced `True` replaces `instance.Type`, leaving the original
-        SHARED instance untouched for every other attribute.
+        SHARED instance untouched for every other attribute. A STRUCTURE
+        type is never cloned (a copy is no longer `is`-identical to the
+        declared STRUCTURE): `Mandatory` goes on the attribute itself.
         """
         for instance in self._pending_mandatory_overrides:
             resolved = getattr(instance, "Type", None)
             if not isinstance(resolved, MetaInstance) or bool(getattr(resolved, "Mandatory", False)):
+                continue
+            if resolved._qualified_class.rsplit(".", 1)[-1] == "Class":
+                instance.Mandatory = True
                 continue
             fields = {
                 k: v for k, v in {**resolved.__dict__, **(resolved.model_extra or {})}.items() if not k.startswith("_")
@@ -328,6 +333,8 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
             return self._build_multi_target(ctx, rule_name, entry)
 
         if rule_name == "modeldef":
+            names = ctx.Name()
+            self.forward_refs.current_model = names[0].getText() if names else None
             self._register_unqualified_imports(ctx)
 
         instance = self.registry.new_instance(entry.target)
@@ -408,7 +415,8 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
             if idx + 1 < len(children):
                 nxt = children[idx + 1]
                 if isinstance(nxt, TerminalNode):
-                    self.symbol_table.unqualified_imports.add(nxt.getText())
+                    model = self.forward_refs.current_model or ""
+                    self.symbol_table.unqualified_imports.setdefault(model, []).append(nxt.getText())
 
     def _build_multi_target(self, ctx: ParserRuleContext, rule_name: str, entry: SpecEntry):
         """Build the two linked targets of a topicDef: SubModel + DataUnit.

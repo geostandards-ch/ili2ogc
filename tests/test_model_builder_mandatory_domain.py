@@ -88,3 +88,28 @@ END Foo.
     resolved = resolve_attribute(attributes_of(a)["Attr1"])
     assert resolved.mandatory is True
     assert resolved.type_instance is domain
+
+
+def test_mandatory_structure_reference_keeps_the_declared_structure():
+    """A STRUCTURE is never cloned: a copy would no longer be the declared instance other code compares against."""
+    builder = _build("""INTERLIS 2.4;
+MODEL Foo AT "http://x" VERSION "1" =
+  TOPIC T =
+    STRUCTURE S =
+      Code : TEXT*5;
+    END S;
+    CLASS A =
+      Required : MANDATORY S;
+      Optional : S;
+    END A;
+  END T;
+END Foo.
+""")
+    structure = builder.symbol_table.resolve("Foo.T.S")
+    attrs = attributes_of(builder.symbol_table.resolve("Foo.T.A"))
+    required = resolve_attribute(attrs["Required"])
+    optional = resolve_attribute(attrs["Optional"])
+    assert required.type_instance is structure
+    assert required.mandatory is True
+    assert optional.mandatory is False
+    assert not getattr(structure, "Mandatory", False)

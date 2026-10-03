@@ -95,8 +95,10 @@ class SymbolTable:
     def __init__(self):
         self._qualified: dict[str, Any] = {}
         self._by_short_name: dict[str, list[Any]] = {}
-        # Names of models imported via `IMPORTS UNQUALIFIED X` in THIS file
-        # (e.g. {"INTERLIS"}) - never persisted on the metamodel side
+        # Names of models imported via `IMPORTS UNQUALIFIED X`, per importing
+        # MODEL in declaration order (e.g. {"Foo": ["INTERLIS"]}) - per model
+        # because a multi-MODEL file's LV03/LV95 variants each import their
+        # own `GeometryCHLV0x_V1` unqualified. Never persisted on the metamodel side
         # (Import has no attribute of its own for UNQUALIFIED - see
         # spec/grammar/mapping/02_packages.yml, _imports_unqualified), but
         # needed here: only an explicitly UNQUALIFIED import lets an
@@ -104,7 +106,7 @@ class SymbolTable:
         # staying strictly local to the current file (Reference Manual
         # eCH-0031 V2.1.0 §3.5.1). Populated by
         # InterlisModelBuilder._register_unqualified_imports.
-        self.unqualified_imports: set[str] = set()
+        self.unqualified_imports: dict[str, list[str]] = {}
 
     def register(self, qualified_name: str, instance: Any) -> None:
         self._qualified[qualified_name] = instance
@@ -244,8 +246,13 @@ class ForwardRefResolver:
     def __init__(self, symbol_table: SymbolTable):
         self.symbol_table = symbol_table
         self._pending: list[_Pending] = []
+        # MODEL currently being built, stamped on each pending ref that
+        # doesn't name its own `home_model` (models are built one after another).
+        self.current_model: str | None = None
 
     def register_pending(self, ref: ForwardRef, container: Any, field: str) -> None:
+        if ref.home_model is None:
+            ref.home_model = self.current_model
         self._pending.append(_Pending(ref, container, field))
 
     def resolve_all(self, repository=None) -> None:
@@ -311,12 +318,18 @@ class ForwardRefResolver:
         # UNQUALIFIED (see SymbolTable.unqualified_imports) can legitimately
         # name it - otherwise it's a real local bug (a name never declared
         # in this file), to be raised as an exception rather than hidden.
-        if not self.symbol_table.unqualified_imports:
+        by_model = self.symbol_table.unqualified_imports
+        unqualified = (
+            by_model[ref.home_model]
+            if ref.home_model in by_model
+            else [name for names in by_model.values() for name in names]
+        )
+        if not unqualified:
             if ref.graceful:
                 return UnresolvedNamedReference(ref.name, reason="unresolved_extends")
             raise BuildError(f"unresolved reference, not attributable to an import: {ref.name!r}", rule=ref.rule)
         if repository is not None:
-            for model_name in self.symbol_table.unqualified_imports:
+            for model_name in unqualified:
                 # Try the name QUALIFIED with that model first: `IMPORTS
                 # UNQUALIFIED X` names X's namespace specifically, and X's
                 # own file can declare a base model of the same short name

@@ -54,7 +54,7 @@ def test_qualified_reference_resolves_without_any_repository():
 
 def test_unqualified_reference_resolves_with_imports_unqualified():
     builder, model = _build("unqualified_ref.ili", repository=None)
-    assert builder.symbol_table.unqualified_imports == {"INTERLIS"}
+    assert list(builder.symbol_table.unqualified_imports.values()) == [["INTERLIS"]]
     type_value = _ident_type(model)
     assert not isinstance(type_value, UnresolvedNamedReference)
     assert type_value._qualified_class == "IlisMeta16.ModelData.NumType"
