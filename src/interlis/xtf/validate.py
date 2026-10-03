@@ -937,40 +937,33 @@ def _validate_resolved_attr(
         # form, INTERPRETED (see `_validate_restriction_text` below) when
         # possible, otherwise falling back to the same "info" message as
         # before.
+        if kind == "Class" and getattr(resolved.type_instance, "Kind", None) == "Structure":
+            # A STRUCTURE-typed attribute: validate its own content like a
+            # root object's. A REF found somewhere in its subtree (a
+            # `CatalogueReference` wrapper's `Reference`) belongs to that
+            # inner attribute and is checked there against ITS declared
+            # target - never against the wrapper STRUCTURE itself.
+            for node in raw_nodes:
+                wrapper = node if already_unwrapped else (node.children[0] if node.children else None)
+                child_attrs = _group_by_tag(wrapper.children) if wrapper is not None else {}
+                issues.extend(
+                    _validate_attrs(
+                        resolved.type_instance,
+                        child_attrs,
+                        path_prefix=path,
+                        basket_bid=basket_bid,
+                        tid=tid,
+                        qualified_class=qualified_class,
+                        home_table=home_table,
+                        symbol_table=symbol_table,
+                        repository=repository,
+                        tid_index=tid_index,
+                        schema_cache=schema_cache,
+                    )
+                )
+            return issues
         ref = _extract_reference(raw_nodes[0]) if raw_nodes else None
         if ref is None:
-            if kind == "Class" and getattr(resolved.type_instance, "Kind", None) == "Structure":
-                # `restriction_candidates()` NEVER returns anything for
-                # `type_kind == "Class"` (internal guard `!= "ReferenceType"`)
-                # - `_validate_restriction_text` could therefore never have
-                # done anything here besides the generic fallback. A real
-                # STRUCTURE (Kind=Structure, no REF extractable anywhere in
-                # its subtree - unlike the MandatoryCatalogueReference
-                # pattern already handled above, which DOES carry a REF
-                # findable via `_extract_reference`): GENERIC recursion into
-                # its own content, EXACTLY the same mechanism as a root
-                # object - confirmed responsible for nearly all the
-                # remaining unchecked "info" issues before this addition
-                # (Name/ModInfo/Point/Surface/Line...).
-                for node in raw_nodes:
-                    wrapper = node if already_unwrapped else (node.children[0] if node.children else None)
-                    child_attrs = _group_by_tag(wrapper.children) if wrapper is not None else {}
-                    issues.extend(
-                        _validate_attrs(
-                            resolved.type_instance,
-                            child_attrs,
-                            path_prefix=path,
-                            basket_bid=basket_bid,
-                            tid=tid,
-                            qualified_class=qualified_class,
-                            home_table=home_table,
-                            symbol_table=symbol_table,
-                            repository=repository,
-                            tid_index=tid_index,
-                            schema_cache=schema_cache,
-                        )
-                    )
-                return issues
             restriction_issue = _validate_restriction_text(
                 resolved,
                 raw_nodes[0] if raw_nodes else None,
