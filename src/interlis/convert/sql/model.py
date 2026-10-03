@@ -39,6 +39,8 @@ class ForeignKey:
     # rewrites it from this id once it knows which of them got the
     # suffixed table name.
     ref_class_id: int | None = None
+    on_delete: str | None = None
+    """`"CASCADE"` for a part's link to its whole (a STRUCTURE child row, or a composition `-<#>` role)."""
 
 
 @dataclass

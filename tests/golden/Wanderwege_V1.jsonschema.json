@@ -53,7 +53,8 @@
       },
       "title": "Wegweiser",
       "required": [
-        "Standort"
+        "Standort",
+        "Wegabschnitt"
       ],
       "x-crud": [
         "GET",
@@ -75,7 +76,10 @@
           "x-reference-target": "Wegweiser"
         }
       },
-      "title": "Abschnitt_Wegweiser"
+      "title": "Abschnitt_Wegweiser",
+      "required": [
+        "Wegabschnitt"
+      ]
     },
     "Wegabschnitt_MitWegweiser": {
       "type": "object",

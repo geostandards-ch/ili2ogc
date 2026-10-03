@@ -95,11 +95,14 @@ def test_catalog_promotion_keeps_each_models_reference_on_its_own_class(repo_dir
         == 0
     )
     ddl = capsys.readouterr().out
-    # BaseA declared first, so BaseB's same-named classes take the suffix.
-    assert 'CREATE TABLE "thing" (' in ddl
-    assert 'CREATE TABLE "thing_2" (' in ddl
-    assert 'ALTER TABLE "holder" ADD CONSTRAINT fk_holder_thing FOREIGN KEY ("thing") REFERENCES "thing" ("id");' in ddl
+    # Same-named classes are told apart by what differs in their model names.
+    assert 'CREATE TABLE "thing_basea" (' in ddl
+    assert 'CREATE TABLE "thing_baseb" (' in ddl
     assert (
-        'ALTER TABLE "holder_2" ADD CONSTRAINT fk_holder_thing FOREIGN KEY ("thing") REFERENCES "thing_2" ("id");'
-        in ddl
+        'ALTER TABLE "holder_basea" ADD CONSTRAINT fk_holder_thing FOREIGN KEY ("thing") '
+        'REFERENCES "thing_basea" ("id");' in ddl
+    )
+    assert (
+        'ALTER TABLE "holder_baseb" ADD CONSTRAINT fk_holder_thing FOREIGN KEY ("thing") '
+        'REFERENCES "thing_baseb" ("id");' in ddl
     )

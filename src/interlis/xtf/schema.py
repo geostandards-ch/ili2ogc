@@ -137,16 +137,21 @@ def attributes_of(class_instance: MetaInstance) -> dict[str, MetaInstance]:
       encountered.
     """
     merged: dict[str, MetaInstance] = {}
+    for level in reversed(inheritance_chain(class_instance)):
+        merged.update(_own_attributes_of(level))
+    return merged
+
+
+def inheritance_chain(class_instance: MetaInstance) -> list[MetaInstance]:
+    """`class_instance`, then each class up its `EXTENDS` chain (stops at an unresolved `Super` or a cycle)."""
+    chain: list[MetaInstance] = []
     seen: set[int] = set()
     current: MetaInstance | None = class_instance
-    chain: list[dict[str, MetaInstance]] = []
     while isinstance(current, MetaInstance) and id(current) not in seen:
         seen.add(id(current))
-        chain.append(_own_attributes_of(current))
+        chain.append(current)
         current = getattr(current, "Super", None)
-    for level in reversed(chain):
-        merged.update(level)
-    return merged
+    return chain
 
 
 def _class_related_base_class(instance: MetaInstance) -> MetaInstance | None:
@@ -178,6 +183,13 @@ def _all_class_related_base_classes(instance: MetaInstance) -> list[MetaInstance
     return [base] if isinstance(base, MetaInstance) else []
 
 
+def _role_is_required(role: MetaInstance) -> bool:
+    """Check whether the role's minimum cardinality is >= 1 (e.g. `{1}`, `{1..*}`); no clause means `{0..*}`."""
+    mult = getattr(role, "Multiplicity", None)
+    minimum = getattr(mult, "Min", None) if isinstance(mult, MetaInstance) else None
+    return isinstance(minimum, str) and minimum.isdigit() and int(minimum) >= 1
+
+
 def _role_is_multi(role: MetaInstance) -> bool:
     """Check whether the role's cardinality is > 1 (Multiplicity.Max == '*').
 
@@ -189,6 +201,16 @@ def _role_is_multi(role: MetaInstance) -> bool:
     """
     mult = getattr(role, "Multiplicity", None)
     return isinstance(mult, MetaInstance) and getattr(mult, "Max", None) == "*"
+
+
+def association_is_embedded(association: MetaInstance) -> bool:
+    """Whether an association travels as a role pseudo-attribute of a class rather than as its own object.
+
+    Exactly 2 roles, not both with a max cardinality > 1 (eCH-0031 §4.3.9) -
+    the same rule `embedded_roles_of` applies.
+    """
+    roles = [r for r in (getattr(association, "Role", None) or []) if isinstance(r, MetaInstance)]
+    return len(roles) == 2 and not (_role_is_multi(roles[0]) and _role_is_multi(roles[1]))
 
 
 def embedded_roles_of(class_instance: MetaInstance, symbol_table: SymbolTable) -> dict[str, MetaInstance]:
@@ -312,7 +334,7 @@ def resolve_attribute(attr: MetaInstance) -> ResolvedAttribute:
             attr=attr,
             type_instance=target,
             type_kind="Class" if target is not None else None,
-            mandatory=bool(getattr(attr, "Mandatory", False)),
+            mandatory=bool(getattr(attr, "Mandatory", False)) or _role_is_required(attr),
         )
     type_instance = getattr(attr, "Type", None)
     type_instance = type_instance if isinstance(type_instance, MetaInstance) else None

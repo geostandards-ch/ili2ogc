@@ -61,6 +61,7 @@
       },
       "title": "Grundstueck",
       "required": [
+        "Entstehung",
         "NBIdent",
         "Nummer"
       ],
@@ -84,7 +85,10 @@
           "x-reference-target": "Grundstueck"
         }
       },
-      "title": "Entstehung_Grundstueck"
+      "title": "Entstehung_Grundstueck",
+      "required": [
+        "Entstehung"
+      ]
     },
     "Untergang_Grundstueck": {
       "type": "object",

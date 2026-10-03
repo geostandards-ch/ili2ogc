@@ -7,7 +7,7 @@ from __future__ import annotations
 import re
 
 from .identifiers import OID_COLUMN, _quote, _quote_list
-from .model import SqlView, Table
+from .model import ForeignKey, SqlView, Table
 from .views import (
     _render_view_unique_triggers_gpkg,
     _render_view_unique_triggers_postgresql,
@@ -43,11 +43,15 @@ def render_postgresql(tables: list[Table], views: tuple[SqlView, ...] = ()) -> s
             statements.append(
                 f"ALTER TABLE {_quote(table.name)} ADD CONSTRAINT {fk.name} "
                 f"FOREIGN KEY ({_quote_list(fk.columns)}) "
-                f"REFERENCES {_quote(fk.ref_table)} ({_quote_list(fk.ref_columns)});",
+                f"REFERENCES {_quote(fk.ref_table)} ({_quote_list(fk.ref_columns)}){_on_delete(fk)};",
             )
     statements += _render_views(views)
     statements += _render_view_unique_triggers_postgresql(views)
     return "\n".join(statements) + "\n"
+
+
+def _on_delete(fk: ForeignKey) -> str:
+    return f" ON DELETE {fk.on_delete}" if fk.on_delete else ""
 
 
 def _gpkg_base_geometry_type(geometry_type: str) -> tuple[str, bool]:
@@ -87,7 +91,7 @@ def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = ()) -> str:
         for fk in table.foreign_keys:
             lines.append(
                 f"    CONSTRAINT {fk.name} FOREIGN KEY ({_quote_list(fk.columns)}) "
-                f"REFERENCES {_quote(fk.ref_table)} ({_quote_list(fk.ref_columns)})",
+                f"REFERENCES {_quote(fk.ref_table)} ({_quote_list(fk.ref_columns)}){_on_delete(fk)}",
             )
         for check in table.check_constraints:
             lines.append(f"    CONSTRAINT {check.name} CHECK ({check.expression})")

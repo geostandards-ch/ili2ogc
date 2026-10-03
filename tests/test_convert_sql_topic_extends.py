@@ -87,8 +87,8 @@ def test_reference_to_extended_base_class_is_split_per_table(tmp_path: Path, cap
     assert 'REFERENCES "subfacility"' in sql
 
 
-def test_folded_table_names_follow_declaration_order(tmp_path: Path, capsys):
-    """Two same-named base classes: the first declared keeps the unsuffixed name, every run."""
+def test_same_named_folded_classes_are_named_after_their_model(tmp_path: Path, capsys):
+    """Two same-named base classes from two models: each table names its own model, never a counter."""
     second = (
         _BASE.split("END Cat.\n", 1)[1]
         .replace("MODEL Base ", "MODEL Base2 ")
@@ -107,7 +107,7 @@ def test_folded_table_names_follow_declaration_order(tmp_path: Path, capsys):
     out = tmp_path / "out.sql"
     main(["convert-sql", str(tmp_path / "Two.ili"), "--repo", str(tmp_path), "-o", str(out)])
     sql = out.read_text(encoding="utf-8")
-    first = sql.split('CREATE TABLE "facility" (', 1)[1].split(");", 1)[0]
-    second = sql.split('CREATE TABLE "facility_2" (', 1)[1].split(");", 1)[0]
+    first = sql.split('CREATE TABLE "facility_base" (', 1)[1].split(");", 1)[0]
+    second = sql.split('CREATE TABLE "facility_base2" (', 1)[1].split(");", 1)[0]
     assert '"extra"' not in first
     assert '"extra"' in second

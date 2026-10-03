@@ -11,7 +11,7 @@ CREATE TABLE "grundstueck" (
     "nbident" varchar(12) NOT NULL,
     "nummer" varchar(12) NOT NULL,
     "egrid" varchar(14),
-    "entstehung" text,
+    "entstehung" text NOT NULL,
     "untergang" text
 );
 ALTER TABLE "grundstueck" ADD CONSTRAINT fk_grundstueck_entstehung FOREIGN KEY ("entstehung") REFERENCES "gsnachfuehrung" ("id");

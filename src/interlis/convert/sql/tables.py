@@ -13,8 +13,11 @@ from interlis.diagnostic_ids import note as _diag
 from interlis.metamodel.instance import MetaInstance
 from interlis.xtf.schema import (
     ResolvedAttribute,
+    association_is_embedded,
     attributes_of,
     concrete_structure_subclasses,
+    embedded_roles_of,
+    inheritance_chain,
     is_class_compatible,
     reference_target_class,
     resolve_attribute,
@@ -60,6 +63,8 @@ def _columns_for_class(
     *,
     prefix: str = "",
     depth: int = 0,
+    role_tables: tuple[SymbolTable, ...] = (),
+    presence_checks: list[tuple[str, list[str], list[str]]] | None = None,
 ) -> tuple[
     list[Column],
     list[ForeignKey],
@@ -72,6 +77,10 @@ def _columns_for_class(
     members, flattening up to `_MAX_STRUCT_FLATTEN_DEPTH` levels of STRUCTURE nesting inline.
 
     `prefix`/`depth` track the recursive STRUCTURE-flattening call.
+    `role_tables`: further symbol tables whose associations may embed a
+    role on `cls` (a base class's association declared in another model).
+    `presence_checks` (out): `(label, columns, required)` per OPTIONAL
+    flattened STRUCTURE - its MANDATORY parts only bind when it is present.
     `child_specs` are `BAG`/`LIST OF` members for `_build_child_table`;
     `local_unique` merges up nested `UNIQUE (LOCAL)`; `abstract_specs` are
     ABSTRACT-structure attributes, one child table per concrete subclass.
@@ -83,6 +92,10 @@ def _columns_for_class(
     local_unique: dict[str, list[list[str]]] = {}
     abstract_specs: list[tuple[str, MetaInstance, bool, bool]] = []
     members = schema_members_of(cls, symbol_table) if symbol_table is not None else attributes_of(cls)
+    for extra_table in role_tables:
+        if extra_table is not symbol_table:
+            for role_name, role in embedded_roles_of(cls, extra_table).items():
+                members.setdefault(role_name, role)
     for name, attr in members.items():
         resolved = resolve_attribute(attr)
         label = f"{prefix}{name}"
@@ -127,7 +140,15 @@ def _columns_for_class(
                 symbol_table,
                 prefix=f"{label}_",
                 depth=depth + 1,
+                presence_checks=presence_checks,
             )
+            if not resolved.mandatory:
+                required = [c.name for c in sub_columns if not c.nullable]
+                for sub_column in sub_columns:
+                    sub_column.nullable = True
+                # Only binds when the structure has more columns than its required ones.
+                if required and len(required) < len(sub_columns) and presence_checks is not None:
+                    presence_checks.append((label, [c.name for c in sub_columns], required))
             columns.extend(sub_columns)
             foreign_keys.extend(sub_fks)
             notes.extend(sub_notes)
@@ -153,9 +174,17 @@ def _columns_for_class(
                 )
                 continue
             target_table = _sql_identifier(getattr(target, "Name", None) or "")
-            columns.append(Column(col_name, "text", nullable=not resolved.mandatory))
+            # A link-table row always carries both ends, whatever the role's cardinality.
+            link_role = getattr(cls, "Kind", None) == "Association"
+            columns.append(Column(col_name, "text", nullable=not (resolved.mandatory or link_role)))
             fk_name = _truncate_identifier(_sql_identifier(f"fk_{getattr(cls, 'Name', '')}_{label}"))
-            foreign_keys.append(ForeignKey(fk_name, [col_name], target_table, [OID_COLUMN], ref_class_id=id(target)))
+            # A composition role (`-<#>`) names the whole: deleting it deletes its parts.
+            on_delete = "CASCADE" if getattr(attr, "Strongness", None) == "Comp" else None
+            foreign_keys.append(
+                ForeignKey(
+                    fk_name, [col_name], target_table, [OID_COLUMN], ref_class_id=id(target), on_delete=on_delete
+                )
+            )
             continue
 
         if resolved.type_kind in _GEOMETRY_KINDS:
@@ -224,6 +253,7 @@ def _build_child_table(
             [fk_column],
             parent_table,
             [OID_COLUMN],
+            on_delete="CASCADE",
         )
     ]
     notes: list[str] = []
@@ -346,6 +376,7 @@ def _structure_child_table(
             [fk_column],
             parent_table,
             [OID_COLUMN],
+            on_delete="CASCADE",
         )
     ]
     if ordered:
@@ -376,7 +407,7 @@ def _check_constraints_for_class(
     result: list[CheckConstraint] = []
     notes: list[str] = []
     counter = 0
-    for constraint in getattr(cls, "Constraint", None) or []:
+    for constraint in _inherited_constraints(cls):
         qname = constraint._qualified_class.rsplit(".", 1)[-1]
         label = repr(getattr(constraint, "Name", None)) if getattr(constraint, "Name", None) else "<unnamed>"
         if qname == "UniqueConstraint":
@@ -454,7 +485,7 @@ def _unique_constraints_for_class(
     result: list[UniqueConstraint] = []
     notes: list[str] = []
     struct_global_unique: dict[str, list[list[str]]] = {}
-    for constraint in getattr(cls, "Constraint", None) or []:
+    for constraint in _inherited_constraints(cls):
         if not constraint._qualified_class.endswith("UniqueConstraint"):
             continue
         kind = getattr(constraint, "Kind", None)
@@ -520,7 +551,7 @@ def _local_unique_constraints_for_class(cls: MetaInstance) -> tuple[dict[str, li
     """
     result: dict[str, list[list[str]]] = {}
     notes: list[str] = []
-    for constraint in getattr(cls, "Constraint", None) or []:
+    for constraint in _inherited_constraints(cls):
         if not constraint._qualified_class.endswith("UniqueConstraint"):
             continue
         if getattr(constraint, "Kind", None) != "LocalU":
@@ -567,6 +598,60 @@ def _local_unique_constraints_for_class(cls: MetaInstance) -> tuple[dict[str, li
     return result, notes
 
 
+def _inherited_constraints(cls: MetaInstance) -> list[MetaInstance]:
+    """`cls`'s own constraints, then each base class's: its table inlines the inherited columns they constrain."""
+    return [c for owner in inheritance_chain(cls) for c in getattr(owner, "Constraint", None) or []]
+
+
+def _distinguishing_suffixes(paths: list[list[str]]) -> list[str | None]:
+    """For same-named classes, the part of their container names (model first, then topic) not shared by all.
+
+    `BaseModel_SectoralPlans_LV03_V1_4` vs `..._LV95_V1_4` gives `lv03` /
+    `lv95`; `None` everywhere when no level tells them apart.
+    """
+    for level in range(max((len(p) for p in paths), default=0)):
+        token_lists = [(p[level] if level < len(p) else "").split("_") for p in paths]
+        common = set.intersection(*(set(tokens) for tokens in token_lists))
+        suffixes = ["_".join(t for t in tokens if t not in common).lower() for tokens in token_lists]
+        if all(suffixes) and len(set(suffixes)) == len(suffixes):
+            return list(suffixes)
+    return [None] * len(paths)
+
+
+def _table_base_names(
+    classes: list[MetaInstance],
+    symbol_table: SymbolTable | None,
+    class_symbol_tables: dict[int, SymbolTable] | None,
+) -> dict[int, str]:
+    """Each class's table name: its own name, or - when several classes share it - suffixed with what tells their
+    declaring models (or topics) apart, never a counter that depends on order.
+    """
+    by_name: dict[str, list[MetaInstance]] = {}
+    for cls in classes:
+        by_name.setdefault(_sql_identifier(getattr(cls, "Name", None) or ""), []).append(cls)
+    names: dict[int, str] = {}
+    for base, group in by_name.items():
+        if len(group) == 1:
+            names[id(group[0])] = base
+            continue
+        paths = []
+        for cls in group:
+            table = (class_symbol_tables or {}).get(id(cls), symbol_table)
+            qualified = table.qualified_name_of(cls) if table is not None else None
+            paths.append(qualified.split(".")[:-1] if qualified else [])
+        for cls, suffix in zip(group, _distinguishing_suffixes(paths)):
+            names[id(cls)] = _truncate_identifier(f"{base}_{suffix}") if suffix else base
+    return names
+
+
+def _presence_check(table_name: str, label: str, columns: list[str], required: list[str]) -> CheckConstraint:
+    """An OPTIONAL structure is either wholly absent or carries all its MANDATORY parts."""
+    absent = " AND ".join(f'"{c}" IS NULL' for c in columns)
+    present = " AND ".join(f'"{c}" IS NOT NULL' for c in required)
+    name = _truncate_identifier(_sql_identifier(f"chk_{table_name}_{label}_present"))
+    return CheckConstraint(name, f"({absent}) OR ({present})")
+
+
 def _reference_target_classes(target: MetaInstance, converted: list[MetaInstance]) -> list[MetaInstance]:
     """Every converted concrete class a `REFERENCE TO target` may point at: `target` unless ABSTRACT, then its
     concrete subclasses by name.
@@ -605,7 +690,9 @@ def _split_polymorphic_fk(
             name = _dedup_name(_truncate_identifier(_sql_identifier(f"{column.name}_{ref_table}")), used)
             fk_name = _truncate_identifier(_sql_identifier(f"{fk.name}_{ref_table}"))
         new_columns.append(Column(name, column.sql_type, nullable=True))
-        new_fks.append(ForeignKey(fk_name, [name], ref_table, fk.ref_columns, ref_class_id=id(target)))
+        new_fks.append(
+            ForeignKey(fk_name, [name], ref_table, fk.ref_columns, ref_class_id=id(target), on_delete=fk.on_delete)
+        )
     position = table.columns.index(column)
     table.columns[position : position + 1] = new_columns
     position = table.foreign_keys.index(fk)
@@ -640,10 +727,21 @@ def build_tables(
     # abstract base it extends.
     _distinct_catalog_tables = {id(t): t for t in (class_symbol_tables or {}).values()}.values()
     scan_symbol_tables: list[SymbolTable] = [st for st in [symbol_table, *_distinct_catalog_tables] if st is not None]
-    for cls in classes:
-        if getattr(cls, "Kind", None) != "Class":
-            continue
-        base_name = _sql_identifier(getattr(cls, "Name", None) or "")
+    # A non-embedded association (n:m, or more than 2 roles) is transferred
+    # as its own object (eCH-0031 §4.3.9.2): it needs its own link table.
+    table_classes = [
+        c
+        for c in classes
+        if getattr(c, "Kind", None) == "Class"
+        or (
+            getattr(c, "Kind", None) == "Association"
+            and not getattr(c, "Abstract", False)
+            and not association_is_embedded(c)
+        )
+    ]
+    base_names = _table_base_names(table_classes, symbol_table, class_symbol_tables)
+    for cls in table_classes:
+        base_name = base_names[id(cls)]
         table_name = base_name
         suffix = 2
         while table_name in used_table_names:
@@ -655,16 +753,29 @@ def build_tables(
             class_table_names[id(cls)] = table_name
 
         home_table = (class_symbol_tables or {}).get(id(cls), symbol_table)
+        presence_checks: list[tuple[str, list[str], list[str]]] = []
         columns, foreign_keys, notes, child_specs, nested_local_unique, abstract_specs = _columns_for_class(
-            cls, home_table
+            cls, home_table, role_tables=tuple(scan_symbol_tables), presence_checks=presence_checks
         )
+        if getattr(cls, "Kind", None) == "Association" and not foreign_keys:
+            notes.append(
+                _diag(
+                    "SQL-ASSOC-ROLES-UNRESOLVED",
+                    "association roles not resolved (inherited through ASSOCIATION EXTENDS) - "
+                    "link table has no role columns",
+                )
+            )
         renamed = _avoid_identity_collision(columns)
         unique_constraints, unique_notes, struct_global_unique = _unique_constraints_for_class(cls, table_name)
         for unique in unique_constraints:
             unique.columns = [renamed.get(c, c) for c in unique.columns]
         column_names = {c.name for c in columns}
         valid_unique_constraints = []
+        seen_unique: set[tuple[str, ...]] = set()
         for unique in unique_constraints:
+            if tuple(unique.columns) in seen_unique:
+                continue  # redeclared by an EXTENDED class over the same columns
+            seen_unique.add(tuple(unique.columns))
             missing = [c for c in unique.columns if c not in column_names]
             if missing:
                 unique_notes.append(
@@ -676,6 +787,7 @@ def build_tables(
                 continue
             valid_unique_constraints.append(unique)
         check_constraints, check_notes = _check_constraints_for_class(cls, table_name, column_names, renamed)
+        check_constraints += [_presence_check(table_name, *spec) for spec in presence_checks]
         local_unique, local_unique_notes = _local_unique_constraints_for_class(cls)
         for attr_name, groups in nested_local_unique.items():
             local_unique.setdefault(attr_name, []).extend(groups)

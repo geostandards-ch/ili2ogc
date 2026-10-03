@@ -102,7 +102,14 @@ concepts:
       Only `Kind=Class` roots become a `CREATE TABLE` (never `Kind=Structure`
       directly - see StructureNesting below for how a STRUCTURE-typed
       ATTRIBUTE is handled). `Kind=View` becomes a `CREATE VIEW` - see the
-      View entry below.
+      View entry below. A non-embedded `Kind=Association` (n:m, or more
+      than 2 roles, eCH-0031 §4.3.9.2) becomes a link table, one NOT NULL
+      FOREIGN KEY column per role; an ABSTRACT association gets none.
+      Same-named classes (e.g. the LV03 and LV95 variants of one base model)
+      are suffixed with the part of their model (else topic) names that
+      differs - `facility_lv03` / `facility_lv95` - never an order-dependent
+      counter. Constraints are collected over the whole EXTENDS chain, since
+      the table inlines the inherited columns they constrain.
 
   View:
     qualified_name: IlisMeta16.ModelData.View
@@ -167,11 +174,11 @@ concepts:
       silently dropped or produced with an ambiguous column name. Same known
       metamodel limitation as the JSON Schema pipeline
       (mappings/ilismeta16-to-jsonschema-rules.yml's StructureNesting
-      entry): `MANDATORY` on a structure-typed attribute is never captured
-      by `resolve_attribute` (`Class` extends `Type`, not `DomainType`), so
-      every flattened sub-column is nullable regardless of the source
-      attribute's own MANDATORY declaration - not fixed here, a
-      builder-layer gap.
+      entry). A sub-column is NOT NULL only if every attribute on its path
+      is MANDATORY: an OPTIONAL structure's sub-columns are nullable, plus a
+      CHECK that the structure is either wholly absent or carries all its
+      MANDATORY parts (`chk_<table>_<attr>_present`, emitted only when it
+      constrains more than a single column).
 
   ReferenceType:
     qualified_name: IlisMeta16.ModelData.ReferenceType
@@ -198,6 +205,11 @@ concepts:
       ReferenceType above (both resolve via `xtf.schema.reference_target_class`,
       reused directly). Opt-in via a `symbol_table` parameter, same
       precondition as `convert/jsonschema.py`'s `class_to_json_schema`.
+      A role with a minimum cardinality >= 1 (`{1}`, `{1..*}`) is NOT NULL;
+      a composition role (`-<#>`, `Strongness=Comp`) names the whole, so its
+      FOREIGN KEY is `ON DELETE CASCADE`. Roles embedded on a base class by
+      an association declared in another converted model reach its
+      subclasses' tables too.
 
   MultiValue:
     qualified_name: IlisMeta16.ModelData.MultiValue
@@ -205,7 +217,8 @@ concepts:
     note: >
       `BAG {m..n} OF X` / `LIST {m..n} OF X` -> a related CHILD TABLE
       (1:N, `_build_child_table`), linked via a `<parent>_fk` FOREIGN KEY
-      back to the parent (real precedent: ili2db's own
+      back to the parent (`ON DELETE CASCADE`: the rows are parts of it;
+      real precedent: ili2db's own
       `D_<attributename>`-style convention) plus a `seq` ordering column
       for `LIST` (see docs/sql-conversion-strategy.md). A `BAG`/`LIST OF`
       found ONE level inside the element STRUCTURE (an indirect/nested

@@ -54,6 +54,7 @@
         "Fiktiv",
         "Flaechenmass",
         "Geometrie",
+        "Grundstueck",
         "Qualitaetsstandard"
       ],
       "x-crud": [
@@ -103,7 +104,8 @@
       "title": "SelbstaendigesDauerndesRecht",
       "required": [
         "Flaechenmass",
-        "Geometrie"
+        "Geometrie",
+        "Grundstueck"
       ],
       "x-crud": [
         "GET",
@@ -149,7 +151,8 @@
       "title": "Bergwerk",
       "required": [
         "Flaechenmass",
-        "Geometrie"
+        "Geometrie",
+        "Grundstueck"
       ],
       "x-crud": [
         "GET",
@@ -293,6 +296,7 @@
       },
       "title": "Grenzpunkt",
       "required": [
+        "Entstehung",
         "IstExaktDefiniert",
         "IstHoheitsgrenzpunkt",
         "IstHoheitsgrenzsteinAlt",
@@ -320,7 +324,10 @@
           "x-reference-target": "Grenzpunkt"
         }
       },
-      "title": "Entstehung_Grenzpunkt"
+      "title": "Entstehung_Grenzpunkt",
+      "required": [
+        "Entstehung"
+      ]
     },
     "Untergang_Grenzpunkt": {
       "type": "object",
@@ -392,6 +399,7 @@
       },
       "title": "Grundstueck",
       "required": [
+        "Entstehung",
         "Fiktiv",
         "Grundstuecksart",
         "IstStreitig",
@@ -419,7 +427,10 @@
           "x-reference-target": "Grundstueck"
         }
       },
-      "title": "Entstehung_Grundstueck"
+      "title": "Entstehung_Grundstueck",
+      "required": [
+        "Entstehung"
+      ]
     },
     "Untergang_Grundstueck": {
       "type": "object",
@@ -447,7 +458,10 @@
           "x-reference-target": "Liegenschaft"
         }
       },
-      "title": "GrundstueckLiegenschaft"
+      "title": "GrundstueckLiegenschaft",
+      "required": [
+        "Grundstueck"
+      ]
     },
     "GrundstueckSelbstaendigesDauerndesRecht": {
       "type": "object",
@@ -461,7 +475,10 @@
           "x-reference-target": "SelbstaendigesDauerndesRecht"
         }
       },
-      "title": "GrundstueckSelbstaendigesDauerndesRecht"
+      "title": "GrundstueckSelbstaendigesDauerndesRecht",
+      "required": [
+        "Grundstueck"
+      ]
     },
     "GrundstueckBergwerk": {
       "type": "object",
@@ -475,7 +492,10 @@
           "x-reference-target": "Bergwerk"
         }
       },
-      "title": "GrundstueckBergwerk"
+      "title": "GrundstueckBergwerk",
+      "required": [
+        "Grundstueck"
+      ]
     },
     "Grenzpunkt_Gueltig": {
       "type": "object",

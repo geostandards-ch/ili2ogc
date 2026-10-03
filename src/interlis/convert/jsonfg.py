@@ -56,6 +56,7 @@ from interlis.xtf.parse import RawNode, XtfObject, XtfTransfer
 from interlis.xtf.schema import (
     ResolvedAttribute,
     attributes_of,
+    home_symbol_table,
     is_class_compatible,
     line_coord_type,
     resolve_attribute,
@@ -2231,12 +2232,14 @@ def transfer_to_feature_collection(
             cls = resolve_class(obj.qualified_class, symbol_table=symbol_table, repository=repository)
             if cls is None:
                 continue
+            # The declaring model's table holds the associations embedding a role on `cls`.
+            cls_table = home_symbol_table(obj.qualified_class, symbol_table=symbol_table, repository=repository)
             features.append(
                 object_to_feature(
                     obj,
                     cls,
                     standalone=False,
-                    symbol_table=symbol_table,
+                    symbol_table=cls_table,
                     repository=repository,
                     omit_multivalue=include_child_rows,
                 )
