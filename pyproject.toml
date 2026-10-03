@@ -1,6 +1,6 @@
 [project]
 name = "ili2ogc"
-version = "0.1.1"
+version = "0.1.2"
 authors = [
     {name = "Maxime Collombin", email = "maxime.collombin@netplus.ch"},
 ]
