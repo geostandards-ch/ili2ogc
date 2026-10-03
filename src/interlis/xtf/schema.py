@@ -203,13 +203,25 @@ def _role_is_multi(role: MetaInstance) -> bool:
     return isinstance(mult, MetaInstance) and getattr(mult, "Max", None) == "*"
 
 
+def association_roles(association: MetaInstance) -> list[MetaInstance]:
+    """An association's roles: its own, then those it inherits through `EXTENDS` (an own role redefines a
+    same-named inherited one).
+    """
+    roles: dict[str, MetaInstance] = {}
+    for owner in inheritance_chain(association):
+        for role in getattr(owner, "Role", None) or []:
+            if isinstance(role, MetaInstance):
+                roles.setdefault(getattr(role, "Name", None) or str(id(role)), role)
+    return list(roles.values())
+
+
 def association_is_embedded(association: MetaInstance) -> bool:
     """Whether an association travels as a role pseudo-attribute of a class rather than as its own object.
 
     Exactly 2 roles, not both with a max cardinality > 1 (eCH-0031 §4.3.9) -
     the same rule `embedded_roles_of` applies.
     """
-    roles = [r for r in (getattr(association, "Role", None) or []) if isinstance(r, MetaInstance)]
+    roles = association_roles(association)
     return len(roles) == 2 and not (_role_is_multi(roles[0]) and _role_is_multi(roles[1]))
 
 
@@ -296,8 +308,8 @@ def schema_members_of(class_instance: MetaInstance, symbol_table: SymbolTable) -
     if getattr(class_instance, "Kind", None) == "Association":
         # A non-embedded association is transferred as its own object whose
         # elements are its roles, each a REF (eCH-0031 §4.3.9.2).
-        for role in getattr(class_instance, "Role", None) or []:
-            if isinstance(role, MetaInstance) and getattr(role, "Name", None):
+        for role in association_roles(class_instance):
+            if getattr(role, "Name", None):
                 members.setdefault(role.Name, role)
     return members
 

@@ -22,6 +22,17 @@ associationDef:
       source:
         field: FINAL
         presence: true
+    Super:
+      association: Inheritance
+      role: Super
+      source:
+        field: associationRef
+        optional: true
+      note: '`[ ''EXTENDS'' AssociationRef ]` (eCH-0031 V2.1.0 §3.6.1 AssociationDef EBNF) - same
+        `Inheritance` association as classDef.Super; `associationRef` resolves directly to the base
+        association (`kind: Reference`, Class with Kind=Association). Without it a derived association
+        (`ASSOCIATION Albus EXTENDS MapProjection`, CoordSys-20151124.ili) had no base, hence none of its
+        inherited roles or attributes.'
 associationRef:
   grammar:
     rule: associationRef
@@ -89,10 +100,7 @@ roleDef:
       note: 'Confirmed against INTERLIS 2 Reference Manual §2.7.2 "Force of relationship": -- = Association,
         -<> = Aggregation (marks the role leading to the whole), -<#> = Composition (marks the role leading
         to the whole). Each role''s own symbol directly encodes its Strongness value. optional:true because
-        of Alternative 2 (see rule-level note below) - confirmed on a real .ili example
-        (models/IlisMeta16.ili, NumsRefSys.Axis: AxisInd - a type restriction on the inherited Axis role,
-        no --/-<>/-<#> symbol at all, no new Role semantically created even though the engine currently
-        still builds one (STATUS: unresolved, see rule-level note).
+        of Alternative 2 (an association attribute, no symbol at all - see rule-level note).
 
         '
     Ordered:
@@ -140,7 +148,11 @@ roleDef:
     restrictedClassOrAssRef (OR restrictedClassOrAssRef)* (ASSIGN STRING)? SEMI ASSIGN STRING at the end:
     spec EBNF shows '':='' Role-Factor (an Expression), but the ANTLR grammar (2.4 dialect) only matches
     a literal STRING here, not a full factor. Purpose/target attribute unclear - not yet mapped. --- Alternative
-    2 (ili2c 2.4 dialect extension, not in the 2006 manual EBNF) --- Name COLON MANDATORY? (attrTypeDef
-    | enumeration | numeric | constraintDef) SEMI Does NOT create a new Role instance. Restricts/redefines
-    the type of an already-declared (inherited) role by name - likely feeds TypeRestriction on the existing
-    Role, MANDATORY affecting DomainType.Mandatory. STATUS: unresolved, needs a real .ili example.'
+    2 --- Name COLON MANDATORY? (attrTypeDef | enumeration | numeric | constraintDef) SEMI is an association
+    ATTRIBUTE, not a role: eCH-0031 V2.1.0 §3.6.1 AssociationDef = ... { RoleDef } [ ''ATTRIBUTE'' ] {
+    AttributeDef } ..., and every RoleDef carries ''--''/''-<>''/''-<#>''; this grammar lets roleDef absorb
+    the AttributeDefs that follow the roles. Real examples: models/IlisMeta16.ili NumsRefSys ''Axis:
+    AxisInd'' (no role named Axis exists to restrict), CoordSys-20151124.ili MapProjection
+    ''FromCo1_FundPt: MANDATORY Angle_DMS_90''. Built as an AttrOrParam attached through ClassAttr
+    (InterlisModelBuilder._build_instance), MANDATORY through the same deferred Mandatory override as
+    attributeDef; the Role bindings above never apply to it.'

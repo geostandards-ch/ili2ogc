@@ -32,8 +32,16 @@ from interlis.builder.view_mixin import _ViewBuildingMixin
 from interlis.metamodel.instance import MetaInstance
 from interlis.metamodel.registry import MetamodelRegistry
 from interlis.metamodel.uml_schema import MetamodelSchema
-from interlis.spec.models import SpecEntry
+from interlis.spec.models import Parent, SpecEntry
 from interlis.spec.spec_index import load_spec
+
+_ASSOCIATION_ATTRIBUTE_ENTRY = SpecEntry(
+    grammar={"rule": "roleDef"},
+    kind="Instance",
+    target="IlisMeta16.ModelData.AttrOrParam",
+    parent=Parent(association="ClassAttr", role="ClassAttribute"),
+    attribute_bindings={"Name": {"source": {"field": "Name"}}},
+)
 
 
 class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _ContextMixin, InterlisParserVisitor):
@@ -332,6 +340,12 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
         if isinstance(entry.target, list):
             return self._build_multi_target(ctx, rule_name, entry)
 
+        # roleDef's `Name : type ;` form is an association ATTRIBUTE (a RoleDef
+        # always carries --/-<>/-<#>): built and attached like an attributeDef.
+        association_attribute = rule_name == "roleDef" and ctx.COLON() is not None
+        if association_attribute:
+            entry = _ASSOCIATION_ATTRIBUTE_ENTRY
+
         if rule_name == "modeldef":
             names = ctx.Name()
             self.forward_refs.current_model = names[0].getText() if names else None
@@ -384,6 +398,8 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
             self._build_context_domain_pairs(instance, ctx)
         elif rule_name == "metaDataBasketDef":
             self._build_metadata_basket_members(instance, ctx)
+        if association_attribute and ctx.MANDATORY() is not None:
+            self._pending_mandatory_overrides.append(instance)
 
         if entry.parent and self._parent_stack:
             self.attachment.attach(

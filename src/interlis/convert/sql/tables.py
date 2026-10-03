@@ -761,8 +761,8 @@ def build_tables(
             notes.append(
                 _diag(
                     "SQL-ASSOC-ROLES-UNRESOLVED",
-                    "association roles not resolved (inherited through ASSOCIATION EXTENDS) - "
-                    "link table has no role columns",
+                    "link table has no role columns: association roles not resolved - "
+                    "provide the base association's model via --repo",
                 )
             )
         renamed = _avoid_identity_collision(columns)

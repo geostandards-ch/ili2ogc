@@ -29,8 +29,8 @@ REGISTRY: dict[str, tuple[str, str]] = {
     # -- convert-sql: CREATE TABLE ---------------------------------------
     "SQL-STRUCT-NESTED-DEEP": ("A", "STRUCTURE nested more than two levels deep is not flattened"),
     "SQL-ASSOC-ROLES-UNRESOLVED": (
-        "A",
-        "link table of a non-embedded association whose roles the model builder did not resolve (ASSOCIATION EXTENDS)",
+        "C",
+        "link table of an association whose roles did not resolve (its base association's model is missing)",
     ),
     "SQL-STRUCT-ABSTRACT": ("A", "ABSTRACT structure attribute with no concrete subclass in scope for a table"),
     "SQL-ATTR-TYPE-UNMAPPED": (
