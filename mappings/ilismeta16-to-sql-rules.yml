@@ -102,7 +102,13 @@ concepts:
       Only `Kind=Class` roots become a `CREATE TABLE` (never `Kind=Structure`
       directly - see StructureNesting below for how a STRUCTURE-typed
       ATTRIBUTE is handled). `Kind=View` becomes a `CREATE VIEW` - see the
-      View entry below. A non-embedded `Kind=Association` (n:m, or more
+      View entry below. `id` (the TID) is the PRIMARY KEY in PostgreSQL;
+      GeoPackage adds an INTEGER `fid` key and keeps `id` UNIQUE NOT NULL,
+      and moves every geometry column after a table's first to a 1:1
+      `<table>_<column>` side table (one geometry column per GeoPackage
+      table). FOREIGN KEYs are DEFERRABLE INITIALLY DEFERRED (transfer order
+      is arbitrary) and indexed; PostgreSQL geometry columns get a GIST
+      index. A non-embedded `Kind=Association` (n:m, or more
       than 2 roles, eCH-0031 §4.3.9.2) becomes a link table, one NOT NULL
       FOREIGN KEY column per role; an ABSTRACT association gets none.
       Same-named classes (e.g. the LV03 and LV95 variants of one base model)
@@ -178,7 +184,11 @@ concepts:
       is MANDATORY: an OPTIONAL structure's sub-columns are nullable, plus a
       CHECK that the structure is either wholly absent or carries all its
       MANDATORY parts (`chk_<table>_<attr>_present`, emitted only when it
-      constrains more than a single column).
+      constrains more than a single column). A multi-geometry wrapper - a
+      STRUCTURE whose only attribute is a `BAG`/`LIST OF` a STRUCTURE holding
+      one coordinate or line attribute (CHBase `MultiSurface`/`MultiLine`/
+      `MultiPoint`) - is one `Multi*` geometry column instead
+      (`xtf.schema.multi_geometry_element`), as ili2db's `--coalesceMulti*`.
 
   ReferenceType:
     qualified_name: IlisMeta16.ModelData.ReferenceType

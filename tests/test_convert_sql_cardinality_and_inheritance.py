@@ -63,8 +63,11 @@ def test_required_polymorphic_role_needs_exactly_one_target_and_cascades(tmp_pat
     assert '"plan" text,' in part
     assert '"plan_subplan" text,' in part
     assert "ELSE 0 END) = 1)" in part
-    assert 'FOREIGN KEY ("plan") REFERENCES "plan" ("id") ON DELETE CASCADE;' in sql
-    assert 'FOREIGN KEY ("plan_subplan") REFERENCES "subplan" ("id") ON DELETE CASCADE;' in sql
+    assert 'FOREIGN KEY ("plan") REFERENCES "plan" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;' in sql
+    assert (
+        'FOREIGN KEY ("plan_subplan") REFERENCES "subplan" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;'
+        in sql
+    )
 
 
 def test_n_to_m_association_gets_a_link_table(tmp_path: Path):

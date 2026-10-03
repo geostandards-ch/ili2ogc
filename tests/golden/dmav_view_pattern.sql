@@ -1,5 +1,5 @@
 CREATE TABLE "gsnachfuehrung" (
-    "id" text UNIQUE NOT NULL,
+    "id" text PRIMARY KEY,
     "nbident" varchar(12) NOT NULL,
     "identifikator" varchar(12) NOT NULL,
     "gueltigereintrag" varchar(10) NOT NULL,
@@ -7,15 +7,17 @@ CREATE TABLE "gsnachfuehrung" (
     CONSTRAINT uq_gsnachfuehrung_nbident_identifikator UNIQUE ("nbident", "identifikator")
 );
 CREATE TABLE "grundstueck" (
-    "id" text UNIQUE NOT NULL,
+    "id" text PRIMARY KEY,
     "nbident" varchar(12) NOT NULL,
     "nummer" varchar(12) NOT NULL,
     "egrid" varchar(14),
     "entstehung" text NOT NULL,
     "untergang" text
 );
-ALTER TABLE "grundstueck" ADD CONSTRAINT fk_grundstueck_entstehung FOREIGN KEY ("entstehung") REFERENCES "gsnachfuehrung" ("id");
-ALTER TABLE "grundstueck" ADD CONSTRAINT fk_grundstueck_untergang FOREIGN KEY ("untergang") REFERENCES "gsnachfuehrung" ("id");
+ALTER TABLE "grundstueck" ADD CONSTRAINT fk_grundstueck_entstehung FOREIGN KEY ("entstehung") REFERENCES "gsnachfuehrung" ("id") DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "grundstueck" ADD CONSTRAINT fk_grundstueck_untergang FOREIGN KEY ("untergang") REFERENCES "gsnachfuehrung" ("id") DEFERRABLE INITIALLY DEFERRED;
+CREATE INDEX idx_grundstueck_entstehung ON "grundstueck" ("entstehung");
+CREATE INDEX idx_grundstueck_untergang ON "grundstueck" ("untergang");
 CREATE VIEW "grundstueck_gueltig" AS
     SELECT
         "grundstueck"."nbident" AS "nbident",

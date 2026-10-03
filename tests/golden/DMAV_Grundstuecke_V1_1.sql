@@ -1,5 +1,5 @@
 CREATE TABLE "liegenschaft" (
-    "id" text UNIQUE NOT NULL,
+    "id" text PRIMARY KEY,
     "nummerteilgrundstueck" varchar(12),
     "fiktiv" boolean NOT NULL,
     "flaechenmass" integer NOT NULL,
@@ -10,7 +10,7 @@ CREATE TABLE "liegenschaft" (
 -- NOTE (liegenschaft): [BUILD-TYPE-UNRESOLVED] Streitig: attribute type not resolved by the model builder - provide the imported model via --repo
 -- NOTE (liegenschaft): [SQL-CHECK-EXPR-UNSUPPORTED] MANDATORY CONSTRAINT 'CH041201': DEFINED(streitig): no such column - CHECK not generated
 CREATE TABLE "selbstaendigesdauerndesrecht" (
-    "id" text UNIQUE NOT NULL,
+    "id" text PRIMARY KEY,
     "nummerteilgrundstueck" varchar(12),
     "flaechenmass" integer NOT NULL,
     "istbaurecht" boolean,
@@ -20,7 +20,7 @@ CREATE TABLE "selbstaendigesdauerndesrecht" (
 -- NOTE (selbstaendigesdauerndesrecht): [BUILD-TYPE-UNRESOLVED] Streitig: attribute type not resolved by the model builder - provide the imported model via --repo
 -- NOTE (selbstaendigesdauerndesrecht): [SQL-CHECK-EXPR-UNSUPPORTED] MANDATORY CONSTRAINT 'CH041601': DEFINED(streitig): no such column - CHECK not generated
 CREATE TABLE "bergwerk" (
-    "id" text UNIQUE NOT NULL,
+    "id" text PRIMARY KEY,
     "nummerteilgrundstueck" varchar(12),
     "flaechenmass" integer NOT NULL,
     "grundstueck" text NOT NULL
@@ -29,7 +29,7 @@ CREATE TABLE "bergwerk" (
 -- NOTE (bergwerk): [BUILD-TYPE-UNRESOLVED] Streitig: attribute type not resolved by the model builder - provide the imported model via --repo
 -- NOTE (bergwerk): [SQL-CHECK-EXPR-UNSUPPORTED] MANDATORY CONSTRAINT 'CH042001': DEFINED(streitig): no such column - CHECK not generated
 CREATE TABLE "gsnachfuehrung" (
-    "id" text UNIQUE NOT NULL,
+    "id" text PRIMARY KEY,
     "nbident" varchar(12) NOT NULL,
     "identifikator" varchar(12) NOT NULL,
     "beschreibung" varchar(60) NOT NULL,
@@ -40,7 +40,7 @@ CREATE TABLE "gsnachfuehrung" (
 );
 -- NOTE (gsnachfuehrung): [SQL-GEOM-NO-CRS] Perimeter: vertex CoordType not resolved - provide the geometry base model via --repo
 CREATE TABLE "grenzpunkt" (
-    "id" text UNIQUE NOT NULL,
+    "id" text PRIMARY KEY,
     "nbident" varchar(12),
     "nummer" varchar(12),
     "hoehengeometrie" numeric,
@@ -61,7 +61,7 @@ CREATE TABLE "grenzpunkt" (
 );
 -- NOTE (grenzpunkt): [BUILD-TYPE-UNRESOLVED] Geometrie: attribute type not resolved by the model builder - provide the imported model via --repo
 CREATE TABLE "grundstueck" (
-    "id" text UNIQUE NOT NULL,
+    "id" text PRIMARY KEY,
     "nbident" varchar(12) NOT NULL,
     "nummer" varchar(12) NOT NULL,
     "egrid" varchar(14),
@@ -75,7 +75,7 @@ CREATE TABLE "grundstueck" (
     CONSTRAINT chk_grundstueck_ch040701 CHECK (("istvollstaendig" = (NOT ("gesamtflaechenmass" IS NOT NULL))))
 );
 CREATE TABLE "grundstueck_textposition" (
-    "id" text UNIQUE NOT NULL,
+    "id" text PRIMARY KEY,
     "grundstueck_fk" text NOT NULL,
     "orientierung" numeric,
     "darstellungin" text,
@@ -85,14 +85,22 @@ CREATE TABLE "grundstueck_textposition" (
 );
 -- NOTE (grundstueck_textposition): [BUILD-TYPE-UNRESOLVED] Position: attribute type not resolved by the model builder - provide the imported model via --repo
 -- NOTE (grundstueck_textposition): [BUILD-TYPE-UNRESOLVED] Hinweisstrich: attribute type not resolved by the model builder - provide the imported model via --repo
-ALTER TABLE "liegenschaft" ADD CONSTRAINT fk_liegenschaft_grundstueck FOREIGN KEY ("grundstueck") REFERENCES "grundstueck" ("id") ON DELETE CASCADE;
-ALTER TABLE "selbstaendigesdauerndesrecht" ADD CONSTRAINT fk_selbstaendigesdauerndesrecht_grundstueck FOREIGN KEY ("grundstueck") REFERENCES "grundstueck" ("id") ON DELETE CASCADE;
-ALTER TABLE "bergwerk" ADD CONSTRAINT fk_bergwerk_grundstueck FOREIGN KEY ("grundstueck") REFERENCES "grundstueck" ("id") ON DELETE CASCADE;
-ALTER TABLE "grenzpunkt" ADD CONSTRAINT fk_grenzpunkt_entstehung FOREIGN KEY ("entstehung") REFERENCES "gsnachfuehrung" ("id");
-ALTER TABLE "grenzpunkt" ADD CONSTRAINT fk_grenzpunkt_untergang FOREIGN KEY ("untergang") REFERENCES "gsnachfuehrung" ("id");
-ALTER TABLE "grundstueck" ADD CONSTRAINT fk_grundstueck_entstehung FOREIGN KEY ("entstehung") REFERENCES "gsnachfuehrung" ("id");
-ALTER TABLE "grundstueck" ADD CONSTRAINT fk_grundstueck_untergang FOREIGN KEY ("untergang") REFERENCES "gsnachfuehrung" ("id");
-ALTER TABLE "grundstueck_textposition" ADD CONSTRAINT fk_grundstueck_textposition_grundstueck_fk FOREIGN KEY ("grundstueck_fk") REFERENCES "grundstueck" ("id") ON DELETE CASCADE;
+ALTER TABLE "liegenschaft" ADD CONSTRAINT fk_liegenschaft_grundstueck FOREIGN KEY ("grundstueck") REFERENCES "grundstueck" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "selbstaendigesdauerndesrecht" ADD CONSTRAINT fk_selbstaendigesdauerndesrecht_grundstueck FOREIGN KEY ("grundstueck") REFERENCES "grundstueck" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "bergwerk" ADD CONSTRAINT fk_bergwerk_grundstueck FOREIGN KEY ("grundstueck") REFERENCES "grundstueck" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "grenzpunkt" ADD CONSTRAINT fk_grenzpunkt_entstehung FOREIGN KEY ("entstehung") REFERENCES "gsnachfuehrung" ("id") DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "grenzpunkt" ADD CONSTRAINT fk_grenzpunkt_untergang FOREIGN KEY ("untergang") REFERENCES "gsnachfuehrung" ("id") DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "grundstueck" ADD CONSTRAINT fk_grundstueck_entstehung FOREIGN KEY ("entstehung") REFERENCES "gsnachfuehrung" ("id") DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "grundstueck" ADD CONSTRAINT fk_grundstueck_untergang FOREIGN KEY ("untergang") REFERENCES "gsnachfuehrung" ("id") DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "grundstueck_textposition" ADD CONSTRAINT fk_grundstueck_textposition_grundstueck_fk FOREIGN KEY ("grundstueck_fk") REFERENCES "grundstueck" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+CREATE INDEX idx_liegenschaft_grundstueck ON "liegenschaft" ("grundstueck");
+CREATE INDEX idx_selbstaendigesdauerndesrecht_grundstueck ON "selbstaendigesdauerndesrecht" ("grundstueck");
+CREATE INDEX idx_bergwerk_grundstueck ON "bergwerk" ("grundstueck");
+CREATE INDEX idx_grenzpunkt_entstehung ON "grenzpunkt" ("entstehung");
+CREATE INDEX idx_grenzpunkt_untergang ON "grenzpunkt" ("untergang");
+CREATE INDEX idx_grundstueck_entstehung ON "grundstueck" ("entstehung");
+CREATE INDEX idx_grundstueck_untergang ON "grundstueck" ("untergang");
+CREATE INDEX idx_grundstueck_textposition_grundstueck_fk ON "grundstueck_textposition" ("grundstueck_fk");
 -- NOTE (view grenzpunkt_gueltig): [SQL-VIEW-ATTR-DROPPED] attribute 'Geometrie' not in the CREATE VIEW: 'Geometrie' has no mapped column on table 'grenzpunkt'
 -- NOTE (view grenzpunkt_gueltig): [SQL-VIEW-CONSTRAINT-DROPPED] VIEW-level UNIQUE 'CH040601' (Geometrie) - a CREATE VIEW cannot enforce it, and it is outside the single-base/plain-column subset a BEFORE INSERT/UPDATE trigger can
 CREATE VIEW "grenzpunkt_gueltig" AS

@@ -74,7 +74,7 @@ def test_primary_key_and_unique_constraint():
     tables = build_tables([owner])
     table = _table(tables, "owner")
     ddl = render_postgresql(tables)
-    assert '"id" text UNIQUE NOT NULL' in ddl
+    assert '"id" text PRIMARY KEY' in ddl
     assert len(table.unique_constraints) == 1
     assert table.unique_constraints[0].columns == ["code"]
     assert 'CONSTRAINT uq_owner_code UNIQUE ("code")' in ddl
@@ -175,7 +175,10 @@ def test_reference_becomes_fk_column_and_constraint():
     assert fk.ref_table == "owner"
     assert fk.ref_columns == ["id"]
     ddl = render_postgresql(tables)
-    assert 'ALTER TABLE "parcel" ADD CONSTRAINT fk_parcel_owner FOREIGN KEY ("owner") REFERENCES "owner" ("id");' in ddl
+    assert (
+        'ALTER TABLE "parcel" ADD CONSTRAINT fk_parcel_owner FOREIGN KEY ("owner") REFERENCES "owner" ("id") '
+        "DEFERRABLE INITIALLY DEFERRED;" in ddl
+    )
 
 
 def test_foreign_key_dropped_when_target_not_converted():
@@ -476,7 +479,7 @@ END Foo.
     assert names == ["id_attr"]  # never a second "id" - that name is reserved for the identity column
     assert table.unique_constraints == [UniqueConstraint("uq_a_id", ["id_attr"])]
     ddl = render_postgresql(tables)
-    assert '"id" text UNIQUE NOT NULL' in ddl
+    assert '"id" text PRIMARY KEY' in ddl
     assert '"id_attr" varchar(25) NOT NULL' in ddl
     assert 'CONSTRAINT uq_a_id UNIQUE ("id_attr")' in ddl
 

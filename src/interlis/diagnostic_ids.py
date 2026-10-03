@@ -28,6 +28,10 @@ from __future__ import annotations
 REGISTRY: dict[str, tuple[str, str]] = {
     # -- convert-sql: CREATE TABLE ---------------------------------------
     "SQL-STRUCT-NESTED-DEEP": ("A", "STRUCTURE nested more than two levels deep is not flattened"),
+    "SQL-GPKG-GEOM-SPLIT": (
+        "B",
+        "GeoPackage allows one geometry column per table: each further one moves to a 1:1 side table",
+    ),
     "SQL-ASSOC-ROLES-UNRESOLVED": (
         "C",
         "link table of an association whose roles did not resolve (its base association's model is missing)",

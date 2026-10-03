@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import re
 
-from .identifiers import OID_COLUMN, _quote, _quote_list
-from .model import ForeignKey, SqlView, Table
+from interlis.diagnostic_ids import note as _diag
+
+from .identifiers import OID_COLUMN, _index_name, _quote, _quote_list, _sql_identifier, _truncate_identifier
+from .model import Column, ForeignKey, SqlView, Table, UniqueConstraint
 from .views import (
     _render_view_unique_triggers_gpkg,
     _render_view_unique_triggers_postgresql,
@@ -25,7 +27,7 @@ def render_postgresql(tables: list[Table], views: tuple[SqlView, ...] = ()) -> s
     """
     statements: list[str] = []
     for table in tables:
-        lines = [f"    {_quote(OID_COLUMN)} text UNIQUE NOT NULL"]
+        lines = [f"    {_quote(OID_COLUMN)} text PRIMARY KEY"]
         for column in table.columns:
             null_clause = "" if column.nullable else " NOT NULL"
             sql_type = f"geometry({column.geometry_type}, {column.srid})" if column.geometry_type else column.sql_type
@@ -40,14 +42,36 @@ def render_postgresql(tables: list[Table], views: tuple[SqlView, ...] = ()) -> s
             statements.append(f"-- NOTE ({table.name}): {note}")
     for table in tables:
         for fk in table.foreign_keys:
+            # Deferred: an XTF transfer lists objects in any order.
             statements.append(
                 f"ALTER TABLE {_quote(table.name)} ADD CONSTRAINT {fk.name} "
                 f"FOREIGN KEY ({_quote_list(fk.columns)}) "
-                f"REFERENCES {_quote(fk.ref_table)} ({_quote_list(fk.ref_columns)}){_on_delete(fk)};",
+                f"REFERENCES {_quote(fk.ref_table)} ({_quote_list(fk.ref_columns)}){_on_delete(fk)} "
+                "DEFERRABLE INITIALLY DEFERRED;",
             )
+    for table in tables:
+        for column in _foreign_key_columns(table):
+            statements.append(
+                f"CREATE INDEX {_index_name(table.name, column)} ON {_quote(table.name)} ({_quote(column)});"
+            )
+        for column in table.columns:
+            if column.geometry_type:
+                statements.append(
+                    f"CREATE INDEX {_index_name(table.name, column.name)} ON {_quote(table.name)} "
+                    f"USING GIST ({_quote(column.name)});"
+                )
     statements += _render_views(views)
     statements += _render_view_unique_triggers_postgresql(views)
     return "\n".join(statements) + "\n"
+
+
+def _foreign_key_columns(table: Table) -> list[str]:
+    """Each single-column FK's column once, in declaration order - joins and cascades look them up."""
+    seen: dict[str, None] = {}
+    for fk in table.foreign_keys:
+        if len(fk.columns) == 1:
+            seen.setdefault(fk.columns[0], None)
+    return list(seen)
 
 
 def _on_delete(fk: ForeignKey) -> str:
@@ -75,8 +99,9 @@ def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = ()) -> str:
     """
     statements: list[str] = []
     srids: set[int] = set()
+    tables = [t for table in tables for t in _one_geometry_per_table(table)]
     for table in tables:
-        lines = [f"    {_quote(OID_COLUMN)} TEXT UNIQUE NOT NULL"]
+        lines = ['    "fid" INTEGER PRIMARY KEY AUTOINCREMENT', f"    {_quote(OID_COLUMN)} TEXT UNIQUE NOT NULL"]
         for column in table.columns:
             null_clause = "" if column.nullable else " NOT NULL"
             if column.geometry_type:
@@ -84,14 +109,15 @@ def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = ()) -> str:
                 sql_type = base_type.upper()
                 srids.add(column.srid)
             else:
-                sql_type = column.sql_type
+                sql_type = _gpkg_type(column.sql_type)
             lines.append(f"    {_quote(column.name)} {sql_type}{null_clause}")
         for unique in table.unique_constraints:
             lines.append(f"    CONSTRAINT {unique.name} UNIQUE ({_quote_list(unique.columns)})")
         for fk in table.foreign_keys:
             lines.append(
                 f"    CONSTRAINT {fk.name} FOREIGN KEY ({_quote_list(fk.columns)}) "
-                f"REFERENCES {_quote(fk.ref_table)} ({_quote_list(fk.ref_columns)}){_on_delete(fk)}",
+                f"REFERENCES {_quote(fk.ref_table)} ({_quote_list(fk.ref_columns)}){_on_delete(fk)} "
+                "DEFERRABLE INITIALLY DEFERRED",
             )
         for check in table.check_constraints:
             lines.append(f"    CONSTRAINT {check.name} CHECK ({check.expression})")
@@ -99,7 +125,13 @@ def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = ()) -> str:
         statements.append(f"CREATE TABLE {_quote(table.name)} (\n{body}\n);")
         for note in table.notes:
             statements.append(f"-- NOTE ({table.name}): {note}")
+        for column in _foreign_key_columns(table):
+            statements.append(
+                f"CREATE INDEX {_index_name(table.name, column)} ON {_quote(table.name)} ({_quote(column)});"
+            )
 
+    # SRS rows first: gpkg_contents/gpkg_geometry_columns reference them.
+    statements += _gpkg_srs_rows(srids)
     for table in tables:
         geometry_columns = [c for c in table.columns if c.geometry_type]
         if geometry_columns:
@@ -121,6 +153,65 @@ def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = ()) -> str:
                 f"VALUES ('{table.name}', 'attributes', '{table.name}');",
             )
 
+    statements += _render_views(views)
+    statements += _render_view_unique_triggers_gpkg(views)
+    return "\n".join(statements) + "\n"
+
+
+_GPKG_TYPES = {
+    "text": "TEXT",
+    "integer": "INTEGER",
+    "numeric": "DOUBLE",
+    "boolean": "BOOLEAN",
+    "date": "DATE",
+    "timestamp": "DATETIME",
+    "time": "TEXT",
+}
+
+
+def _gpkg_type(sql_type: str) -> str:
+    """The GeoPackage 1.3 column type name for a portable SQL type (`varchar(n)` -> `TEXT(n)`); GPKG has no TIME."""
+    if sql_type.startswith("varchar(") and sql_type.endswith(")"):
+        return f"TEXT{sql_type[len('varchar'):]}"
+    return _GPKG_TYPES.get(sql_type, sql_type)
+
+
+def _one_geometry_per_table(table: Table) -> list[Table]:
+    """`table`, plus a 1:1 side table `<table>_<column>` for each geometry column after its first (GeoPackage
+    registers a single geometry column per table, as ili2db's `--oneGeomPerTable`).
+    """
+    geometry_columns = [c for c in table.columns if c.geometry_type]
+    if len(geometry_columns) <= 1:
+        return [table]
+    out = [table]
+    fk_column = _sql_identifier(f"{table.name}_fk")
+    for column in geometry_columns[1:]:
+        table.columns.remove(column)
+        side_name = _truncate_identifier(_sql_identifier(f"{table.name}_{column.name}"))
+        table.notes.append(
+            _diag("SQL-GPKG-GEOM-SPLIT", f"{column.name}: geometry column moved to side table {side_name!r}")
+        )
+        out.append(
+            Table(
+                name=side_name,
+                columns=[Column(fk_column, "text", nullable=False), column],
+                unique_constraints=[UniqueConstraint(_truncate_identifier(f"uq_{side_name}_{fk_column}"), [fk_column])],
+                foreign_keys=[
+                    ForeignKey(
+                        _truncate_identifier(f"fk_{side_name}_{fk_column}"),
+                        [fk_column],
+                        table.name,
+                        [OID_COLUMN],
+                        on_delete="CASCADE",
+                    )
+                ],
+            )
+        )
+    return out
+
+
+def _gpkg_srs_rows(srids: set[int]) -> list[str]:
+    statements: list[str] = []
     for srid in sorted(srids - {4326}):
         statements.append(
             f"-- TODO: verify/replace this placeholder with the authoritative EPSG:{srid} WKT "
@@ -131,9 +222,7 @@ def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = ()) -> str:
             f"(srs_name, srs_id, organization, organization_coordsys_id, definition) "
             f"VALUES ('EPSG:{srid}', {srid}, 'EPSG', {srid}, 'undefined');",
         )
-    statements += _render_views(views)
-    statements += _render_view_unique_triggers_gpkg(views)
-    return "\n".join(statements) + "\n"
+    return statements
 
 
 _NOTE_RULE_RE = re.compile(r"^\[([A-Z0-9-]+)\]\s*(.*)$", re.DOTALL)

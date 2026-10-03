@@ -19,6 +19,7 @@ from interlis.xtf.schema import (
     embedded_roles_of,
     inheritance_chain,
     is_class_compatible,
+    multi_geometry_element,
     reference_target_class,
     resolve_attribute,
     schema_members_of,
@@ -124,6 +125,20 @@ def _columns_for_class(
             continue
 
         if resolved.type_kind == "Class" and _is_structure(resolved.type_instance):
+            # A multi-geometry wrapper (CHBase MultiSurface/MultiLine/MultiPoint)
+            # is one Multi* column, not a child table of single parts.
+            multi_geometry = multi_geometry_element(resolved.type_instance)
+            if multi_geometry is not None:
+                sfa_type, srid, reason = _geometry_column_info(multi_geometry)
+                if sfa_type is None:
+                    notes.append(
+                        _diag("SQL-GEOM-NO-CRS", f"{label}: {reason} - provide the geometry base model via --repo")
+                    )
+                    continue
+                if not sfa_type.startswith("Multi"):
+                    sfa_type = f"Multi{sfa_type}"
+                columns.append(Column(col_name, "", nullable=not resolved.mandatory, geometry_type=sfa_type, srid=srid))
+                continue
             if depth >= _MAX_STRUCT_FLATTEN_DEPTH:
                 notes.append(
                     _diag(

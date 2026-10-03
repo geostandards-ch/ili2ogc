@@ -10,9 +10,9 @@ from __future__ import annotations
 import hashlib
 
 OID_COLUMN = "id"
-"""Deliberately NOT `PRIMARY KEY`/GDAL's own FID column (`ogc_fid`) - GDAL
-never writes application data into whatever column it detects as the
-PRIMARY KEY, so a real `id` value would be silently dropped there.
+"""The object's TID. A `text` PRIMARY KEY in PostgreSQL (GDAL only takes an
+integer key as its FID, so `ogr2ogr -append` still writes the TID there);
+GeoPackage requires an INTEGER PRIMARY KEY, so it keeps a separate `fid`.
 """
 
 _MAX_IDENTIFIER_LENGTH = 63  # PostgreSQL's own identifier length limit - a real ceiling, not an arbitrary one.
@@ -62,3 +62,7 @@ def _quote(name: str) -> str:
 
 def _quote_list(names: list[str]) -> str:
     return ", ".join(_quote(n) for n in names)
+
+
+def _index_name(table: str, column: str) -> str:
+    return _truncate_identifier(f"idx_{table}_{column}")

@@ -33,6 +33,7 @@ docs/view-formation-support.md; this test pins it:
   FUNCTION Aggregation.
 """
 
+import re
 import sqlite3
 from pathlib import Path
 
@@ -44,6 +45,12 @@ from interlis.convert.sql import build_tables, build_views, render_gpkg
 from interlis.metamodel.instance import MetaInstance
 from interlis.runtime.parse import meta_attribute_comments_in_file
 from interlis.xtf.parse import parse_xtf
+
+
+def _gpkg_schema_only(ddl: str) -> str:
+    """The DDL up to the GeoPackage bootstrap rows (SRS first), which need GDAL's gpkg_* tables."""
+    return re.split(r"\n(?:-- TODO: verify|INSERT (?:OR IGNORE )?INTO gpkg_)", ddl, maxsplit=1)[0]
+
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / "tests" / "fixtures" / "views"
@@ -78,7 +85,7 @@ def _sql_views(builder):
 def _run_ddl(tables, views):
     """Create every table + `CREATE VIEW` body against live SQLite - proves the DDL compiles."""
     con = sqlite3.connect(":memory:")
-    con.executescript(render_gpkg(tables).split("\nINSERT INTO gpkg_contents")[0])
+    con.executescript(_gpkg_schema_only(render_gpkg(tables)))
     for view in views:
         if view.body is not None:
             con.execute(f'CREATE VIEW "{view.name}" AS {view.body}')

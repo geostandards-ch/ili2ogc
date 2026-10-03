@@ -100,9 +100,9 @@ def test_catalog_promotion_keeps_each_models_reference_on_its_own_class(repo_dir
     assert 'CREATE TABLE "thing_baseb" (' in ddl
     assert (
         'ALTER TABLE "holder_basea" ADD CONSTRAINT fk_holder_thing FOREIGN KEY ("thing") '
-        'REFERENCES "thing_basea" ("id");' in ddl
+        'REFERENCES "thing_basea" ("id") DEFERRABLE INITIALLY DEFERRED;' in ddl
     )
     assert (
         'ALTER TABLE "holder_baseb" ADD CONSTRAINT fk_holder_thing FOREIGN KEY ("thing") '
-        'REFERENCES "thing_baseb" ("id");' in ddl
+        'REFERENCES "thing_baseb" ("id") DEFERRABLE INITIALLY DEFERRED;' in ddl
     )

@@ -16,6 +16,7 @@ carries the same shapes (a `JOIN OF ... WHERE role == base`, a
 real SQLite engine.
 """
 
+import re
 import sqlite3
 from pathlib import Path
 
@@ -26,6 +27,12 @@ from interlis.builder.repository import ModelRepository
 from interlis.convert.sql import build_tables, build_views, render_gpkg
 from interlis.metamodel.instance import MetaInstance
 from interlis.runtime.parse import meta_attribute_comments
+
+
+def _gpkg_schema_only(ddl: str) -> str:
+    """The DDL up to the GeoPackage bootstrap rows (SRS first), which need GDAL's gpkg_* tables."""
+    return re.split(r"\n(?:-- TODO: verify|INSERT (?:OR IGNORE )?INTO gpkg_)", ddl, maxsplit=1)[0]
+
 
 FGDM4GS = Path(__file__).resolve().parent / "fixtures" / "fgdm4gs"
 
@@ -113,7 +120,7 @@ def test_projection_view_navigates_a_reference_hop_with_an_extra_join():
 
 def test_join_view_executes_against_real_sqlite():
     tables, sql_views = _split(_build_model())
-    schema = render_gpkg(tables).split("\nINSERT INTO gpkg_contents")[0]
+    schema = _gpkg_schema_only(render_gpkg(tables))
     conn = sqlite3.connect(":memory:")
     conn.executescript(schema)
     for v in sql_views:
@@ -181,7 +188,7 @@ def test_view_attribute_naming_a_flattened_struct_resolves_to_its_one_column():
 
 def test_view_over_flattened_struct_executes_against_real_sqlite():
     tables, sql_views = _split_catalog_ref()
-    schema = render_gpkg(tables).split("\nINSERT INTO gpkg_contents")[0]
+    schema = _gpkg_schema_only(render_gpkg(tables))
     conn = sqlite3.connect(":memory:")
     conn.executescript(schema)
     view = _view(sql_views, "itemview")
@@ -227,7 +234,7 @@ def test_union_view_is_a_union_all_of_per_branch_projections():
 
 def test_union_view_executes_against_real_sqlite():
     tables, sql_views = _split_union()
-    schema = render_gpkg(tables).split("\nINSERT INTO gpkg_contents")[0]
+    schema = _gpkg_schema_only(render_gpkg(tables))
     conn = sqlite3.connect(":memory:")
     conn.executescript(schema)
     view = _view(sql_views, "cc")
@@ -378,7 +385,7 @@ def test_whereless_join_of_directly_associated_classes_auto_derives_the_join_con
 
 def test_whereless_join_of_directly_associated_classes_executes_against_real_sqlite():
     tables, sql_views = _split_whereless_join()
-    schema = render_gpkg(tables).split("\nINSERT INTO gpkg_contents")[0]
+    schema = _gpkg_schema_only(render_gpkg(tables))
     conn = sqlite3.connect(":memory:")
     conn.executescript(schema)
     view = _view(sql_views, "linietyp")

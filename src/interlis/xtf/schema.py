@@ -203,6 +203,29 @@ def _role_is_multi(role: MetaInstance) -> bool:
     return isinstance(mult, MetaInstance) and getattr(mult, "Max", None) == "*"
 
 
+def multi_geometry_element(structure: MetaInstance | None) -> "ResolvedAttribute | None":
+    """The single geometry attribute of a multi-geometry wrapper STRUCTURE, else `None`.
+
+    The CHBase pattern (`MultiSurface`, `MultiLine`, `MultiPoint`, ...): a
+    STRUCTURE whose only attribute is a `BAG`/`LIST OF` a STRUCTURE holding
+    exactly one coordinate or line attribute - one multi-geometry value.
+    """
+    if not isinstance(structure, MetaInstance) or getattr(structure, "Kind", None) != "Structure":
+        return None
+    members = list(attributes_of(structure).values())
+    if len(members) != 1:
+        return None
+    bag = resolve_attribute(members[0])
+    element = getattr(bag.type_instance, "BaseType", None) if bag.type_kind == "MultiValue" else None
+    if not isinstance(element, MetaInstance) or getattr(element, "Kind", None) != "Structure":
+        return None
+    parts = list(attributes_of(element).values())
+    if len(parts) != 1:
+        return None
+    geometry = resolve_attribute(parts[0])
+    return geometry if geometry.type_kind in ("CoordType", "LineType") else None
+
+
 def association_roles(association: MetaInstance) -> list[MetaInstance]:
     """An association's roles: its own, then those it inherits through `EXTENDS` (an own role redefines a
     same-named inherited one).
