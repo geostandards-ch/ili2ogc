@@ -187,6 +187,15 @@ def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = ()) -> str:
                 f"VALUES ('{table.name}', 'attributes', '{table.name}');",
             )
 
+    # The R-tree spatial index (GeoPackage extension F.3) uses ST_* trigger
+    # functions only GDAL/SpatiaLite provide - GDAL creates it in one call.
+    for table in tables + union_views:
+        for column in [c for c in table.columns if c.geometry_type][:1]:
+            if not table.union_of:
+                statements.append(
+                    f"-- spatial index: ogrinfo <file>.gpkg -sql \"SELECT CreateSpatialIndex('{table.name}', "
+                    f"'{column.name}')\""
+                )
     statements += _render_views(views)
     statements += _render_view_unique_triggers_gpkg(views)
     return "\n".join(statements) + "\n"

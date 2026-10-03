@@ -78,6 +78,7 @@ def test_geopackage_keeps_one_geometry_per_table_and_applies(tmp_path: Path):
     assert 'CREATE TABLE "site_spots"' in sql
     assert 'CREATE TABLE "site_paths"' in sql
     assert '"born" DATETIME' in sql
+    assert "-- spatial index: ogrinfo <file>.gpkg -sql \"SELECT CreateSpatialIndex('site', 'area')\"" in sql
     con = sqlite3.connect(":memory:")
     con.execute("PRAGMA foreign_keys=ON")
     con.executescript(_GPKG_SYSTEM + sql)
