@@ -16,6 +16,7 @@ ALTER TABLE "wegweiser" ADD CONSTRAINT fk_wegweiser_wegabschnitt FOREIGN KEY ("w
 CREATE INDEX idx_wegweiser_wegabschnitt ON "wegweiser" ("wegabschnitt");
 CREATE VIEW "wegabschnitt_mitwegweiser" AS
     SELECT
+        "wegabschnitt"."id" AS "id",
         "wegabschnitt"."bezeichnung" AS "bezeichnung",
         "wegabschnitt"."kategorie" AS "kategorie",
         "wegabschnitt"."belagsart" AS "belagsart"

@@ -366,6 +366,8 @@ def build_views(
                     notes.append(_diag("SQL-VIEW-ATTR-DROPPED", f"attribute {aname!r} not in the CREATE VIEW: {exc}"))
             if not select_items:
                 raise _UnsupportedView("view has no projectable ATTRIBUTE definitions", "SQL-VIEW-NO-ATTRS")
+            if OID_COLUMN not in {_sql_identifier(getattr(a, "Name", None) or "") for a in view.ClassAttribute or []}:
+                select_items.insert(0, f'{_view_row_id(bases)} AS "{OID_COLUMN}"')
             where = _view_where_conjuncts(getattr(view, "Where", None), resolver)
             if len(bases) > 1 and getattr(view, "Where", None) is None:
                 where += _auto_join_conditions(bases, symbol_for)
@@ -383,6 +385,12 @@ def build_views(
         except _UnsupportedView as exc:
             result.append(SqlView(vname, None, [_diag(exc.rule, str(exc))]))
     return result
+
+
+def _view_row_id(bases: list[tuple[str, MetaInstance, str]]) -> str:
+    """A row id for a projection (its base's id) or a join (the bases' ids joined by ':', unique per pair)."""
+    ids = [f'"{alias}"."{OID_COLUMN}"' for alias, _cls, _table in bases]
+    return ids[0] if len(ids) == 1 else " || ':' || ".join(ids)
 
 
 def _build_union_view(
@@ -404,9 +412,10 @@ def _build_union_view(
     if not attrs:
         raise _UnsupportedView("union view has no ATTRIBUTE definitions", "SQL-VIEW-NO-ATTRS")
     branches: list[str] = []
+    declares_id = OID_COLUMN in {_sql_identifier(getattr(a, "Name", None) or "") for a in attrs}
     for branch_index, (alias, cls, table) in enumerate(bases):
         resolver = _ViewResolver([(alias, cls, table)], tables_by_name, symbol_for, assoc_near_roles)
-        items: list[str] = []
+        items: list[str] = [] if declares_id else [f'"{alias}"."{OID_COLUMN}" AS "{OID_COLUMN}"']
         for attr in attrs:
             aname = getattr(attr, "Name", None)
             derivates = getattr(attr, "Derivates", None) or []

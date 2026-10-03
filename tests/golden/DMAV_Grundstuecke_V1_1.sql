@@ -122,6 +122,7 @@ CREATE INDEX idx_grundstueck_textposition_grundstueck_fk ON "grundstueck_textpos
 -- NOTE (view grenzpunkt_gueltig): [SQL-VIEW-CONSTRAINT-DROPPED] VIEW-level UNIQUE 'CH040601' (Geometrie) - a CREATE VIEW cannot enforce it, and it is outside the single-base/plain-column subset a BEFORE INSERT/UPDATE trigger can
 CREATE VIEW "grenzpunkt_gueltig" AS
     SELECT
+        "grenzpunkt"."id" AS "id",
         "grenzpunkt"."nbident" AS "nbident",
         "grenzpunkt"."nummer" AS "nummer",
         "grenzpunkt"."hoehengeometrie" AS "hoehengeometrie",
@@ -141,6 +142,7 @@ CREATE VIEW "grenzpunkt_gueltig" AS
 -- NOTE (view grundstueck_gueltig): [SQL-VIEW-ATTR-DROPPED] attribute 'Textposition' not in the CREATE VIEW: 'Textposition' has no mapped column on table 'grundstueck'
 CREATE VIEW "grundstueck_gueltig" AS
     SELECT
+        "grundstueck"."id" AS "id",
         "grundstueck"."nbident" AS "nbident",
         "grundstueck"."nummer" AS "nummer",
         "grundstueck"."egrid" AS "egrid",
@@ -158,6 +160,7 @@ CREATE VIEW "grundstueck_gueltig" AS
 -- NOTE (view liegenschaft_gueltig): [SQL-VIEW-CONSTRAINT-DROPPED] VIEW-level SetConstraint 'CH041501' - a whole-population check no CREATE VIEW/TRIGGER can carry
 CREATE VIEW "liegenschaft_gueltig" AS
     SELECT
+        "liegenschaft"."id" AS "id",
         "liegenschaft"."nummerteilgrundstueck" AS "nummerteilgrundstueck",
         "liegenschaft"."fiktiv" AS "fiktiv",
         "liegenschaft"."flaechenmass" AS "flaechenmass",
@@ -170,6 +173,7 @@ CREATE VIEW "liegenschaft_gueltig" AS
 -- NOTE (view selbstaendigesdauerndesrecht_gueltig): [SQL-VIEW-ATTR-DROPPED] attribute 'Streitig' not in the CREATE VIEW: 'Streitig' has no mapped column on table 'selbstaendigesdauerndesrecht'
 CREATE VIEW "selbstaendigesdauerndesrecht_gueltig" AS
     SELECT
+        "selbstaendigesdauerndesrecht"."id" AS "id",
         "selbstaendigesdauerndesrecht"."nummerteilgrundstueck" AS "nummerteilgrundstueck",
         "selbstaendigesdauerndesrecht"."flaechenmass" AS "flaechenmass",
         "selbstaendigesdauerndesrecht"."istbaurecht" AS "istbaurecht"
@@ -181,6 +185,7 @@ CREATE VIEW "selbstaendigesdauerndesrecht_gueltig" AS
 -- NOTE (view bergwerk_gueltig): [SQL-VIEW-ATTR-DROPPED] attribute 'Streitig' not in the CREATE VIEW: 'Streitig' has no mapped column on table 'bergwerk'
 CREATE VIEW "bergwerk_gueltig" AS
     SELECT
+        "bergwerk"."id" AS "id",
         "bergwerk"."nummerteilgrundstueck" AS "nummerteilgrundstueck",
         "bergwerk"."flaechenmass" AS "flaechenmass"
     FROM "bergwerk" "bergwerk"
