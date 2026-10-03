@@ -57,7 +57,16 @@
     },
     "WorksFor": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "Employee": {
+          "type": "string",
+          "x-reference-target": "Person"
+        },
+        "Employer": {
+          "type": "string",
+          "x-reference-target": "Company"
+        }
+      },
       "title": "WorksFor"
     }
   }

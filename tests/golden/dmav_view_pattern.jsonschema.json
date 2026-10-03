@@ -74,12 +74,30 @@
     },
     "Entstehung_Grundstueck": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "Entstehung": {
+          "type": "string",
+          "x-reference-target": "GSNachfuehrung"
+        },
+        "entstehendes_Grundstueck": {
+          "type": "string",
+          "x-reference-target": "Grundstueck"
+        }
+      },
       "title": "Entstehung_Grundstueck"
     },
     "Untergang_Grundstueck": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "Untergang": {
+          "type": "string",
+          "x-reference-target": "GSNachfuehrung"
+        },
+        "untergehendes_Grundstueck": {
+          "type": "string",
+          "x-reference-target": "Grundstueck"
+        }
+      },
       "title": "Untergang_Grundstueck"
     },
     "Grundstueck_Gueltig": {

@@ -65,7 +65,16 @@
     },
     "Abschnitt_Wegweiser": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "Wegabschnitt": {
+          "type": "string",
+          "x-reference-target": "Wegabschnitt"
+        },
+        "wegweiser_von": {
+          "type": "string",
+          "x-reference-target": "Wegweiser"
+        }
+      },
       "title": "Abschnitt_Wegweiser"
     },
     "Wegabschnitt_MitWegweiser": {

@@ -406,7 +406,11 @@ def _fold_in_dependency_models(classes, views, root_table, repository, class_sym
                 if isinstance(target, MetaInstance):
                     queue.append(target)
 
-    for instance_id, instance in keep.items():
+    # Declaration order, not discovery order: `needed_ids` is a set of
+    # `id()`s, so discovery order follows memory addresses - and decides
+    # which of two same-named classes keeps the unsuffixed table name.
+    position = {instance_id: n for n, instance_id in enumerate(loaded)}
+    for instance_id, instance in sorted(keep.items(), key=lambda item: position.get(item[0], len(position))):
         if getattr(instance, "Name", None) in already_names:
             continue  # already in the conversion (typically via --catalog)
         already_ids.add(instance_id)

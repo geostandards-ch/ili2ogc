@@ -267,10 +267,16 @@ def schema_members_of(class_instance: MetaInstance, symbol_table: SymbolTable) -
 
     The full view of pseudo-attributes an XTF object of this class can
     carry: own/inherited ClassAttr attributes plus embedded association
-    roles.
+    roles - and, for an association itself, its own roles.
     """
     members = dict(attributes_of(class_instance))
     members.update(embedded_roles_of(class_instance, symbol_table))
+    if getattr(class_instance, "Kind", None) == "Association":
+        # A non-embedded association is transferred as its own object whose
+        # elements are its roles, each a REF (eCH-0031 §4.3.9.2).
+        for role in getattr(class_instance, "Role", None) or []:
+            if isinstance(role, MetaInstance) and getattr(role, "Name", None):
+                members.setdefault(role.Name, role)
     return members
 
 

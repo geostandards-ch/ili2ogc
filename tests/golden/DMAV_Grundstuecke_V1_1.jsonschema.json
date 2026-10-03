@@ -310,12 +310,30 @@
     },
     "Entstehung_Grenzpunkt": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "Entstehung": {
+          "type": "string",
+          "x-reference-target": "GSNachfuehrung"
+        },
+        "entstehender_Grenzpunkt": {
+          "type": "string",
+          "x-reference-target": "Grenzpunkt"
+        }
+      },
       "title": "Entstehung_Grenzpunkt"
     },
     "Untergang_Grenzpunkt": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "Untergang": {
+          "type": "string",
+          "x-reference-target": "GSNachfuehrung"
+        },
+        "untergehender_Grenzpunkt": {
+          "type": "string",
+          "x-reference-target": "Grenzpunkt"
+        }
+      },
       "title": "Untergang_Grenzpunkt"
     },
     "Grundstueck": {
@@ -391,27 +409,72 @@
     },
     "Entstehung_Grundstueck": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "Entstehung": {
+          "type": "string",
+          "x-reference-target": "GSNachfuehrung"
+        },
+        "entstehendes_Grundstueck": {
+          "type": "string",
+          "x-reference-target": "Grundstueck"
+        }
+      },
       "title": "Entstehung_Grundstueck"
     },
     "Untergang_Grundstueck": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "Untergang": {
+          "type": "string",
+          "x-reference-target": "GSNachfuehrung"
+        },
+        "untergehendes_Grundstueck": {
+          "type": "string",
+          "x-reference-target": "Grundstueck"
+        }
+      },
       "title": "Untergang_Grundstueck"
     },
     "GrundstueckLiegenschaft": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "Grundstueck": {
+          "type": "string",
+          "x-reference-target": "Grundstueck"
+        },
+        "Liegenschaft": {
+          "type": "string",
+          "x-reference-target": "Liegenschaft"
+        }
+      },
       "title": "GrundstueckLiegenschaft"
     },
     "GrundstueckSelbstaendigesDauerndesRecht": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "Grundstueck": {
+          "type": "string",
+          "x-reference-target": "Grundstueck"
+        },
+        "SelbstaendigesDauerndesRecht": {
+          "type": "string",
+          "x-reference-target": "SelbstaendigesDauerndesRecht"
+        }
+      },
       "title": "GrundstueckSelbstaendigesDauerndesRecht"
     },
     "GrundstueckBergwerk": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "Grundstueck": {
+          "type": "string",
+          "x-reference-target": "Grundstueck"
+        },
+        "Bergwerk": {
+          "type": "string",
+          "x-reference-target": "Bergwerk"
+        }
+      },
       "title": "GrundstueckBergwerk"
     },
     "Grenzpunkt_Gueltig": {

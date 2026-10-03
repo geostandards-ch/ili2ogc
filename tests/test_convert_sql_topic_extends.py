@@ -85,3 +85,29 @@ def test_reference_to_extended_base_class_is_split_per_table(tmp_path: Path, cap
     assert 'REFERENCES "facility"' in sql
     assert '"facility_subfacility" text' in sql
     assert 'REFERENCES "subfacility"' in sql
+
+
+def test_folded_table_names_follow_declaration_order(tmp_path: Path, capsys):
+    """Two same-named base classes: the first declared keeps the unsuffixed name, every run."""
+    second = (
+        _BASE.split("END Cat.\n", 1)[1]
+        .replace("MODEL Base ", "MODEL Base2 ")
+        .replace("END Base.", "END Base2.")
+        .replace("Label : TEXT*10;", "Label : TEXT*10;\n      Extra : TEXT*3;")
+    )
+    (tmp_path / "Base.ili").write_text(_BASE + second, encoding="utf-8")
+    (tmp_path / "Two.ili").write_text(
+        _BARE_EXTENSION.replace("MODEL Bare", "MODEL Two").replace("END Bare.", "END Two.")
+        + _BARE_EXTENSION.replace("MODEL Bare", "MODEL Two2")
+        .replace("END Bare.", "END Two2.")
+        .replace("Base", "Base2")
+        .replace("INTERLIS 2.4;", ""),
+        encoding="utf-8",
+    )
+    out = tmp_path / "out.sql"
+    main(["convert-sql", str(tmp_path / "Two.ili"), "--repo", str(tmp_path), "-o", str(out)])
+    sql = out.read_text(encoding="utf-8")
+    first = sql.split('CREATE TABLE "facility" (', 1)[1].split(");", 1)[0]
+    second = sql.split('CREATE TABLE "facility_2" (', 1)[1].split(");", 1)[0]
+    assert '"extra"' not in first
+    assert '"extra"' in second
