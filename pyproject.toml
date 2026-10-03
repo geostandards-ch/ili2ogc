@@ -129,6 +129,22 @@ ignore_missing_imports = true
 warn_unused_configs = true
 exclude = ["^src/interlis/antlr/", "^vendor/"]
 
+[tool.hatch.build.targets.sdist]
+# Explicit allow-list: hatch honours .gitignore but not .git/info/exclude,
+# so without it the sdist would ship every untracked local file.
+only-include = [
+    "src/interlis",
+    "spec/grammar/mapping",
+    "mappings/ilismeta16-classes.yml",
+    "mappings/ilismeta16-datatypes.yml",
+    "mappings/ilismeta16-associations.yml",
+    "mappings/ilismeta16-enumerations.yml",
+    "mappings/ilismeta16-extensions.yml",
+    "mappings/ilismeta16-kind-values.yml",
+    "README.md",
+    "LICENSE",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/interlis"]
 
