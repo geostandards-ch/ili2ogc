@@ -753,10 +753,12 @@ def build_tables(
     scan_symbol_tables: list[SymbolTable] = [st for st in [symbol_table, *_distinct_catalog_tables] if st is not None]
     # A non-embedded association (n:m, or more than 2 roles) is transferred
     # as its own object (eCH-0031 §4.3.9.2): it needs its own link table.
+    # ABSTRACT classes never have instances: their concrete subclasses hold
+    # the rows and are the FOREIGN KEY targets (`_reference_target_classes`).
     table_classes = [
         c
         for c in classes
-        if getattr(c, "Kind", None) == "Class"
+        if (getattr(c, "Kind", None) == "Class" and not getattr(c, "Abstract", False))
         or (
             getattr(c, "Kind", None) == "Association"
             and not getattr(c, "Abstract", False)
@@ -984,12 +986,54 @@ def build_tables(
                 for candidate in _reference_target_classes(alternative, converted) if alternative else []:
                     if all(candidate is not t for t in targets):
                         targets.append(candidate)
-            if len(targets) <= 1:
-                fk.ref_table = table_name_by_class_id[id(targets[0] if targets else target)]
+            if not targets:
+                table.foreign_keys.remove(fk)
+                table.notes.append(
+                    _diag(
+                        "SQL-REF-TARGET-UNRESOLVED",
+                        f"{', '.join(fk.columns)}: reference to ABSTRACT {getattr(target, 'Name', '?')!r} with no "
+                        "concrete subclass in this conversion (FOREIGN KEY dropped, column kept) - provide the model "
+                        "that defines them via --repo",
+                    )
+                )
+                continue
+            if len(targets) == 1:
+                fk.ref_table = table_name_by_class_id[id(targets[0])]
                 continue
             _split_polymorphic_fk(
                 table, fk, [(t, table_name_by_class_id[id(t)]) for t in targets], keeps_column=targets[0] is target
             )
+
+    # An ABSTRACT class with concrete subclasses becomes a polymorphic VIEW of
+    # its inherited columns over their tables - what a `VIEW ... OF` it, or a
+    # reader wanting every instance, needs (INTERLIS views are polymorphic).
+    tables_by_name = {t.name: t for t in tables}
+    for cls in classes:
+        if getattr(cls, "Kind", None) != "Class" or not getattr(cls, "Abstract", False):
+            continue
+        subclass_tables = [
+            tables_by_name[table_name_by_class_id[id(s)]] for s in _reference_target_classes(cls, converted)
+        ]
+        if not subclass_tables:
+            continue
+        own = {c.name for c in _columns_for_class(cls, (class_symbol_tables or {}).get(id(cls), symbol_table))[0]}
+        shared = [
+            column
+            for column in subclass_tables[0].columns
+            if any(column.name == n or column.name.startswith(f"{n}_") for n in own)
+            and all(any(o.name == column.name for o in t.columns) for t in subclass_tables[1:])
+        ]
+        name = _dedup_name(_sql_identifier(getattr(cls, "Name", None) or ""), used_table_names)
+        table_name_by_class_id[id(cls)] = name
+        if class_table_names is not None:
+            class_table_names[id(cls)] = name
+        tables.append(
+            Table(
+                name=name,
+                columns=[Column(c.name, c.sql_type, geometry_type=c.geometry_type, srid=c.srid) for c in shared],
+                union_of=[t.name for t in subclass_tables],
+            )
+        )
 
     final_table_names = {t.name for t in tables}
     for table in tables:

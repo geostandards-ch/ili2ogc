@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 
 from interlis.diagnostic_ids import note as _diag
 
@@ -26,6 +27,8 @@ def render_postgresql(tables: list[Table], views: tuple[SqlView, ...] = ()) -> s
     topologically sorting.
     """
     statements: list[str] = []
+    union_views = [t for t in tables if t.union_of]
+    tables = [t for t in tables if not t.union_of]
     for table in tables:
         lines = [f"    {_quote(OID_COLUMN)} text PRIMARY KEY"]
         for column in table.columns:
@@ -61,9 +64,16 @@ def render_postgresql(tables: list[Table], views: tuple[SqlView, ...] = ()) -> s
                     f"CREATE INDEX {_index_name(table.name, column.name)} ON {_quote(table.name)} "
                     f"USING GIST ({_quote(column.name)});"
                 )
+    statements += [f"CREATE VIEW {_quote(v.name)} AS {_union_select(v)};" for v in union_views]
     statements += _render_views(views)
     statements += _render_view_unique_triggers_postgresql(views)
     return "\n".join(statements) + "\n"
+
+
+def _union_select(view: Table) -> str:
+    """`SELECT id, <columns> FROM a UNION ALL SELECT ... FROM b` - one branch per concrete subclass table."""
+    columns = _quote_list([OID_COLUMN, *(c.name for c in view.columns)])
+    return " UNION ALL ".join(f"SELECT {columns} FROM {_quote(t)}" for t in view.union_of)
 
 
 def _domain_checks(table: Table) -> list[str]:
@@ -109,7 +119,8 @@ def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = ()) -> str:
     """
     statements: list[str] = []
     srids: set[int] = set()
-    tables = [t for table in tables for t in _one_geometry_per_table(table)]
+    union_views = [t for t in tables if t.union_of]
+    tables = [t for table in tables if not table.union_of for t in _one_geometry_per_table(table)]
     for table in tables:
         lines = ['    "fid" INTEGER PRIMARY KEY AUTOINCREMENT', f"    {_quote(OID_COLUMN)} TEXT UNIQUE NOT NULL"]
         for column in table.columns:
@@ -141,10 +152,22 @@ def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = ()) -> str:
                 f"CREATE INDEX {_index_name(table.name, column)} ON {_quote(table.name)} ({_quote(column)});"
             )
 
+    remaining = {t.name: {c.name for c in t.columns} for t in tables}
+    union_views = [
+        replace(v, columns=[c for c in v.columns if all(c.name in remaining.get(u, ()) for u in v.union_of)])
+        for v in union_views
+    ]
+    for view in union_views:
+        # GeoPackage reads a feature view through an integer key of its own.
+        statements.append(
+            f"CREATE VIEW {_quote(view.name)} AS SELECT ROW_NUMBER() OVER () AS fid, * FROM ({_union_select(view)});"
+        )
+        srids.update(c.srid for c in view.columns if c.geometry_type)
+
     # SRS rows first: gpkg_contents/gpkg_geometry_columns reference them.
     statements += _gpkg_srs_rows(srids)
-    for table in tables:
-        geometry_columns = [c for c in table.columns if c.geometry_type]
+    for table in tables + union_views:
+        geometry_columns = [c for c in table.columns if c.geometry_type][:1]
         if geometry_columns:
             geom = geometry_columns[0]
             statements.append(

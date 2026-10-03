@@ -108,7 +108,11 @@ concepts:
       Only `Kind=Class` roots become a `CREATE TABLE` (never `Kind=Structure`
       directly - see StructureNesting below for how a STRUCTURE-typed
       ATTRIBUTE is handled). `Kind=View` becomes a `CREATE VIEW` - see the
-      View entry below. `id` (the TID) is the PRIMARY KEY in PostgreSQL;
+      View entry below. An ABSTRACT class has no table (it has no
+      instances): with concrete subclasses in the conversion it becomes a
+      polymorphic `CREATE VIEW <class> AS SELECT id, <inherited columns> FROM
+      <sub1> UNION ALL ...`, which a `VIEW ... OF` it builds on.
+      `id` (the TID) is the PRIMARY KEY in PostgreSQL;
       GeoPackage adds an INTEGER `fid` key and keeps `id` UNIQUE NOT NULL,
       and moves every geometry column after a table's first to a 1:1
       `<table>_<column>` side table (one geometry column per GeoPackage

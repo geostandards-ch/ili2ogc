@@ -72,6 +72,9 @@ class Table:
     check_constraints: list[CheckConstraint] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     """Human-readable reasons an attribute/constraint was skipped (RULE #5) - never a silent drop."""
+    union_of: list[str] = field(default_factory=list)
+    """For an ABSTRACT class: the concrete subclass tables this is a polymorphic VIEW over (`UNION ALL` of
+    `columns`), rendered as a VIEW, not a table."""
 
 
 @dataclass
