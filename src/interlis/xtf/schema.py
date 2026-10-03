@@ -206,6 +206,12 @@ def _role_is_multi(role: MetaInstance) -> bool:
     return maximum == "*" or (isinstance(maximum, str) and maximum.isdigit() and int(maximum) > 1)
 
 
+def line_allows_arcs(line_type: MetaInstance | None) -> bool:
+    """Whether a LineType's `WITH (...)` admits ARCS (circular arc segments)."""
+    forms = getattr(line_type, "LineForm", None) or []
+    return any(getattr(f, "Name", None) == "ARCS" for f in (forms if isinstance(forms, list) else [forms]))
+
+
 def multi_geometry_element(structure: MetaInstance | None) -> "ResolvedAttribute | None":
     """The single geometry attribute of a multi-geometry wrapper STRUCTURE, else `None`.
 

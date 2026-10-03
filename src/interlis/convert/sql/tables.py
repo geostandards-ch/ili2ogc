@@ -19,6 +19,7 @@ from interlis.xtf.schema import (
     embedded_roles_of,
     inheritance_chain,
     is_class_compatible,
+    line_allows_arcs,
     multi_geometry_element,
     reference_target_class,
     reference_target_classes,
@@ -138,6 +139,8 @@ def _columns_for_class(
                     continue
                 if not sfa_type.startswith("Multi"):
                     sfa_type = f"Multi{sfa_type}"
+                if multi_geometry.type_kind == "LineType" and line_allows_arcs(multi_geometry.type_instance):
+                    notes.append(_arcs_note(label))
                 columns.append(Column(col_name, "", nullable=not resolved.mandatory, geometry_type=sfa_type, srid=srid))
                 continue
             if depth >= _MAX_STRUCT_FLATTEN_DEPTH:
@@ -216,6 +219,8 @@ def _columns_for_class(
                     _diag("SQL-GEOM-NO-CRS", f"{label}: {reason} - provide the geometry base model via --repo")
                 )
                 continue
+            if resolved.type_kind == "LineType" and line_allows_arcs(resolved.type_instance):
+                notes.append(_arcs_note(label))
             columns.append(
                 Column(
                     col_name,
@@ -620,6 +625,13 @@ def _local_unique_constraints_for_class(cls: MetaInstance) -> tuple[dict[str, li
         if supported and role_attr and columns:
             result.setdefault(role_attr, []).append(columns)
     return result, notes
+
+
+def _arcs_note(label: str) -> str:
+    return _diag(
+        "SQL-GEOM-ARCS-STROKED",
+        f"{label}: admits ARCS, column is linear - stroke arc segments on load (e.g. ST_CurveToLine)",
+    )
 
 
 def _inherited_constraints(cls: MetaInstance) -> list[MetaInstance]:

@@ -785,7 +785,9 @@ lineForm:
         association (LineType <-> LineForm, 1..*) - see lineType binding above.
   note: 'No direct IlisMeta16 instance expected. This rule is the WITH(...) clause of a lineType: it groups
     one or more lineFormType resolutions and produces LinesForm association links between the enclosing
-    LineType and each resolved LineForm.'
+    LineType and each resolved LineForm. The predefined STRAIGHTS/ARCS forms are bound procedurally
+    (InterlisModelBuilder._attach_line_forms: one shared LineForm per keyword, named after it); a custom
+    `Model.Name` LINE FORM reference is not bound.'
 lineFormType:
   grammar:
     rule: lineFormType

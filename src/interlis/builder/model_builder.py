@@ -123,6 +123,7 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
         # ForwardRef that resolves to nothing). Materialised on demand by
         # `_predefined_type`, one shared instance per token per builder.
         self._predefined_type_cache: dict[str, MetaInstance] = {}
+        self._predefined_line_forms: dict[str, MetaInstance] = {}
         self.repository.bind_builder_factory(self._make_sub_builder)
 
     def _make_sub_builder(self) -> "InterlisModelBuilder":
@@ -398,6 +399,8 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
             self._build_context_domain_pairs(instance, ctx)
         elif rule_name == "metaDataBasketDef":
             self._build_metadata_basket_members(instance, ctx)
+        elif rule_name == "lineType":
+            self._attach_line_forms(instance, ctx)
         if association_attribute and ctx.MANDATORY() is not None:
             self._pending_mandatory_overrides.append(instance)
 
@@ -412,6 +415,29 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
             )
 
         return instance
+
+    def _attach_line_forms(self, instance: MetaInstance, ctx: ParserRuleContext) -> None:
+        """Bind `WITH (STRAIGHTS, ARCS)` to `LineType.LineForm` (association LinesForm).
+
+        The two predefined forms are one shared LineForm each, named after the
+        keyword; a custom `LINE FORM` reference (`Model.Name`) is not bound.
+        """
+        form_ctx = ctx.lineForm()
+        if form_ctx is None:
+            return
+        forms = []
+        for entry in form_ctx.lineFormType():
+            keyword = "ARCS" if entry.ARCS() is not None else "STRAIGHTS" if entry.STRAIGHTS() is not None else None
+            if keyword is None:
+                continue
+            form = self._predefined_line_forms.get(keyword)
+            if form is None:
+                form = self.registry.new_instance("IlisMeta16.ModelData.LineForm")
+                form.Name = keyword
+                self._predefined_line_forms[keyword] = form
+            forms.append(form)
+        if forms:
+            instance.LineForm = forms
 
     def _register_unqualified_imports(self, ctx: ParserRuleContext) -> None:
         """Detect which `IMPORTS` names are prefixed with `UNQUALIFIED`.
