@@ -76,8 +76,9 @@ class Table:
     """Human-readable reasons an attribute/constraint was skipped (RULE #5) - never a silent drop."""
     ili_name: str | None = None
     """The INTERLIS class/association this table holds (`Model.Topic.Class`), for T_ILI2DB_CLASSNAME."""
-    has_tid: bool = True
-    """Whether rows carry a transferred TID (`t_ili_tid`) - not for an association link table."""
+    has_tid: bool = False
+    """Whether rows carry a transferred TID (`t_ili_tid`): a class's objects do, structure elements and
+    association links don't."""
     union_of: list[str] = field(default_factory=list)
     """For an ABSTRACT class: the concrete subclass tables this is a polymorphic VIEW over (`UNION ALL` of
     `columns`), rendered as a VIEW, not a table."""

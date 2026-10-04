@@ -115,7 +115,6 @@ CREATE TABLE "grundstueck" (
 CREATE TABLE "grundstueck_textposition" (
     "t_id" bigint PRIMARY KEY DEFAULT nextval('t_ili2db_seq'),
     "t_basket" bigint NOT NULL,
-    "t_ili_tid" varchar(200),
     "grundstueck_fk" bigint NOT NULL,
     "orientierung" numeric(4,1),
     "darstellungin" text,
