@@ -224,6 +224,11 @@ concepts:
       `<column>_<table>`) plus a CHECK that at most one - exactly one when
       MANDATORY - is set. An ABSTRACT target with a single concrete subclass
       just retargets the plain FK to it.
+      With `--feature-views LANG`, a `<table>_features` view shows each
+      reference as the target's UNIQUE key (else its TID and plain
+      attributes) and multilingual
+      names, LEFT JOINed, for feature services that would otherwise expose
+      raw `t_id`s.
 
   Role:
     qualified_name: IlisMeta16.ModelData.Role

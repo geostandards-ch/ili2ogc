@@ -1181,9 +1181,8 @@ def build_graphic_views(
             continue
         items = [f'"g"."{OID_COLUMN}" AS "{OID_COLUMN}"', f'"g"."{geometry}" AS "{geometry}"']
         items += [f'{ref} AS "{prop}"' for prop, ref in properties.items()]
-        from_parts = [f'"{table}" "g"', *(f'"{t}" "{a}"' for t, a, _on in resolver.extra_joins)]
-        body = "SELECT\n    " + ",\n    ".join(items) + "\nFROM " + ", ".join(from_parts)
-        if resolver.extra_joins:
-            body += "\nWHERE " + "\n  AND ".join(on for _t, _a, on in resolver.extra_joins)
+        # LEFT JOINs: a row with an unset reference keeps its place for the rules that don't test it.
+        body = "SELECT\n    " + ",\n    ".join(items) + f'\nFROM "{table}" "g"'
+        body += "".join(f'\nLEFT JOIN "{t}" "{a}" ON {on}' for t, a, on in resolver.extra_joins)
         result.append(SqlView(vname, body, []))
     return result

@@ -32,6 +32,7 @@ from interlis.convert import xtf_writer as _xtf_writer_mod
 from interlis.convert.jsonfg import transfer_to_feature_collection
 from interlis.convert.jsonschema import model_to_json_schema
 from interlis.convert.sql import build_tables, build_views, render_gpkg, render_postgresql
+from interlis.convert.sql.feature_views import build_feature_views
 from interlis.convert.sql.ili2db import Ili2dbMeta, model_file
 from interlis.convert.sql.views import build_graphic_views
 from interlis.convert.translation import (
@@ -649,6 +650,9 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
                 class_by_name=class_by_name,
             )
         )
+    if args.feature_views:
+        used_names = {t.name for t in tables} | {v.name for v in sql_views}
+        sql_views += tuple(build_feature_views(tables, args.feature_views, used_names))
     bag.extend(_sql_mod.collect_diagnostics(tables, sql_views, file=str(path)))
     meta = _ili2db_meta(path, repository, classes, builder.symbol_table, class_symbol_tables)
     ddl = render_gpkg(tables, sql_views, meta) if args.dialect == "gpkg" else render_postgresql(tables, sql_views, meta)
@@ -1268,6 +1272,16 @@ def main(argv: list[str] | None = None) -> int:
         "a CREATE VIEW named after it, with t_id, the drawing rules' geometry column and one column per "
         "attribute path their WHERE clauses test, named like the SLD PropertyName `interlis convert-sld` "
         'writes (e.g. "MeasureType.Reference.TypeID") - a map server can apply that SLD to the view as is.',
+    )
+    convert_sql_parser.add_argument(
+        "--feature-views",
+        default=None,
+        metavar="LANG",
+        help="Also emit a readable <table>_features view per class table, for feature services: each reference "
+        "column is replaced by the referenced object's key (its UNIQUE attributes, else its transferred TID and "
+        "plain attributes) "
+        "and multilingual names, and the table's own multilingual texts (LocalisationCH) become plain columns - "
+        "texts in LANG (e.g. de), else in another language the value carries.",
     )
     convert_sql_parser.add_argument(
         "--lang",
