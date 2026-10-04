@@ -7,7 +7,10 @@ translatable subset.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from interlis.builder.forward_refs import SymbolTable
+from interlis.convert.cql2 import UnsupportedExpressionError, _path_property_name
 from interlis.convert.jsonschema import _is_structure
 from interlis.diagnostic_ids import note as _diag
 from interlis.metamodel.instance import MetaInstance
@@ -23,7 +26,7 @@ from interlis.xtf.schema import (
 )
 
 from .expressions import _SQL_RELATIONAL_OPERATORS, _numeric_sql_literal, _text_sql_literal
-from .identifiers import OID_COLUMN, _quote, _sql_identifier, _truncate_identifier
+from .identifiers import OID_COLUMN, _dedup_name, _quote, _sql_identifier, _truncate_identifier
 from .model import SqlView, Table, UniqueViewTrigger
 from .tables import _columns_for_class
 
@@ -59,8 +62,10 @@ class _ViewResolver:
         tables_by_name: dict[str, Table],
         symbol_for,
         assoc_near_roles: dict[str, str] | None = None,
+        table_names: dict[int, str] | None = None,
     ) -> None:
         self.by_alias = {alias: (cls, table) for alias, cls, table in bases}
+        self.table_names = table_names or {}
         self.tables_by_name = tables_by_name
         self.symbol_for = symbol_for
         self.assoc_near_roles = assoc_near_roles or {}
@@ -110,6 +115,7 @@ class _ViewResolver:
             raise _UnsupportedView(f"path root {refs[0]!r} is not a base of this view")
         cls, table = self.by_alias[alias]
         cur_alias = alias
+        prefix = ""  # inside a flattened single-valued STRUCTURE: its columns are `<attr>_<sub>`
         if len(refs) == 1:
             # a bare base reference denotes the object itself -> its identity column
             return f'"{cur_alias}"."{OID_COLUMN}"'
@@ -127,7 +133,11 @@ class _ViewResolver:
             if attr is None:
                 raise _UnsupportedView(f"{hop!r} is not an attribute/role of {getattr(cls, 'Name', None)!r}")
             resolved = resolve_attribute(attr)
-            col = _sql_identifier(hop)
+            col = _sql_identifier(f"{prefix}{hop}")
+            if not is_last and resolved.type_kind == "Class" and _is_structure(resolved.type_instance):
+                # Step into the flattened STRUCTURE (e.g. a catalogue reference wrapper).
+                cls, prefix = resolved.type_instance, f"{prefix}{hop}_"
+                continue
             if is_last:
                 if col not in self._columns(table):
                     flattened = self._flattened_struct_column(resolved, col, table)
@@ -138,7 +148,7 @@ class _ViewResolver:
             target = reference_target_class(resolved) if resolved.type_kind in ("Class", "ReferenceType") else None
             if target is None:
                 raise _UnsupportedView(f"cannot navigate through {hop!r} - not a resolvable reference/role")
-            target_table = _sql_identifier(getattr(target, "Name", None) or "")
+            target_table = self.table_names.get(id(target)) or _sql_identifier(getattr(target, "Name", None) or "")
             if target_table not in self.tables_by_name:
                 raise _UnsupportedView(
                     f"join target table {target_table!r} not built - pass its model via --repo or --catalog",
@@ -151,7 +161,7 @@ class _ViewResolver:
             self.extra_joins.append(
                 (target_table, new_alias, f'"{cur_alias}"."{col}" = "{new_alias}"."{OID_COLUMN}"'),
             )
-            cls, table, cur_alias = target, target_table, new_alias
+            cls, table, cur_alias, prefix = target, target_table, new_alias, ""
         raise _UnsupportedView("unreachable")  # pragma: no cover
 
     def defined_sql(self, factor: MetaInstance) -> str:
@@ -342,7 +352,7 @@ def build_views(
                 body = _build_aggregation_view(view, bases, tables_by_name, symbol_for, assoc_near_roles)
                 result.append(SqlView(vname, body, _view_constraint_notes(view)))
                 continue
-            resolver = _ViewResolver(bases, tables_by_name, symbol_for, assoc_near_roles)
+            resolver = _ViewResolver(bases, tables_by_name, symbol_for, assoc_near_roles, table_name_by_class_id)
             select_items: list[str] = []
             notes: list[str] = []
             attr_col: dict[str, str] = {}
@@ -1081,3 +1091,99 @@ def _render_view_unique_triggers_gpkg(views: tuple[SqlView, ...]) -> list[str]:
                     "END;"
                 )
     return statements
+
+
+def _path_factors(expression: object, seen: set[int] | None = None) -> list[MetaInstance]:
+    """Every attribute-path leaf (`PathOrInspFactor`) of an expression tree, in order."""
+    seen = set() if seen is None else seen
+    if not isinstance(expression, MetaInstance) or id(expression) in seen:
+        return []
+    seen.add(id(expression))
+    if expression._qualified_class.endswith("PathOrInspFactor"):
+        return [expression]
+    found: list[MetaInstance] = []
+    for value in vars(expression).values():
+        for item in value if isinstance(value, list) else [value]:
+            found += _path_factors(item, seen)
+    return found
+
+
+def _rooted(factor: MetaInstance, alias: str) -> SimpleNamespace:
+    """`factor`'s path prefixed with the view's base alias - a drawing rule's paths start at the attribute."""
+    return SimpleNamespace(
+        _qualified_class=factor._qualified_class,
+        Inspection=None,
+        PathEls=[SimpleNamespace(Ref=alias), *(getattr(factor, "PathEls", None) or [])],
+    )
+
+
+def build_graphic_views(
+    graphics: list[MetaInstance],
+    tables: list[Table],
+    *,
+    symbol_table: SymbolTable | None = None,
+    class_symbol_tables: dict[int, SymbolTable] | None = None,
+    class_table_names: dict[int, str] | None = None,
+    graphic_symbol_tables: list[SymbolTable] | None = None,
+    class_by_name: dict[str, MetaInstance] | None = None,
+) -> list[SqlView]:
+    """One `CREATE VIEW <graphic>` per `GRAPHIC` whose `BASED ON` class is converted: its `t_id`, the drawing
+    rules' geometry column, and one column per attribute path their `WHERE`s test - named exactly like the SLD's
+    `PropertyName` (`MeasureType.Reference.TypeID`), so a map server evaluates the SLD filters on it as is.
+    The symbology model is built separately, so its `BASED ON` class is matched to the converted one by qualified
+    name (`graphic_symbol_tables`, `class_by_name`).
+
+    A `GRAPHIC` based on a class of another conversion is skipped; one whose paths can't all be resolved becomes a
+    note, never a view missing a filtered column.
+    """
+    tables_by_name = {t.name: t for t in tables}
+    names = class_table_names or {}
+
+    def symbol_for(cls: MetaInstance) -> SymbolTable | None:
+        return (class_symbol_tables or {}).get(id(cls), symbol_table)
+
+    result: list[SqlView] = []
+    used_names = {t.name for t in tables}
+    for graphic in graphics:
+        base = getattr(graphic, "Base", None)
+        if isinstance(base, MetaInstance):
+            qualified = next((q for t in graphic_symbol_tables or [] if (q := t.qualified_name_of(base))), None)
+            base = (class_by_name or {}).get(qualified or "", base)
+        table = names.get(id(base)) if isinstance(base, MetaInstance) else None
+        if table is None or table not in tables_by_name:
+            continue
+        vname = _dedup_name(
+            _truncate_identifier(_sql_identifier(getattr(graphic, "Name", None) or "graphic")), used_names
+        )
+        resolver = _ViewResolver([("g", base, table)], tables_by_name, symbol_for, None, names)
+        rules = graphic.DrawingRule if isinstance(graphic.DrawingRule, list) else [graphic.DrawingRule]
+        conditions = [c for rule in rules for c in (rule.Rule if isinstance(rule.Rule, list) else [rule.Rule])]
+        try:
+            geometry = None
+            properties: dict[str, str] = {}
+            for condition in conditions:
+                for factor in _path_factors(getattr(condition, "Where", None)):
+                    prop = _path_property_name(factor.PathEls)
+                    if prop not in properties:  # one join per distinct path, however many rules test it
+                        properties[prop] = resolver.scalar_ref(_rooted(factor, "g"))
+                assignments = (
+                    condition.Assignments if isinstance(condition.Assignments, list) else [condition.Assignments]
+                )
+                for assignment in assignments:
+                    if assignment.Param == "Geometry" and geometry is None:
+                        geometry = _sql_identifier(str(assignment.Assignment.PathEls[0].Ref))
+            if geometry is None or not any(
+                c.name == geometry and c.geometry_type for c in tables_by_name[table].columns
+            ):
+                raise _UnsupportedView(f"the drawing rules' Geometry is not a geometry column of {table!r}")
+        except (_UnsupportedView, UnsupportedExpressionError, AttributeError) as exc:
+            result.append(SqlView(vname, None, [_diag("SQL-VIEW-GRAPHIC", f"GRAPHIC {graphic.Name!r}: {exc}")]))
+            continue
+        items = [f'"g"."{OID_COLUMN}" AS "{OID_COLUMN}"', f'"g"."{geometry}" AS "{geometry}"']
+        items += [f'{ref} AS "{prop}"' for prop, ref in properties.items()]
+        from_parts = [f'"{table}" "g"', *(f'"{t}" "{a}"' for t, a, _on in resolver.extra_joins)]
+        body = "SELECT\n    " + ",\n    ".join(items) + "\nFROM " + ", ".join(from_parts)
+        if resolver.extra_joins:
+            body += "\nWHERE " + "\n  AND ".join(on for _t, _a, on in resolver.extra_joins)
+        result.append(SqlView(vname, body, []))
+    return result

@@ -33,6 +33,7 @@ from interlis.convert.jsonfg import transfer_to_feature_collection
 from interlis.convert.jsonschema import model_to_json_schema
 from interlis.convert.sql import build_tables, build_views, render_gpkg, render_postgresql
 from interlis.convert.sql.ili2db import Ili2dbMeta, model_file
+from interlis.convert.sql.views import build_graphic_views
 from interlis.convert.translation import (
     load_translation,
     rename_feature_collection,
@@ -615,6 +616,39 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
             class_table_names=class_table_names,
         )
     )
+    class_by_name = {
+        name: cls
+        for cls in classes
+        if (name := class_symbol_tables.get(id(cls), builder.symbol_table).qualified_name_of(cls))
+    }
+    for symbology_arg in args.map_views:
+        symbology_path = Path(symbology_arg)
+        symbology_tree, symbology_errors = (
+            parse_file(symbology_path) if symbology_path.exists() else (None, ["missing"])
+        )
+        if symbology_errors:
+            _error(f"--map-views: cannot read {symbology_path}")
+            return ExitCode.INVALID
+        symbology_builder = _open_builder(repository)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            symbology_builder.build(symbology_tree)
+        graphics = [
+            inst
+            for inst in symbology_builder.symbol_table.all_registered()
+            if isinstance(inst, MetaInstance) and inst._qualified_class.rsplit(".", 1)[-1] == "Graphic"
+        ]
+        sql_views += tuple(
+            build_graphic_views(
+                graphics,
+                tables,
+                symbol_table=builder.symbol_table,
+                class_symbol_tables=class_symbol_tables,
+                class_table_names=class_table_names,
+                graphic_symbol_tables=[symbology_builder.symbol_table, *repository.loaded_models().values()],
+                class_by_name=class_by_name,
+            )
+        )
     bag.extend(_sql_mod.collect_diagnostics(tables, sql_views, file=str(path)))
     meta = _ili2db_meta(path, repository, classes, builder.symbol_table, class_symbol_tables)
     ddl = render_gpkg(tables, sql_views, meta) if args.dialect == "gpkg" else render_postgresql(tables, sql_views, meta)
@@ -1224,6 +1258,16 @@ def main(argv: list[str] | None = None) -> int:
         "exist in this conversion's own output). Also required to turn a VIEW into a CREATE VIEW: pass the "
         "base model(s) the VIEW's JOIN OF/PROJECTION OF classes come from, else the VIEW is emitted as a "
         "'-- NOTE' comment instead.",
+    )
+    convert_sql_parser.add_argument(
+        "--map-views",
+        action="append",
+        default=[],
+        metavar="SYMBOLOGY.ili",
+        help="A model declaring GRAPHICs (repeatable): each GRAPHIC BASED ON a class of this conversion becomes "
+        "a CREATE VIEW named after it, with t_id, the drawing rules' geometry column and one column per "
+        "attribute path their WHERE clauses test, named like the SLD PropertyName `interlis convert-sld` "
+        'writes (e.g. "MeasureType.Reference.TypeID") - a map server can apply that SLD to the view as is.',
     )
     convert_sql_parser.add_argument(
         "--lang",

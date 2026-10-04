@@ -1,5 +1,5 @@
-# Contract for the `.ili` -> SQL DDL conversion pipeline (backlog item 14 -
-# see docs/sql-conversion-strategy.md and docs/interlis-ogc-architecture.md).
+# Contract for the `.ili` -> SQL DDL conversion pipeline (see
+# docs/sql-conversion-strategy.md and docs/interlis-ogc-architecture.md).
 #
 # Mirrors mappings/ilismeta16-to-jsonschema-rules.yml's role for the JSON
 # Schema pipeline: one entry per IlisMeta16 concept a converter needs a
@@ -12,14 +12,10 @@
 # Scope (concept mapping is dialect-neutral; two renderers exist -
 # PostgreSQL and GeoPackage/SQLite, see convert/sql.py's
 # render_postgresql/render_gpkg): a plain `Class` (`Kind=Class`, never
-# `Kind=Structure`, never `View`) becomes one `CREATE TABLE`, with a
-# synthetic `id text UNIQUE NOT NULL` (deliberately NOT `PRIMARY KEY`/GDAL's
-# own default FID column name `ogc_fid` - verified empirically that GDAL
-# excludes whatever it detects as PRIMARY KEY from the INSERT column list
-# entirely, expecting the database to auto-generate it, so a Feature's
-# `"id"` was NEVER actually written on `-append`; `"id"` matches exactly
-# what the JSON-FG reader itself exposes as a plain field - see
-# docs/sql-conversion-strategy.md). GDAL still
+# `Kind=Structure`, never `View`) becomes one `CREATE TABLE` laid out as
+# ili2db lays it out (`t_id` key, `t_basket`, `t_ili_tid`, the
+# `T_ILI2DB_*` dataset/basket and metadata tables - see ObjectOID). GDAL
+# still
 # does the actual DATA LOADING (`ogr2ogr -append`); this pipeline only
 # generates the SCHEMA (table/column declarations + UNIQUE/FOREIGN KEY
 # constraints) - see docs/sql-conversion-strategy.md for why this division
@@ -157,29 +153,35 @@ concepts:
       and `WHERE`-translation rules: docs/sql-conversion-strategy.md and
       docs/view-formation-support.md.
 
+  Graphic:
+    qualified_name: IlisMeta16.ModelData.Graphic
+    status: mapped
+    note: >
+      Only with `--map-views SYMBOLOGY.ili`: a GRAPHIC whose `BASED ON`
+      class is converted becomes a `CREATE VIEW <graphic>` exposing `t_id`,
+      the drawing rules' geometry column and one column per attribute path
+      their `WHERE`s test, named like the SLD `PropertyName` (`Kind.Reference.Code`),
+      references and flattened structures joined through to the catalogue
+      table. A map server then evaluates the SLD filters `convert-sld` writes
+      without any hand-written view. The symbology model is built
+      separately, so the base class is matched by qualified name. A path
+      that can't be resolved makes the whole GRAPHIC a `SQL-VIEW-GRAPHIC`
+      note, never a view missing a filtered column.
+
   ObjectOID:
     qualified_name: IlisMeta16.ModelData.ObjectOID
     status: mapped
     note: >
-      Every table gets a synthetic `id text UNIQUE NOT NULL` regardless of
-      the Class's own OID clause/type (`AnyOIDType`/a named TEXT or NUM
-      domain/none at all) - same uniform-string treatment the JSON Schema
-      pipeline already gives every reference (`ReferenceType`/`Role` ->
-      plain `{"type": "string"}`), and matching how `convert/jsonfg.py`
-      already treats `XtfObject.tid` as an opaque string regardless of the
-      declared OID type (indeed the SAME `"id"` JSON-FG already puts on
-      every Feature - `object_to_feature`). `id`, and NEVER `PRIMARY KEY`
-      (not GDAL's own PostgreSQL default FID name, `ogc_fid`):
-      verified empirically (a real `ogr2ogr -append`
-      against a live PostgreSQL AND GeoPackage) that GDAL treats WHATEVER
-      column it detects as `PRIMARY KEY` as an auto-managed FID slot,
-      excluded from the INSERT column list entirely - a Feature's `"id"`
-      was NEVER actually written into it, silently staying NULL and
-      violating its own NOT NULL constraint. `"id"` matches exactly what
-      the JSON-FG reader itself exposes as a plain STRING FIELD (confirmed
-      via `ogrinfo`) - `UNIQUE NOT NULL` (never `PRIMARY KEY`) so GDAL
-      writes it as a normal field instead of managing it. See
-      docs/sql-conversion-strategy.md for the full investigation.
+      Every table opens with ili2db's technical columns: `t_id` (bigint
+      primary key from the shared `t_ili2db_seq`; INTEGER PRIMARY KEY, hence
+      the GDAL FID, in GeoPackage), `t_basket` (NOT NULL FK to
+      `T_ILI2DB_BASKET`, so one schema holds several datasets) and, for a
+      class whose objects carry an OID, `t_ili_tid` holding the transferred
+      TID as text whatever its declared OID type. References point at
+      `t_id`, never at the TID, which is only unique within a basket. The
+      `T_ILI2DB_*` tables are ili2pg/ili2gpkg 5.5's exact definitions,
+      filled with the class/attribute name mappings, inheritance, model
+      files and settings, so ili2db tooling reads the schema as its own.
 
   StructureNesting:
     qualified_name: IlisMeta16.ModelData.Class
@@ -210,8 +212,8 @@ concepts:
     qualified_name: IlisMeta16.ModelData.ReferenceType
     status: mapped
     note: >
-      Plain `REFERENCE TO X` -> a `text` column (typed to match the target
-      table's `id`) PLUS a real `FOREIGN KEY ... REFERENCES` (a
+      Plain `REFERENCE TO X` -> a `bigint` column holding the target row's
+      `t_id` PLUS a real `FOREIGN KEY ... REFERENCES` (a
       marquee feature of this pipeline - see docs/interlis-ogc-architecture.md's Prevalence
       table: REFERENCE TO touches ~30% of the real corpus). An unresolved
       target class (declared target not reachable, e.g. no `--repo` given)
@@ -245,7 +247,7 @@ concepts:
       (1:N, `_build_child_table`), linked via a `<parent>_fk` FOREIGN KEY
       back to the parent (`ON DELETE CASCADE`: the rows are parts of it;
       real precedent: ili2db's own
-      `D_<attributename>`-style convention) plus a `seq` ordering column
+      `D_<attributename>`-style convention) plus a `t_seq` ordering column
       for `LIST` (see docs/sql-conversion-strategy.md). A `BAG`/`LIST OF`
       found ONE level inside the element STRUCTURE (an indirect/nested
       multi-value, e.g. `INSPECTION OF ... -> a -> b`) gets its own
@@ -267,7 +269,7 @@ concepts:
       Schema pipeline's `anyOf` enumerates), named
       `<parent>_<attr>_<subclass>` (the table name is the discriminant, no
       extra `kind` column), each with a `<parent>_fk` back to the parent
-      (`seq` too for a `LIST`). When no concrete subclass shares
+      (`t_seq` too for a `LIST`). When no concrete subclass shares
       `convert-sql`'s identity graph (a folded-in dependency-model library
       class, e.g. `Dictionaries_V1.Dictionary.Entries`) the attribute is a
       `-- NOTE` carrying `SQL-STRUCT-ABSTRACT` /

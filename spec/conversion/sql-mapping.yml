@@ -134,16 +134,11 @@ ObjectOID:
   qualified_name: IlisMeta16.ModelData.ObjectOID
   sql:
     identity_column:
-      value: "id text UNIQUE NOT NULL"
-      note: >
-        Synthetic, independent of the Class's own OID clause. Deliberately
-        NOT `PRIMARY KEY` (not GDAL's own default FID column name,
-        `ogc_fid`): verified empirically that GDAL excludes whatever it detects as
-        `PRIMARY KEY` from the INSERT column list entirely (expects the
-        database to auto-generate it) - a Feature's `"id"` was NEVER
-        actually written on `ogr2ogr -append`. See
-        mappings/ilismeta16-to-sql-rules.yml's ObjectOID entry for the full
-        rationale.
+      value: "t_id bigint PRIMARY KEY DEFAULT nextval('t_ili2db_seq')"
+      note: "ili2db's layout, independent of the Class's own OID clause: INTEGER PRIMARY KEY (the GDAL FID) in GeoPackage, plus t_basket (NOT NULL FK to T_ILI2DB_BASKET) on every table."
+    tid_column:
+      value: "t_ili_tid varchar(200)"
+      note: "The transferred TID as text, only on classes whose objects carry an OID; unique only within a basket, so never a FK target."
 
 StructureNesting:
   qualified_name: IlisMeta16.ModelData.Class
@@ -156,27 +151,43 @@ Inheritance:
   qualified_name: IlisMeta16.ModelData.Class
   sql:
     table_per_subtype:
-      rule: "an ABSTRACT STRUCTURE attribute (single or BAG/LIST OF) -> one <parent>_<attr>_<subclass> child table per concrete subclass, each with a <parent>_fk (and seq for LIST)"
+      rule: "an ABSTRACT STRUCTURE attribute (single or BAG/LIST OF) -> one <parent>_<attr>_<subclass> child table per concrete subclass, each with a <parent>_fk (and t_seq for LIST)"
       note: "Subclass set = xtf.schema.concrete_structure_subclasses (same as the JSON Schema anyOf). No concrete subclass in convert-sql's identity graph -> a -- NOTE (SQL-STRUCT-ABSTRACT / SQL-BAGLIST-ELEMENT-UNMAPPED). See mappings/ilismeta16-to-sql-rules.yml's Inheritance entry."
 
 ReferenceType:
   qualified_name: IlisMeta16.ModelData.ReferenceType
   sql:
     fk_column:
-      value: text
-      note: "Typed to match the target table's id (also text)."
+      value: bigint
+      note: "Holds the target row's t_id."
     foreign_key:
-      rule: "FOREIGN KEY (<column>) REFERENCES <target table>(id)"
+      rule: "FOREIGN KEY (<column>) REFERENCES <target table>(t_id) DEFERRABLE INITIALLY DEFERRED"
       note: "Target class via xtf.schema.reference_target_class, reused directly - not re-derived."
 
 Role:
   qualified_name: IlisMeta16.ModelData.Role
   sql:
     fk_column:
-      value: text
+      value: bigint
       note: "Same treatment as ReferenceType above - both resolve via reference_target_class."
     foreign_key:
-      rule: "FOREIGN KEY (<column>) REFERENCES <target table>(id)"
+      rule: "FOREIGN KEY (<column>) REFERENCES <target table>(t_id) DEFERRABLE INITIALLY DEFERRED"
+
+MultiValue:
+  qualified_name: IlisMeta16.ModelData.MultiValue
+  sql:
+    child_table:
+      rule: "BAG/LIST OF -> a <parent>_<attr> child table with a <parent>_fk FOREIGN KEY ... ON DELETE CASCADE back to the parent"
+    ordering:
+      source: {field: Ordered}
+      note: "A LIST (Ordered) child table gets a t_seq bigint NOT NULL column."
+
+Graphic:
+  qualified_name: IlisMeta16.ModelData.Graphic
+  sql:
+    map_view:
+      rule: "convert-sql --map-views: CREATE VIEW <graphic> AS SELECT t_id, <geometry column>, <one column per WHERE path, AS its SLD PropertyName> FROM <BASED ON table> joined to the tables the paths reach"
+      note: "The DrawingRule conditions' Where expressions supply the paths. A path that can't be resolved makes the GRAPHIC a SQL-VIEW-GRAPHIC note."
 
 UniqueConstraint:
   qualified_name: IlisMeta16.ModelData.UniqueConstraint
