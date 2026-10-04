@@ -87,7 +87,7 @@ classOrStructureDef:
     PARAMETER, attributeDef, constraintDef - no classDef/
     structureDef accessor). A pure dispatcher/aggregator, no own class - a
     repeated loop of 3 alternatives: "(ATTRIBUTE)? attributeDef+",
-    "constraintDef+", "(PARAMETER)? parameterDef+". Each attributeDef/
+    "constraintDef+", "PARAMETER parameterDef+". Each attributeDef/
     constraintDef/parameterDef feeds its own association
     (ClassAttr/ClassConstraint/ClassParam) on the enclosing classDef/structureDef
     via ITS OWN `parent:`, not via classOrStructureDef

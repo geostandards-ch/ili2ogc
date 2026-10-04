@@ -170,8 +170,11 @@ parameterDef:
         AttrOrParam/ExtendableME attribute distinct from Abstract/Final (see
         classDef note - Generic is a separate ExtendableME attribute not tied
         to any token here).
-  note: 'Grammar (parameterDef()): PARAMETER Name (LPAR (ABSTRACT|EXTENDED|FINAL)
-    RPAR)? COLON (attrTypeDef | METAOBJECT (OF metaObjectRef)?) SEMI. The
+  note: 'Grammar (parameterDef()): Name (LPAR (ABSTRACT|EXTENDED|FINAL)
+    RPAR)? COLON (attrTypeDef | METAOBJECT (OF metaObjectRef)?) SEMI - the
+    PARAMETER keyword opens the whole section in classOrStructureDef
+    (eCH-0031 V2.1.0 3.5.1, ClassOrStructureDef = ... [ ''PARAMETER'' {
+    ParameterDef } ]), so every following definition is a parameter. The
     METAOBJECT(...) branch may instead reference MetaObjectDef - unconfirmed
     against a real .ili example using PARAMETER METAOBJECT.'
 runTimeParameterDef:
