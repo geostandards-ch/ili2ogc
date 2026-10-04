@@ -51,14 +51,14 @@ def _sql(tmp_path: Path) -> str:
 
 def test_roles_without_cardinality_are_n_to_m(tmp_path: Path):
     link = _sql(tmp_path).split('CREATE TABLE "a_b" (', 1)[1].split("\n);", 1)[0]
-    assert '"a" text NOT NULL' in link
-    assert '"b" text NOT NULL' in link
+    assert '"a" bigint NOT NULL' in link
+    assert '"b" bigint NOT NULL' in link
 
 
 def test_alternative_targets_get_one_column_each(tmp_path: Path):
     c = _sql(tmp_path).split('CREATE TABLE "c" (', 1)[1].split("\n);", 1)[0]
-    assert '"owner" text,' in c
-    assert '"owner_b" text,' in c
+    assert '"owner" bigint,' in c
+    assert '"owner_b" bigint,' in c
     assert "ELSE 0 END) = 1)" in c
 
 

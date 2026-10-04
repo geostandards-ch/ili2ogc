@@ -32,6 +32,7 @@ from interlis.convert import xtf_writer as _xtf_writer_mod
 from interlis.convert.jsonfg import transfer_to_feature_collection
 from interlis.convert.jsonschema import model_to_json_schema
 from interlis.convert.sql import build_tables, build_views, render_gpkg, render_postgresql
+from interlis.convert.sql.ili2db import Ili2dbMeta, model_file
 from interlis.convert.translation import (
     load_translation,
     rename_feature_collection,
@@ -433,6 +434,28 @@ def _catalog_symbol_table(catalog_path: Path, repository: ModelRepository | None
     return None
 
 
+def _ili2db_meta(path: Path, repository, classes, symbol_table, class_symbol_tables) -> Ili2dbMeta:
+    """The T_ILI2DB_MODEL/INHERITANCE content: every .ili file the conversion read, and each class's base."""
+    files = {path.resolve(): path}
+    for name in (repository.loaded_models() if repository is not None else {}):
+        found = repository.path_for(name)
+        if found is not None:
+            files.setdefault(found.resolve(), found)
+    inheritance = []
+    for cls in classes:
+        table = class_symbol_tables.get(id(cls), symbol_table)
+        this = table.qualified_name_of(cls)
+        if this:
+            base = getattr(cls, "Super", None)
+            inheritance.append((this, table.qualified_name_of(base) if isinstance(base, MetaInstance) else None))
+    return Ili2dbMeta(
+        # One row per distinct model set: a model file variant (`_o1`) and its
+        # --repo original declare the same models.
+        models=list({m.model_name: m for m in reversed([model_file(f) for f in files.values()])}.values())[::-1],
+        inheritance=inheritance,
+    )
+
+
 def cmd_convert_sql(args: argparse.Namespace) -> int:
     """Convert an .ili model to SQL DDL, PostgreSQL or GeoPackage/SQLite.
 
@@ -581,6 +604,7 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
         symbol_table=builder.symbol_table,
         class_symbol_tables=class_symbol_tables,
         class_table_names=class_table_names,
+        name_tables=tuple({id(t): t for t in (repository.loaded_models() if repository else {}).values()}.values()),
     )
     sql_views = tuple(
         build_views(
@@ -592,7 +616,8 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
         )
     )
     bag.extend(_sql_mod.collect_diagnostics(tables, sql_views, file=str(path)))
-    ddl = render_gpkg(tables, sql_views) if args.dialect == "gpkg" else render_postgresql(tables, sql_views)
+    meta = _ili2db_meta(path, repository, classes, builder.symbol_table, class_symbol_tables)
+    ddl = render_gpkg(tables, sql_views, meta) if args.dialect == "gpkg" else render_postgresql(tables, sql_views, meta)
     if args.lang:
         root_names = (
             builder.symbol_table.root_model_names() if hasattr(builder.symbol_table, "root_model_names") else []

@@ -104,7 +104,7 @@ def test_join_view_body_is_a_select_over_the_base_tables():
     assert '"segment"."geom" AS "geom"' in body
     assert '"road"."roadname" AS "road_name"' in body
     assert 'FROM "segment" "segment", "road" "road"' in body
-    assert '"segment"."ofroad" = "road"."id"' in body
+    assert '"segment"."ofroad" = "road"."t_id"' in body
 
 
 def test_projection_view_navigates_a_reference_hop_with_an_extra_join():
@@ -114,7 +114,7 @@ def test_projection_view_navigates_a_reference_hop_with_an_extra_join():
     body = view.body
     # `Segment -> OfRoad -> RoadName` crosses the OfRoad reference: an extra
     # join table + its ON condition, not a second base.
-    assert '"ofroad" = "j1_road"."id"' in body
+    assert '"ofroad" = "j1_road"."t_id"' in body
     assert '"j1_road"."roadname" AS "road_name"' in body
 
 
@@ -126,11 +126,11 @@ def test_join_view_executes_against_real_sqlite():
     for v in sql_views:
         assert v.body is not None, v.notes
         conn.execute(f'CREATE VIEW "{v.name}" AS {v.body}')
-    conn.execute("INSERT INTO road (id, roadname, owner) VALUES ('r1', 'Main St', 'City')")
-    conn.execute("INSERT INTO road (id, roadname, owner) VALUES ('r2', 'Side St', 'Canton')")
-    conn.execute("INSERT INTO segment (id, segnr, geom, ofroad) VALUES ('s1', 1, 'x', 'r1')")
-    conn.execute("INSERT INTO segment (id, segnr, geom, ofroad) VALUES ('s2', 2, 'x', 'r1')")
-    conn.execute("INSERT INTO segment (id, segnr, geom, ofroad) VALUES ('s3', 3, 'x', 'r2')")
+    conn.execute("INSERT INTO road (t_id, t_basket, roadname, owner) VALUES (100, 1, 'Main St', 'City')")
+    conn.execute("INSERT INTO road (t_id, t_basket, roadname, owner) VALUES (101, 1, 'Side St', 'Canton')")
+    conn.execute("INSERT INTO segment (t_id, t_basket, segnr, geom, ofroad) VALUES (102, 1, 1, 'x', 100)")
+    conn.execute("INSERT INTO segment (t_id, t_basket, segnr, geom, ofroad) VALUES (103, 1, 2, 'x', 100)")
+    conn.execute("INSERT INTO segment (t_id, t_basket, segnr, geom, ofroad) VALUES (104, 1, 3, 'x', 101)")
     rows = sorted(conn.execute("SELECT segnr, road_name, owner_name FROM roadsegments"))
     assert rows == [(1, "Main St", "City"), (2, "Main St", "City"), (3, "Side St", "Canton")]
     proj = sorted(conn.execute("SELECT road_name FROM segmentroad"))
@@ -193,10 +193,10 @@ def test_view_over_flattened_struct_executes_against_real_sqlite():
     conn.executescript(schema)
     view = _view(sql_views, "itemview")
     conn.execute(f'CREATE VIEW "{view.name}" AS {view.body}')
-    conn.execute("INSERT INTO wind (id) VALUES ('w1')")
-    conn.execute("INSERT INTO item (id, kind_reference, label) VALUES ('i1', 'w1', 'Windpark')")
+    conn.execute("INSERT INTO wind (t_id, t_basket) VALUES (105, 1)")
+    conn.execute("INSERT INTO item (t_id, t_basket, kind_reference, label) VALUES (106, 1, 105, 'Windpark')")
     rows = conn.execute("SELECT kind_ref, label FROM itemview").fetchall()
-    assert rows == [("w1", "Windpark")]
+    assert rows == [(105, "Windpark")]
 
 
 _UNION_MODEL = """INTERLIS 2.4;
@@ -239,8 +239,8 @@ def test_union_view_executes_against_real_sqlite():
     conn.executescript(schema)
     view = _view(sql_views, "cc")
     conn.execute(f'CREATE VIEW "{view.name}" AS {view.body}')
-    conn.execute("INSERT INTO c1 (id, attr1) VALUES ('a', 'x')")
-    conn.execute("INSERT INTO c2 (id, attr2) VALUES ('b', 'y')")
+    conn.execute("INSERT INTO c1 (t_id, t_basket, attr1) VALUES (107, 1, 'x')")
+    conn.execute("INSERT INTO c2 (t_id, t_basket, attr2) VALUES (108, 1, 'y')")
     rows = sorted(r[0] for r in conn.execute("SELECT mergedattr FROM cc"))
     assert rows == ["x", "y"]
 
@@ -380,7 +380,7 @@ def test_whereless_join_of_directly_associated_classes_auto_derives_the_join_con
     view = _view(sql_views, "linietyp")
     assert view.body is not None, view.notes
     assert 'FROM "linie" "linie", "typ" "typ"' in view.body
-    assert '"linie"."wal" = "typ"."id"' in view.body
+    assert '"linie"."wal" = "typ"."t_id"' in view.body
 
 
 def test_whereless_join_of_directly_associated_classes_executes_against_real_sqlite():
@@ -390,9 +390,9 @@ def test_whereless_join_of_directly_associated_classes_executes_against_real_sql
     conn.executescript(schema)
     view = _view(sql_views, "linietyp")
     conn.execute(f'CREATE VIEW "{view.name}" AS {view.body}')
-    conn.execute("INSERT INTO typ (id, code) VALUES ('t1', 'x')")
-    conn.execute("INSERT INTO linie (id, geom, wal) VALUES ('l1', 'g1', 't1')")
-    conn.execute("INSERT INTO linie (id, geom, wal) VALUES ('l2', 'g2', 't1')")
+    conn.execute("INSERT INTO typ (t_id, t_basket, code) VALUES (109, 1, 'x')")
+    conn.execute("INSERT INTO linie (t_id, t_basket, geom, wal) VALUES (110, 1, 'g1', 109)")
+    conn.execute("INSERT INTO linie (t_id, t_basket, geom, wal) VALUES (111, 1, 'g2', 109)")
     rows = sorted(conn.execute("SELECT geom, code FROM linietyp"))
     assert rows == [("g1", "x"), ("g2", "x")]
 

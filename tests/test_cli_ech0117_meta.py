@@ -73,7 +73,7 @@ def test_convert_sql_resolves_crs_declared_locally_not_via_import(tmp_path, caps
     assert main(["convert-sql", str(ili_path)]) == 0
     ddl = capsys.readouterr().out
     assert 'CREATE TABLE "a" (' in ddl
-    assert '"id" text PRIMARY KEY' in ddl
+    assert "\"t_id\" bigint PRIMARY KEY DEFAULT nextval('t_ili2db_seq')" in ddl
     assert '"geom" geometry(Point, 2056) NOT NULL' in ddl
 
 
@@ -120,7 +120,7 @@ def test_convert_sql_cross_model_reference_target_on_repo_keeps_fk_automatically
     assert main(["convert-sql", str(main_path), "--repo", str(tmp_path)]) == 0
     ddl = capsys.readouterr().out
     assert 'CREATE TABLE "zonecatalog" (' in ddl
-    assert 'FOREIGN KEY ("zone") REFERENCES "zonecatalog" ("id")' in ddl
+    assert 'FOREIGN KEY ("zone") REFERENCES "zonecatalog" ("t_id")' in ddl
     assert "different model" not in ddl
 
 
@@ -146,7 +146,7 @@ def test_convert_sql_catalog_flag_still_works_when_target_model_is_not_on_repo(t
     )
     ddl = capsys.readouterr().out
     assert 'CREATE TABLE "zonecatalog" (' in ddl
-    assert 'FOREIGN KEY ("zone") REFERENCES "zonecatalog" ("id")' in ddl
+    assert 'FOREIGN KEY ("zone") REFERENCES "zonecatalog" ("t_id")' in ddl
 
 
 def test_convert_sql_catalog_flag_ignores_the_same_file_given_twice(tmp_path, capsys):
@@ -226,8 +226,8 @@ def test_convert_sql_catalog_flag_resolves_embedded_role_in_the_catalogues_own_m
     # Main.ili's own symbol table. A `"parent"` FK column on `child`
     # proves it was resolved against the catalogue's OWN table.
     assert 'CREATE TABLE "child" (' in ddl
-    assert '"parent" text' in ddl
-    assert 'FOREIGN KEY ("parent") REFERENCES "parent" ("id")' in ddl
+    assert '"parent" bigint' in ddl
+    assert 'FOREIGN KEY ("parent") REFERENCES "parent" ("t_id")' in ddl
 
 
 _BASE_MODEL_FOR_VIEW = """INTERLIS 2.4;
@@ -273,7 +273,7 @@ def test_convert_sql_auto_includes_a_views_base_model_from_repo(tmp_path, capsys
     assert 'CREATE TABLE "road" (' in ddl  # the imported base model's tables, auto-included
     assert 'CREATE TABLE "segment" (' in ddl
     assert 'CREATE VIEW "v_seg" AS' in ddl
-    assert '"segment"."ofroad" = "road"."id"' in ddl
+    assert '"segment"."ofroad" = "road"."t_id"' in ddl
     assert "-- NOTE (view v_seg)" not in ddl
 
 

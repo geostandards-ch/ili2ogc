@@ -69,15 +69,15 @@ def one_subclass_ddl(tmp_path: Path, capsys) -> str:
 
 def test_concrete_base_gets_one_fk_column_per_target_table(one_subclass_ddl: str):
     ddl = one_subclass_ddl
-    assert 'REFERENCES "facility" ("id")' in ddl
-    assert '"facility_linefacility" text' in ddl
-    assert 'FOREIGN KEY ("facility_linefacility") REFERENCES "linefacility" ("id")' in ddl
+    assert 'REFERENCES "facility" ("t_id")' in ddl
+    assert '"facility_linefacility" bigint' in ddl
+    assert 'FOREIGN KEY ("facility_linefacility") REFERENCES "linefacility" ("t_id")' in ddl
 
 
 def test_mandatory_polymorphic_reference_requires_exactly_one_target(one_subclass_ddl: str):
     measure = one_subclass_ddl.split('CREATE TABLE "measure" (', 1)[1].split(");", 1)[0]
     # Each per-target column is nullable; MANDATORY moves to the CHECK.
-    assert '"facility" text NOT NULL' not in measure
+    assert '"facility" bigint NOT NULL' not in measure
     assert (
         '(CASE WHEN "facility" IS NOT NULL THEN 1 ELSE 0 END'
         ' + CASE WHEN "facility_linefacility" IS NOT NULL THEN 1 ELSE 0 END) = 1'
@@ -85,7 +85,7 @@ def test_mandatory_polymorphic_reference_requires_exactly_one_target(one_subclas
 
 
 def test_abstract_base_with_one_concrete_subclass_is_retargeted(one_subclass_ddl: str):
-    assert 'FOREIGN KEY ("site") REFERENCES "plant" ("id")' in one_subclass_ddl
+    assert 'FOREIGN KEY ("site") REFERENCES "plant" ("t_id")' in one_subclass_ddl
     assert '"site_plant"' not in one_subclass_ddl
 
 
@@ -93,6 +93,6 @@ def test_abstract_base_with_several_subclasses_drops_the_base_column(tmp_path: P
     ddl = _convert(tmp_path, _TWO_SUBCLASSES, capsys)
     measure = ddl.split('CREATE TABLE "measure" (', 1)[1].split(");", 1)[0]
     assert '"site" text' not in measure
-    assert 'FOREIGN KEY ("site_depot") REFERENCES "depot" ("id")' in ddl
-    assert 'FOREIGN KEY ("site_plant") REFERENCES "plant" ("id")' in ddl
+    assert 'FOREIGN KEY ("site_depot") REFERENCES "depot" ("t_id")' in ddl
+    assert 'FOREIGN KEY ("site_plant") REFERENCES "plant" ("t_id")' in ddl
     assert ") <= 1" in measure

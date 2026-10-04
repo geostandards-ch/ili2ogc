@@ -1,4 +1,4 @@
-"""Generated SQL views expose an `id` column (pygeoapi and OGR need one): the base's id, or joined bases' ids."""
+"""Generated SQL views expose a `t_id` column (pygeoapi and OGR need an id): the base's, or joined bases' ids."""
 
 import sqlite3
 
@@ -48,16 +48,16 @@ def _views():
 
 def test_projection_view_exposes_its_base_id():
     con = sqlite3.connect(":memory:")
-    con.executescript("CREATE TABLE road (id TEXT, name TEXT); INSERT INTO road VALUES ('r1', 'A1');")
+    con.executescript("CREATE TABLE road (t_id INTEGER, name TEXT); INSERT INTO road VALUES (1, 'A1');")
     body = _views()["roadnames"].body
-    assert con.execute(f"SELECT id, roadname FROM ({body})").fetchall() == [("r1", "A1")]
+    assert con.execute(f"SELECT t_id, roadname FROM ({body})").fetchall() == [(1, "A1")]
 
 
 def test_join_view_id_combines_both_bases():
     con = sqlite3.connect(":memory:")
     con.executescript(
-        "CREATE TABLE road (id TEXT, name TEXT); CREATE TABLE sign (id TEXT, label TEXT, road TEXT);"
-        "INSERT INTO road VALUES ('r1', 'A1'); INSERT INTO sign VALUES ('s1', 'Stop', 'r1'), ('s2', 'Go', 'r1');"
+        "CREATE TABLE road (t_id INTEGER, name TEXT); CREATE TABLE sign (t_id INTEGER, label TEXT, road INTEGER);"
+        "INSERT INTO road VALUES (1, 'A1'); INSERT INTO sign VALUES (11, 'Stop', 1), (12, 'Go', 1);"
     )
-    rows = con.execute(f"SELECT id FROM ({_views()['roadsigns'].body}) ORDER BY id").fetchall()
-    assert rows == [("r1:s1",), ("r1:s2",)]
+    rows = con.execute(f"SELECT t_id FROM ({_views()['roadsigns'].body}) ORDER BY t_id").fetchall()
+    assert rows == [("1:11",), ("1:12",)]

@@ -83,7 +83,7 @@ def test_catalogue_target_behind_a_mandatory_structure_is_folded(tmp_path: Path,
 def test_reference_to_extended_base_class_is_split_per_table(tmp_path: Path, capsys):
     sql, _ = _convert_sql(tmp_path, "Ext", _EXTENSION, capsys)
     assert 'REFERENCES "facility"' in sql
-    assert '"facility_subfacility" text' in sql
+    assert '"facility_subfacility" bigint' in sql
     assert 'REFERENCES "subfacility"' in sql
 
 

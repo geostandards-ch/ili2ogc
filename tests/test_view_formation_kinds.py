@@ -114,8 +114,8 @@ def test_union_sql_is_union_all_and_runs():
     (cc,) = views
     assert cc.body is not None and "UNION ALL" in cc.body
     con = _run_ddl(_tables, views)
-    con.execute('INSERT INTO "c1" ("id", "attr1") VALUES (1, ?)', ("alpha",))
-    con.execute('INSERT INTO "c2" ("id", "attr2") VALUES (1, ?)', ("gamma",))
+    con.execute('INSERT INTO "c1" ("t_id", "t_basket", "attr1") VALUES (1, 1, ?)', ("alpha",))
+    con.execute('INSERT INTO "c2" ("t_id", "t_basket", "attr2") VALUES (1, 1, ?)', ("gamma",))
     assert sorted(r[0] for r in con.execute('SELECT "attr1" FROM "cc"')) == ["alpha", "gamma"]
 
 
@@ -131,11 +131,11 @@ def test_union_sql_joins_a_branch_attribute_that_navigates_a_reference():
     (cc,) = views
     assert cc.body is not None
     assert 'FROM "c1" "c1", "d" "j1_d"' in cc.body
-    assert '"c1"."refd" = "j1_d"."id"' in cc.body
+    assert '"c1"."refd" = "j1_d"."t_id"' in cc.body
     con = _run_ddl(tables, views)
-    con.execute('INSERT INTO "d" ("id", "name") VALUES (1, ?)', ("delta",))
-    con.execute('INSERT INTO "c1" ("id", "refd") VALUES (1, 1)')
-    con.execute('INSERT INTO "c2" ("id", "attr2") VALUES (1, ?)', ("gamma",))
+    con.execute('INSERT INTO "d" ("t_id", "t_basket", "name") VALUES (1, 1, ?)', ("delta",))
+    con.execute('INSERT INTO "c1" ("t_id", "t_basket", "refd") VALUES (1, 1, 1)')
+    con.execute('INSERT INTO "c2" ("t_id", "t_basket", "attr2") VALUES (1, 1, ?)', ("gamma",))
     assert sorted(r[0] for r in con.execute('SELECT "attr1" FROM "cc"')) == ["delta", "gamma"]
 
 
@@ -154,9 +154,9 @@ def test_inspection_sql_selects_over_the_child_table_and_runs():
     (vb,) = views
     assert vb.body is not None and 'FROM "b_attr2"' in vb.body
     con = _run_ddl(_tables, views)
-    con.execute('INSERT INTO "b" ("id") VALUES (1)')
-    con.execute('INSERT INTO "b_attr2" ("id", "b_fk", "attr1") VALUES (1, 1, ?)', ("first",))
-    con.execute('INSERT INTO "b_attr2" ("id", "b_fk", "attr1") VALUES (2, 1, ?)', ("second",))
+    con.execute('INSERT INTO "b" ("t_id", "t_basket") VALUES (1, 1)')
+    con.execute('INSERT INTO "b_attr2" ("t_id", "t_basket", "b_fk", "attr1") VALUES (1, 1, 1, ?)', ("first",))
+    con.execute('INSERT INTO "b_attr2" ("t_id", "t_basket", "b_fk", "attr1") VALUES (2, 1, 1, ?)', ("second",))
     assert sorted(r[0] for r in con.execute('SELECT "attr1" FROM "vb"')) == ["first", "second"]
 
 
@@ -171,11 +171,11 @@ def test_inspection_sql_resolves_parent_arrow_by_joining_back_to_the_base_table(
     (vb,) = views
     assert vb.body is not None
     assert 'FROM "b_attr2" "insp"' in vb.body
-    assert 'JOIN "b" "b" ON "insp"."b_fk" = "b"."id"' in vb.body
+    assert 'JOIN "b" "b" ON "insp"."b_fk" = "b"."t_id"' in vb.body
     con = _run_ddl(_tables, views)
-    con.execute('INSERT INTO "b" ("id", "name") VALUES (1, ?)', ("owner-1",))
-    con.execute('INSERT INTO "b_attr2" ("id", "b_fk", "attr1") VALUES (1, 1, ?)', ("first",))
-    con.execute('INSERT INTO "b_attr2" ("id", "b_fk", "attr1") VALUES (2, 1, ?)', ("second",))
+    con.execute('INSERT INTO "b" ("t_id", "t_basket", "name") VALUES (1, 1, ?)', ("owner-1",))
+    con.execute('INSERT INTO "b_attr2" ("t_id", "t_basket", "b_fk", "attr1") VALUES (1, 1, 1, ?)', ("first",))
+    con.execute('INSERT INTO "b_attr2" ("t_id", "t_basket", "b_fk", "attr1") VALUES (2, 1, 1, ?)', ("second",))
     rows = sorted(con.execute('SELECT "attr1", "ownername" FROM "vb"'))
     assert rows == [("first", "owner-1"), ("second", "owner-1")]
 
@@ -189,10 +189,14 @@ def test_inspection_sql_resolves_an_indirect_multi_hop_path_via_a_nested_child_t
     table_names = {t.name for t in tables}
     assert {"b", "b_attr2", "b_attr2_attr3"} <= table_names
     con = _run_ddl(tables, views)
-    con.execute('INSERT INTO "b" ("id") VALUES (1)')
-    con.execute('INSERT INTO "b_attr2" ("id", "b_fk", "attr1") VALUES (1, 1, ?)', ("first",))
-    con.execute('INSERT INTO "b_attr2_attr3" ("id", "b_attr2_fk", "attr4") VALUES (1, 1, ?)', ("alpha",))
-    con.execute('INSERT INTO "b_attr2_attr3" ("id", "b_attr2_fk", "attr4") VALUES (2, 1, ?)', ("beta",))
+    con.execute('INSERT INTO "b" ("t_id", "t_basket") VALUES (1, 1)')
+    con.execute('INSERT INTO "b_attr2" ("t_id", "t_basket", "b_fk", "attr1") VALUES (1, 1, 1, ?)', ("first",))
+    con.execute(
+        'INSERT INTO "b_attr2_attr3" ("t_id", "t_basket", "b_attr2_fk", "attr4") VALUES (1, 1, 1, ?)', ("alpha",)
+    )
+    con.execute(
+        'INSERT INTO "b_attr2_attr3" ("t_id", "t_basket", "b_attr2_fk", "attr4") VALUES (2, 1, 1, ?)', ("beta",)
+    )
     assert sorted(r[0] for r in con.execute('SELECT "attr4" FROM "vb"')) == ["alpha", "beta"]
 
 
@@ -264,7 +268,7 @@ def test_aggregation_projection_only_sql_groups_by_the_stashed_key_and_runs():
     assert v.body is not None and "GROUP BY" in v.body and not v.body.startswith("SELECT DISTINCT")
     con = _run_ddl(_tables, views)
     con.executemany(
-        'INSERT INTO "parcel" ("id", "municipality") VALUES (?, ?)',
+        'INSERT INTO "parcel" ("t_id", "t_basket", "municipality") VALUES (?, 1, ?)',
         [(1, "Lausanne"), (2, "Lausanne"), (3, "Renens")],
     )
     assert sorted(r[0] for r in con.execute('SELECT "municipality" FROM "municipalitylist"')) == ["Lausanne", "Renens"]
@@ -282,10 +286,10 @@ def test_aggregation_sql_joins_an_attribute_that_navigates_a_reference():
     assert v.body is not None and "GROUP BY" in v.body
     assert 'FROM "parcel" "parcel", "municipality" "j1_municipality"' in v.body
     con = _run_ddl(tables, views)
-    con.execute('INSERT INTO "municipality" ("id", "name") VALUES (1, ?)', ("Lausanne",))
-    con.execute('INSERT INTO "municipality" ("id", "name") VALUES (2, ?)', ("Renens",))
+    con.execute('INSERT INTO "municipality" ("t_id", "t_basket", "name") VALUES (1, 1, ?)', ("Lausanne",))
+    con.execute('INSERT INTO "municipality" ("t_id", "t_basket", "name") VALUES (2, 1, ?)', ("Renens",))
     con.executemany(
-        'INSERT INTO "parcel" ("id", "municipality", "zone") VALUES (?, ?, ?)',
+        'INSERT INTO "parcel" ("t_id", "t_basket", "municipality", "zone") VALUES (?, 1, ?, ?)',
         [(1, 1, "A"), (2, 1, "B"), (3, 2, "A")],
     )
     rows = sorted(r[0] for r in con.execute('SELECT "municipalityname" FROM "municipalitylist"'))
@@ -300,7 +304,7 @@ def test_aggregation_standard_count_function_sql_groups_by_key_and_runs():
     assert "COUNT(*)" in v.body and 'GROUP BY "parcel"."municipality"' in v.body
     con = _run_ddl(tables, views)
     con.executemany(
-        'INSERT INTO "parcel" ("id", "municipality") VALUES (?, ?)',
+        'INSERT INTO "parcel" ("t_id", "t_basket", "municipality") VALUES (?, 1, ?)',
         [(1, "Lausanne"), (2, "Lausanne"), (3, "Renens")],
     )
     rows = dict(con.execute('SELECT "municipality", "parcelcount" FROM "municipalitystats"'))
@@ -315,7 +319,7 @@ def test_aggregation_standard_count_function_all_sql_is_a_single_ungrouped_row()
     assert "COUNT(*)" in v.body and "GROUP BY" not in v.body
     con = _run_ddl(tables, views)
     con.executemany(
-        'INSERT INTO "parcel" ("id", "municipality") VALUES (?, ?)',
+        'INSERT INTO "parcel" ("t_id", "t_basket", "municipality") VALUES (?, 1, ?)',
         [(1, "Lausanne"), (2, "Lausanne"), (3, "Renens")],
     )
     (total,) = con.execute('SELECT "total" FROM "parcelstats"').fetchone()
@@ -342,9 +346,11 @@ def test_projection_of_association_sql_resolves_the_embedded_carrier_and_far_rol
     (v,) = views
     assert v.body is not None
     assert 'FROM "planungszone" "typpz_planungszone", "typpz" "j1_typpz"' in v.body
-    assert '"typpz_planungszone"."typpz" = "j1_typpz"."id"' in v.body
+    assert '"typpz_planungszone"."typpz" = "j1_typpz"."t_id"' in v.body
     con = _run_ddl(tables, views)
-    con.execute('INSERT INTO "typpz" ("id", "code") VALUES (1, ?)', ("Z1",))
-    con.execute('INSERT INTO "planungszone" ("id", "publishedfrom", "typpz") VALUES (1, ?, 1)', ("2024-01-01",))
+    con.execute('INSERT INTO "typpz" ("t_id", "t_basket", "code") VALUES (1, 1, ?)', ("Z1",))
+    con.execute(
+        'INSERT INTO "planungszone" ("t_id", "t_basket", "publishedfrom", "typpz") VALUES (1, 1, ?, 1)', ("2024-01-01",)
+    )
     row = con.execute('SELECT "publishedfrom", "typecode" FROM "view_pz"').fetchone()
     assert row == ("2024-01-01", "Z1")

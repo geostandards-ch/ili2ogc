@@ -28,35 +28,31 @@ from interlis.xtf.schema import (
 )
 
 from .expressions import _MAX_STRUCT_FLATTEN_DEPTH, _expression_to_sql, _UnsupportedCheckExpression
-from .identifiers import OID_COLUMN, _dedup_name, _sql_identifier, _truncate_identifier
+from .identifiers import OID_COLUMN, RESERVED_COLUMNS, SEQ_COLUMN, _dedup_name, _sql_identifier, _truncate_identifier
 from .model import CheckConstraint, Column, ForeignKey, Table, UniqueConstraint
 from .types import _GEOMETRY_KINDS, _domain_check, _geometry_column_info, _scalar_sql_type
 
 
 def _avoid_identity_collision(columns: list[Column]) -> dict[str, str]:
-    """Rename any column literally named `OID_COLUMN` ("id") to `"id_attr"` (or `"id_attr_2"`, ... on a further
-    collision), IN PLACE - returns the `{old_name: new_name}` rename map.
-
-    Real corpus case: a genuine INTERLIS attribute literally named
-    `Id`/`ID` collides with the reserved identity column. The caller must
-    also apply the rename map to any `UniqueConstraint` built from the
-    same attributes.
+    """Rename any attribute column named like a technical column (`t_id`, `t_basket`, ...) to `<name>_attr` (or
+    `<name>_attr_2`, ...), IN PLACE - returns the `{old_name: new_name}` rename map, which the caller also applies to
+    its UNIQUE constraints.
     """
     used = {c.name for c in columns}
     renamed: dict[str, str] = {}
     for column in columns:
-        if column.name != OID_COLUMN:
+        if column.name not in RESERVED_COLUMNS:
             continue
-        base_name = f"{OID_COLUMN}_attr"
+        base_name = f"{column.name}_attr"
         new_name = base_name
         suffix = 2
         while new_name in used:
             new_name = f"{base_name}_{suffix}"
             suffix += 1
-        used.discard(OID_COLUMN)
+        used.discard(column.name)
         used.add(new_name)
+        renamed[column.name] = new_name
         column.name = new_name
-        renamed[OID_COLUMN] = new_name
     return renamed
 
 
@@ -68,6 +64,8 @@ def _columns_for_class(
     depth: int = 0,
     role_tables: tuple[SymbolTable, ...] = (),
     presence_checks: list[tuple[str, list[str], list[str]]] | None = None,
+    child_ili_names: dict[str, str] | None = None,
+    name_tables: tuple[SymbolTable, ...] = (),
 ) -> tuple[
     list[Column],
     list[ForeignKey],
@@ -99,6 +97,15 @@ def _columns_for_class(
         if extra_table is not symbol_table:
             for role_name, role in embedded_roles_of(cls, extra_table).items():
                 members.setdefault(role_name, role)
+    lookup_tables = [t for t in (symbol_table, *role_tables, *name_tables) if t is not None]
+
+    def qualified(attr: MetaInstance) -> str | None:
+        return next((q for t in lookup_tables if (q := t.qualified_name_of(attr))), None)
+
+    def ili_name(attr: MetaInstance) -> str | None:
+        """The attribute's qualified INTERLIS name - for a top-level column only, a flattened part has none."""
+        return None if prefix else qualified(attr)
+
     for name, attr in members.items():
         resolved = resolve_attribute(attr)
         label = f"{prefix}{name}"
@@ -120,6 +127,9 @@ def _columns_for_class(
                 and _is_structure(element)
                 and bool(getattr(element, "Abstract", False))
             )
+            # A BAG/LIST's child table stands for the attribute even inside a flattened STRUCTURE.
+            if child_ili_names is not None and qualified(attr):
+                child_ili_names[label] = qualified(attr)
             if is_abstract_struct:
                 abstract_specs.append((label, element, bool(getattr(multi_value, "Ordered", False)), True))
                 continue
@@ -141,7 +151,16 @@ def _columns_for_class(
                     sfa_type = f"Multi{sfa_type}"
                 if multi_geometry.type_kind == "LineType" and line_allows_arcs(multi_geometry.type_instance):
                     notes.append(_arcs_note(label))
-                columns.append(Column(col_name, "", nullable=not resolved.mandatory, geometry_type=sfa_type, srid=srid))
+                columns.append(
+                    Column(
+                        col_name,
+                        "",
+                        nullable=not resolved.mandatory,
+                        geometry_type=sfa_type,
+                        srid=srid,
+                        ili_name=ili_name(attr),
+                    )
+                )
                 continue
             if depth >= _MAX_STRUCT_FLATTEN_DEPTH:
                 notes.append(
@@ -160,6 +179,8 @@ def _columns_for_class(
                 prefix=f"{label}_",
                 depth=depth + 1,
                 presence_checks=presence_checks,
+                child_ili_names=child_ili_names,
+                name_tables=name_tables,
             )
             if not resolved.mandatory:
                 required = [c.name for c in sub_columns if not c.nullable]
@@ -195,7 +216,9 @@ def _columns_for_class(
             target_table = _sql_identifier(getattr(target, "Name", None) or "")
             # A link-table row always carries both ends, whatever the role's cardinality.
             link_role = getattr(cls, "Kind", None) == "Association"
-            columns.append(Column(col_name, "text", nullable=not (resolved.mandatory or link_role)))
+            columns.append(
+                Column(col_name, "bigint", nullable=not (resolved.mandatory or link_role), ili_name=ili_name(attr))
+            )
             fk_name = _truncate_identifier(_sql_identifier(f"fk_{getattr(cls, 'Name', '')}_{label}"))
             # A composition role (`-<#>`) names the whole: deleting it deletes its parts.
             on_delete = "CASCADE" if getattr(attr, "Strongness", None) == "Comp" else None
@@ -226,6 +249,7 @@ def _columns_for_class(
                     col_name,
                     sql_type="",
                     nullable=not resolved.mandatory,
+                    ili_name=ili_name(attr),
                     geometry_type=sfa_type,
                     srid=srid,
                 )
@@ -235,7 +259,13 @@ def _columns_for_class(
         scalar_type = _scalar_sql_type(resolved)
         if scalar_type is not None:
             columns.append(
-                Column(col_name, scalar_type, nullable=not resolved.mandatory, check=_domain_check(resolved))
+                Column(
+                    col_name,
+                    scalar_type,
+                    nullable=not resolved.mandatory,
+                    check=_domain_check(resolved),
+                    ili_name=ili_name(attr),
+                )
             )
             continue
 
@@ -257,6 +287,7 @@ def _build_child_table(
     attr_name: str,
     multi_value: MetaInstance,
     symbol_table: SymbolTable | None,
+    name_tables: tuple[SymbolTable, ...] = (),
 ) -> tuple[Table | None, dict[str, str], str | None, list[tuple[str, MetaInstance]]]:
     """Return `(child_table, renamed, None, nested_child_specs)` on success or `(None, {}, reason, [])` on failure,
     for one `BAG`/`LIST OF` attribute.
@@ -275,7 +306,7 @@ def _build_child_table(
 
     child_table_name = _sql_identifier(f"{parent_table}_{attr_name}")
     fk_column = _sql_identifier(f"{parent_table}_fk")
-    columns: list[Column] = [Column(fk_column, "text", nullable=False)]
+    columns: list[Column] = [Column(fk_column, "bigint", nullable=False)]
     foreign_keys: list[ForeignKey] = [
         ForeignKey(
             _truncate_identifier(_sql_identifier(f"fk_{child_table_name}_{fk_column}")),
@@ -288,7 +319,7 @@ def _build_child_table(
     notes: list[str] = []
 
     if bool(getattr(multi_value, "Ordered", False)):
-        columns.append(Column("seq", "integer", nullable=False))
+        columns.append(Column(SEQ_COLUMN, "bigint", nullable=False))
 
     nested_child_specs: list[tuple[str, MetaInstance]] = []
     if base_kind == "Class" and _is_structure(base_type):
@@ -297,7 +328,7 @@ def _build_child_table(
             # (one child table per concrete subclass) - never reaches here.
             return None, {}, "BAG/LIST OF an ABSTRACT structure - subclass polymorphism not mapped to a table", []
         sub_columns, sub_fks, sub_notes, sub_child_specs, _sub_local_unique, _sub_abstract = _columns_for_class(
-            base_type, symbol_table
+            base_type, symbol_table, name_tables=name_tables
         )
         columns.extend(sub_columns)
         foreign_keys.extend(sub_fks)
@@ -309,7 +340,7 @@ def _build_child_table(
         if target is None:
             return None, {}, "reference target not resolved - pass its model to --repo or --catalog", []
         target_table = _sql_identifier(getattr(target, "Name", None) or "")
-        columns.append(Column("value", "text", nullable=True))
+        columns.append(Column("value", "bigint", nullable=True))
         foreign_keys.append(
             ForeignKey(
                 _truncate_identifier(_sql_identifier(f"fk_{child_table_name}_value")),
@@ -333,7 +364,16 @@ def _build_child_table(
         columns.append(Column("value", scalar_type, nullable=False, check=_domain_check(synthetic)))
 
     renamed = _avoid_identity_collision(columns)
-    table = Table(name=child_table_name, columns=columns, foreign_keys=foreign_keys, notes=notes)
+    checks: list[CheckConstraint] = []
+    if base_kind == "Class" and _is_structure(base_type):
+        # The element STRUCTURE's own MANDATORY CONSTRAINTs bind each child row.
+        checks, check_notes = _check_constraints_for_class(
+            base_type, child_table_name, {c.name for c in columns}, renamed
+        )
+        notes.extend(check_notes)
+    table = Table(
+        name=child_table_name, columns=columns, foreign_keys=foreign_keys, check_constraints=checks, notes=notes
+    )
     return table, renamed, None, nested_child_specs
 
 
@@ -342,6 +382,7 @@ def _build_nested_child_tables(
     child_specs: list[tuple[str, MetaInstance]],
     symbol_table: SymbolTable | None,
     used_table_names: set[str],
+    name_tables: tuple[SymbolTable, ...] = (),
 ) -> list[Table]:
     """Build one `<parent_child_table>_<attr>` table per `BAG`/`LIST OF` attribute found one level inside it.
 
@@ -352,7 +393,7 @@ def _build_nested_child_tables(
     out: list[Table] = []
     for attr_name, multi_value in child_specs:
         child_table, _renamed, reason, deeper_specs = _build_child_table(
-            parent_child_table.name, attr_name, multi_value, symbol_table
+            parent_child_table.name, attr_name, multi_value, symbol_table, name_tables
         )
         if child_table is None:
             rule = (
@@ -388,6 +429,7 @@ def _structure_child_table(
     symbol_table: SymbolTable | None,
     *,
     ordered: bool,
+    name_tables: tuple[SymbolTable, ...] = (),
 ) -> tuple[Table, dict[str, str]]:
     """One child table holding instances of a concrete STRUCTURE `struct_cls`.
 
@@ -398,7 +440,7 @@ def _structure_child_table(
     columns), factored out so `build_tables` can call it per subclass.
     """
     fk_column = _sql_identifier(f"{parent_table}_fk")
-    columns: list[Column] = [Column(fk_column, "text", nullable=False)]
+    columns: list[Column] = [Column(fk_column, "bigint", nullable=False)]
     foreign_keys: list[ForeignKey] = [
         ForeignKey(
             _truncate_identifier(_sql_identifier(f"fk_{table_name}_{fk_column}")),
@@ -409,14 +451,22 @@ def _structure_child_table(
         )
     ]
     if ordered:
-        columns.append(Column("seq", "integer", nullable=False))
+        columns.append(Column(SEQ_COLUMN, "bigint", nullable=False))
     sub_columns, sub_fks, sub_notes, _sub_child_specs, _sub_local_unique, _sub_abstract = _columns_for_class(
-        struct_cls, symbol_table
+        struct_cls, symbol_table, name_tables=name_tables
     )
     columns.extend(sub_columns)
     foreign_keys.extend(sub_fks)
     renamed = _avoid_identity_collision(columns)
-    return Table(name=table_name, columns=columns, foreign_keys=foreign_keys, notes=list(sub_notes)), renamed
+    checks, check_notes = _check_constraints_for_class(struct_cls, table_name, {c.name for c in columns}, renamed)
+    table = Table(
+        name=table_name,
+        columns=columns,
+        foreign_keys=foreign_keys,
+        check_constraints=checks,
+        notes=[*sub_notes, *check_notes],
+    )
+    return table, renamed
 
 
 def _check_constraints_for_class(
@@ -744,6 +794,7 @@ def build_tables(
     *,
     class_symbol_tables: dict[int, SymbolTable] | None = None,
     class_table_names: dict[int, str] | None = None,
+    name_tables: tuple[SymbolTable, ...] = (),
 ) -> list[Table]:
     """Convert every `Class(Kind=Class)` in `classes` into a `Table` - the dialect-neutral IR every renderer consumes.
 
@@ -753,6 +804,8 @@ def build_tables(
     View's base classes to their tables by identity. `class_symbol_tables`
     overrides `symbol_table` per-class for a `--catalog` class whose
     embedding association lives in a different model's own table.
+    `name_tables` (the imported models' tables) only serve to name columns
+    after the attribute they hold, for T_ILI2DB_ATTRNAME.
     """
     tables = []
     used_table_names: set[str] = set()
@@ -792,8 +845,14 @@ def build_tables(
 
         home_table = (class_symbol_tables or {}).get(id(cls), symbol_table)
         presence_checks: list[tuple[str, list[str], list[str]]] = []
+        child_ili_names: dict[str, str] = {}
         columns, foreign_keys, notes, child_specs, nested_local_unique, abstract_specs = _columns_for_class(
-            cls, home_table, role_tables=tuple(scan_symbol_tables), presence_checks=presence_checks
+            cls,
+            home_table,
+            role_tables=tuple(scan_symbol_tables),
+            presence_checks=presence_checks,
+            child_ili_names=child_ili_names,
+            name_tables=name_tables,
         )
         if getattr(cls, "Kind", None) == "Association" and not foreign_keys:
             notes.append(
@@ -837,12 +896,14 @@ def build_tables(
             foreign_keys=foreign_keys,
             check_constraints=check_constraints,
             notes=notes + unique_notes + check_notes + local_unique_notes,
+            ili_name=home_table.qualified_name_of(cls) if home_table is not None else None,
+            has_tid=getattr(cls, "Kind", None) != "Association",
         )
         tables.append(parent_table)
 
         for attr_name, multi_value in child_specs:
             child_table, child_renamed, reason, nested_specs = _build_child_table(
-                table_name, attr_name, multi_value, home_table
+                table_name, attr_name, multi_value, home_table, name_tables
             )
             if child_table is None:
                 rule = (
@@ -860,6 +921,8 @@ def build_tables(
                 suffix += 1
             used_table_names.add(child_name)
             child_table.name = child_name
+            # Its link back to the parent stands for the multi-valued attribute itself.
+            child_table.columns[0].ili_name = child_ili_names.get(attr_name)
 
             fk_column = _sql_identifier(f"{table_name}_fk")
             child_column_names = {c.name for c in child_table.columns}
@@ -897,7 +960,9 @@ def build_tables(
 
             tables.append(child_table)
             if nested_specs:
-                tables.extend(_build_nested_child_tables(child_table, nested_specs, home_table, used_table_names))
+                tables.extend(
+                    _build_nested_child_tables(child_table, nested_specs, home_table, used_table_names, name_tables)
+                )
 
         # An ABSTRACT structure attribute (single-valued or BAG/LIST OF):
         # one child table per concrete subclass reachable in the symbol
@@ -925,8 +990,9 @@ def build_tables(
                 sub_name = _sql_identifier(getattr(sub, "Name", None) or "")
                 child_name = _dedup_name(_sql_identifier(f"{table_name}_{attr_name}_{sub_name}"), used_table_names)
                 child_table, child_renamed = _structure_child_table(
-                    table_name, child_name, sub, home_table, ordered=ordered
+                    table_name, child_name, sub, home_table, ordered=ordered, name_tables=name_tables
                 )
+                child_table.columns[0].ili_name = child_ili_names.get(attr_name)
                 child_column_names = {c.name for c in child_table.columns}
                 for group_columns in groups_for_attr:
                     full_columns = [fk_column, *(child_renamed.get(c, c) for c in group_columns)]

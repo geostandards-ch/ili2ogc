@@ -91,9 +91,9 @@ def test_convert_sql_lang_renames_tables_columns_views_and_fk_refs(capsys):
     assert '"designation" varchar(40)' in ddl
     assert 'CREATE VIEW "tronconchemin_avecindicateur"' in ddl
     # the FK column and its REFERENCES target renamed consistently
-    assert 'FOREIGN KEY ("tronconchemin") REFERENCES "tronconchemin" ("id")' in ddl
+    assert 'FOREIGN KEY ("tronconchemin") REFERENCES "tronconchemin" ("t_id")' in ddl
     # the view's WHERE EXISTS references the renamed child table + FK column
-    assert 'FROM "indicateur" "v1" WHERE "v1"."tronconchemin" = "tronconchemin"."id"' in ddl
+    assert 'FROM "indicateur" "v1" WHERE "v1"."tronconchemin" = "tronconchemin"."t_id"' in ddl
     for german in ("wegabschnitt", "wegweiser", "bezeichnung", "belagsart"):
         assert f'"{german}"' not in ddl
 

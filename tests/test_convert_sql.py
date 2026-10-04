@@ -74,7 +74,7 @@ def test_primary_key_and_unique_constraint():
     tables = build_tables([owner])
     table = _table(tables, "owner")
     ddl = render_postgresql(tables)
-    assert '"id" text PRIMARY KEY' in ddl
+    assert "\"t_id\" bigint PRIMARY KEY DEFAULT nextval('t_ili2db_seq')" in ddl
     assert len(table.unique_constraints) == 1
     assert table.unique_constraints[0].columns == ["code"]
     assert 'CONSTRAINT uq_owner_code UNIQUE ("code")' in ddl
@@ -167,16 +167,16 @@ def test_reference_becomes_fk_column_and_constraint():
     )  # owner must ALSO be converted, or the FK gets dropped (see test_foreign_key_dropped_when_target_not_converted)
     table = _table(tables, "parcel")
     owner_col = next(c for c in table.columns if c.name == "owner")
-    assert owner_col.sql_type == "text"
+    assert owner_col.sql_type == "bigint"
     assert not owner_col.nullable
     assert len(table.foreign_keys) == 1
     fk = table.foreign_keys[0]
     assert fk.columns == ["owner"]
     assert fk.ref_table == "owner"
-    assert fk.ref_columns == ["id"]
+    assert fk.ref_columns == ["t_id"]
     ddl = render_postgresql(tables)
     assert (
-        'ALTER TABLE "parcel" ADD CONSTRAINT fk_parcel_owner FOREIGN KEY ("owner") REFERENCES "owner" ("id") '
+        'ALTER TABLE "parcel" ADD CONSTRAINT fk_parcel_owner FOREIGN KEY ("owner") REFERENCES "owner" ("t_id") '
         "DEFERRABLE INITIALLY DEFERRED;" in ddl
     )
 
@@ -333,7 +333,7 @@ def test_render_gpkg_inline_unique_and_foreign_key():
     ddl = render_gpkg(build_tables([parcel, owner]))
     assert "ALTER TABLE" not in ddl
     assert 'CONSTRAINT uq_owner_code UNIQUE ("code")' in ddl
-    assert 'CONSTRAINT fk_parcel_owner FOREIGN KEY ("owner") REFERENCES "owner" ("id")' in ddl
+    assert 'CONSTRAINT fk_parcel_owner FOREIGN KEY ("owner") REFERENCES "owner" ("t_id")' in ddl
 
 
 def test_render_gpkg_geometry_column_and_metadata_rows():
@@ -458,16 +458,14 @@ END Foo.
     assert 'CREATE TABLE "union" (' in gpkg_ddl
 
 
-def test_attribute_literally_named_id_gets_renamed_not_the_identity_column():
-    """Real corpus case (ili_corpus/WasserBase_V1_1.ili): `ID : MANDATORY TEXT*25;` lowercases to the SAME name as the
-    reserved identity column - a live SQLite run rejects the naive DDL with "duplicate column name: id".
-    """
+def test_attribute_named_like_a_technical_column_is_renamed():
+    """An attribute `T_Id` lowercases to the technical key column `t_id` - it is renamed, never a duplicate column."""
     builder = _build("""INTERLIS 2.4;
 MODEL Foo AT "http://x" VERSION "1" =
   TOPIC T =
     CLASS A =
-      ID : MANDATORY TEXT*25;
-      UNIQUE ID;
+      T_Id : MANDATORY TEXT*25;
+      UNIQUE T_Id;
     END A;
   END T;
 END Foo.
@@ -475,13 +473,10 @@ END Foo.
     a = _resolved_class(builder, "Foo.T.A")
     tables = build_tables([a])
     table = _table(tables, "a")
-    names = [c.name for c in table.columns]
-    assert names == ["id_attr"]  # never a second "id" - that name is reserved for the identity column
-    assert table.unique_constraints == [UniqueConstraint("uq_a_id", ["id_attr"])]
+    assert [c.name for c in table.columns] == ["t_id_attr"]
+    assert table.unique_constraints == [UniqueConstraint("uq_a_t_id", ["t_id_attr"])]
     ddl = render_postgresql(tables)
-    assert '"id" text PRIMARY KEY' in ddl
-    assert '"id_attr" varchar(25) NOT NULL' in ddl
-    assert 'CONSTRAINT uq_a_id UNIQUE ("id_attr")' in ddl
+    assert '"t_id_attr" varchar(25) NOT NULL' in ddl
 
 
 _CHILD_TABLE_MODEL = """INTERLIS 2.4;
@@ -507,15 +502,15 @@ def test_bag_of_scalar_becomes_a_child_table_with_a_value_column():
     tables = build_tables([parcel])
     child = _table(tables, "parcel_tags")
     names = {c.name: c for c in child.columns}
-    assert names["parcel_fk"].sql_type == "text"
+    assert names["parcel_fk"].sql_type == "bigint"
     assert not names["parcel_fk"].nullable
     assert names["value"].sql_type == "varchar(5)"
     assert not names["value"].nullable
-    assert not any(c.name == "seq" for c in child.columns)  # BAG - no ordering column
+    assert not any(c.name == "t_seq" for c in child.columns)  # BAG - no ordering column
     fk = child.foreign_keys[0]
     assert fk.columns == ["parcel_fk"]
     assert fk.ref_table == "parcel"
-    assert fk.ref_columns == ["id"]
+    assert fk.ref_columns == ["t_id"]
     assert not any(c.name == "tags" for c in _table(tables, "parcel").columns)  # never inlined on the parent
 
 
@@ -526,7 +521,7 @@ def test_list_of_structure_child_table_has_seq_and_flattened_columns():
     child = _table(tables, "parcel_names")
     names = {c.name: c for c in child.columns}
     assert (
-        "seq" in names and names["seq"].sql_type == "integer" and not names["seq"].nullable
+        "t_seq" in names and names["t_seq"].sql_type == "bigint" and not names["t_seq"].nullable
     )  # LIST - ordering matters
     assert names["language"].sql_type == "varchar(2)" and names["language"].nullable
     assert names["text"].sql_type == "varchar(100)" and not names["text"].nullable
@@ -618,13 +613,13 @@ def test_abstract_structure_attribute_becomes_one_child_table_per_concrete_subcl
 
     cover_circle = _table(tables, "drawing_cover_circle")
     cols = {c.name: c for c in cover_circle.columns}
-    assert cols["drawing_fk"].sql_type == "text" and not cols["drawing_fk"].nullable
+    assert cols["drawing_fk"].sql_type == "bigint" and not cols["drawing_fk"].nullable
     assert "radius" in cols and "label" in cols  # the subclass's own + inherited columns
-    assert not any(c.name == "seq" for c in cover_circle.columns)  # single-valued - no ordering column
+    assert not any(c.name == "t_seq" for c in cover_circle.columns)  # single-valued - no ordering column
     assert cover_circle.foreign_keys[0].ref_table == "drawing"
 
     shapes_square = _table(tables, "drawing_shapes_square")
-    assert any(c.name == "seq" for c in shapes_square.columns)  # LIST - ordered
+    assert any(c.name == "t_seq" for c in shapes_square.columns)  # LIST - ordered
 
 
 def test_abstract_structure_without_a_concrete_subclass_is_a_note():
@@ -654,7 +649,7 @@ def test_render_gpkg_child_table_inline_fk_and_no_topological_sort_needed():
     parcel = _resolved_class(builder, "Foo.T.Parcel")
     ddl = render_gpkg(build_tables([parcel]))
     assert "ALTER TABLE" not in ddl
-    assert 'CONSTRAINT fk_parcel_tags_parcel_fk FOREIGN KEY ("parcel_fk") REFERENCES "parcel" ("id")' in ddl
+    assert 'CONSTRAINT fk_parcel_tags_parcel_fk FOREIGN KEY ("parcel_fk") REFERENCES "parcel" ("t_id")' in ddl
 
 
 def test_child_table_name_collision_gets_disambiguated_like_any_other_table():
@@ -742,12 +737,12 @@ def test_check_constraint_executes_against_real_sqlite_and_enforces_the_rule():
     conn = sqlite3.connect(":memory:")
     conn.executescript(ddl.split("INSERT INTO gpkg_contents")[0])
     conn.execute(
-        "INSERT INTO parcel (id, parcelnr, status, loc_street, loc_number) VALUES (?,?,?,?,?)",
+        "INSERT INTO parcel (t_id, t_basket, parcelnr, status, loc_street, loc_number) VALUES (?, 1,?,?,?,?)",
         ("1", 5, "Active", "Main St", None),
     )
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute(
-            "INSERT INTO parcel (id, parcelnr, status, loc_street, loc_number) VALUES (?,?,?,?,?)",
+            "INSERT INTO parcel (t_id, t_basket, parcelnr, status, loc_street, loc_number) VALUES (?, 1,?,?,?,?)",
             ("2", -1, "Active", "Main St", None),
         )
 
@@ -844,6 +839,12 @@ def test_unique_local_becomes_a_compound_unique_on_the_child_table():
     ]
 
 
+_ENTRY_INSERT = (
+    "INSERT INTO countrynamestranslation_entries (t_id, t_basket, countrynamestranslation_fk, t_seq, code) "
+    "VALUES (?, 1, ?, ?, ?)"
+)
+
+
 def test_unique_local_executes_against_real_sqlite_and_enforces_per_parent_scope():
     """Not just text assembly - same live-engine discipline as every other constraint in this file."""
     builder = _build(_LOCAL_UNIQUE_MODEL)
@@ -851,20 +852,20 @@ def test_unique_local_executes_against_real_sqlite_and_enforces_per_parent_scope
     ddl = render_gpkg(build_tables([cls]))
     conn = sqlite3.connect(":memory:")
     conn.executescript(ddl.split("INSERT INTO gpkg_contents")[0])
-    conn.execute("INSERT INTO countrynamestranslation (id) VALUES (?)", ("p1",))
-    conn.execute("INSERT INTO countrynamestranslation (id) VALUES (?)", ("p2",))
+    conn.execute("INSERT INTO countrynamestranslation (t_id, t_basket) VALUES (?, 1)", (1,))
+    conn.execute("INSERT INTO countrynamestranslation (t_id, t_basket) VALUES (?, 1)", (2,))
     conn.execute(
-        "INSERT INTO countrynamestranslation_entries (id, countrynamestranslation_fk, seq, code) VALUES (?,?,?,?)",
-        ("e1", "p1", 0, "CH"),
+        _ENTRY_INSERT,
+        (11, 1, 0, "CH"),
     )
     conn.execute(  # same code, DIFFERENT parent - must be allowed (that's the whole point of "LOCAL")
-        "INSERT INTO countrynamestranslation_entries (id, countrynamestranslation_fk, seq, code) VALUES (?,?,?,?)",
-        ("e2", "p2", 0, "CH"),
+        _ENTRY_INSERT,
+        (12, 2, 0, "CH"),
     )
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute(  # same code, SAME parent - must be rejected
-            "INSERT INTO countrynamestranslation_entries (id, countrynamestranslation_fk, seq, code) VALUES (?,?,?,?)",
-            ("e3", "p1", 1, "CH"),
+            _ENTRY_INSERT,
+            (13, 1, 1, "CH"),
         )
 
 
@@ -923,20 +924,20 @@ END Foo.
     ddl = render_gpkg(build_tables([parcel]))
     conn = sqlite3.connect(":memory:")
     conn.executescript(ddl.split("INSERT INTO gpkg_contents")[0])
-    conn.execute("INSERT INTO parcel (id) VALUES (?)", ("p1",))
-    conn.execute("INSERT INTO parcel (id) VALUES (?)", ("p2",))
+    conn.execute("INSERT INTO parcel (t_id, t_basket) VALUES (?, 1)", (1,))
+    conn.execute("INSERT INTO parcel (t_id, t_basket) VALUES (?, 1)", (2,))
     conn.execute(
-        "INSERT INTO parcel_name_entries (id, parcel_fk, language, text) VALUES (?,?,?,?)",
-        ("e1", "p1", "de", "Parzelle"),
+        "INSERT INTO parcel_name_entries (t_id, t_basket, parcel_fk, language, text) VALUES (?, 1,?,?,?)",
+        (11, 1, "de", "Parzelle"),
     )
     conn.execute(  # same language, DIFFERENT parent - must be allowed (that's the whole point of "LOCAL")
-        "INSERT INTO parcel_name_entries (id, parcel_fk, language, text) VALUES (?,?,?,?)",
-        ("e2", "p2", "de", "Parzelle"),
+        "INSERT INTO parcel_name_entries (t_id, t_basket, parcel_fk, language, text) VALUES (?, 1,?,?,?)",
+        (12, 2, "de", "Parzelle"),
     )
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute(  # same language, SAME parent - must be rejected
-            "INSERT INTO parcel_name_entries (id, parcel_fk, language, text) VALUES (?,?,?,?)",
-            ("e3", "p1", "de", "Parcelle"),
+            "INSERT INTO parcel_name_entries (t_id, t_basket, parcel_fk, language, text) VALUES (?, 1,?,?,?)",
+            (13, 1, "de", "Parcelle"),
         )
 
 

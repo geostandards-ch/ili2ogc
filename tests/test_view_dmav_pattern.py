@@ -120,15 +120,15 @@ def test_convert_sql_create_view_executes_and_filters_against_live_sqlite():
     conn = sqlite3.connect(":memory:")
     conn.executescript(_executable_gpkg_schema(tables, sql_views))
     conn.executescript("""
-        INSERT INTO grundstueck (id, nbident, nummer, egrid, entstehung, untergang) VALUES
-          ('g1','CH1','100','E1','n1',NULL),
-          ('g2','CH1','200','E2','n2e','n2u'),
-          ('g3','CH1','300','E3','n3',NULL);
-        INSERT INTO gsnachfuehrung (id, nbident, identifikator, gueltigereintrag, grundbucheintrag) VALUES
-          ('n1','CH1','D-100','2020-01-10','2020-02-14'),
-          ('n2e','CH1','D-200e','2019-01-10','2019-02-14'),
-          ('n2u','CH1','D-200u','2022-01-10','2022-02-14'),
-          ('n3','CH1','D-300','2024-01-10',NULL);
+        INSERT INTO grundstueck (t_id, t_basket, nbident, nummer, egrid, entstehung, untergang) VALUES
+          (1,1,'CH1','100','E1',11,NULL),
+          (2,1,'CH1','200','E2',12,13),
+          (3,1,'CH1','300','E3',14,NULL);
+        INSERT INTO gsnachfuehrung (t_id, t_basket, nbident, identifikator, gueltigereintrag, grundbucheintrag) VALUES
+          (11,1,'CH1','D-100','2020-01-10','2020-02-14'),
+          (12,1,'CH1','D-200e','2019-01-10','2019-02-14'),
+          (13,1,'CH1','D-200u','2022-01-10','2022-02-14'),
+          (14,1,'CH1','D-300','2024-01-10',NULL);
     """)
     assert sorted(r[0] for r in conn.execute("SELECT nummer FROM grundstueck_gueltig")) == ["100"]
 
@@ -144,29 +144,29 @@ def test_view_level_unique_trigger_enforces_uniqueness_only_among_valid_rows_liv
     conn = sqlite3.connect(":memory:")
     conn.executescript(_executable_gpkg_schema(tables, sql_views))
     conn.executescript("""
-        INSERT INTO gsnachfuehrung (id, nbident, identifikator, gueltigereintrag, grundbucheintrag) VALUES
-          ('n1','CH1','D-100','2020-01-10','2020-02-14'),
-          ('n2e','CH1','D-200e','2019-01-10','2019-02-14'),
-          ('n2u','CH1','D-200u','2022-01-10','2022-02-14');
-        INSERT INTO grundstueck (id, nbident, nummer, egrid, entstehung, untergang) VALUES
-          ('g1','CH1','100','E1','n1',NULL),
-          ('g2','CH1','200','E2','n2e','n2u'),
-          ('g6','CH1','999','E6','n1',NULL);
+        INSERT INTO gsnachfuehrung (t_id, t_basket, nbident, identifikator, gueltigereintrag, grundbucheintrag) VALUES
+          (11,1,'CH1','D-100','2020-01-10','2020-02-14'),
+          (12,1,'CH1','D-200e','2019-01-10','2019-02-14'),
+          (13,1,'CH1','D-200u','2022-01-10','2022-02-14');
+        INSERT INTO grundstueck (t_id, t_basket, nbident, nummer, egrid, entstehung, untergang) VALUES
+          (1,1,'CH1','100','E1',11,NULL),
+          (2,1,'CH1','200','E2',12,13),
+          (6,1,'CH1','999','E6',11,NULL);
     """)
     # a duplicate of a VALID row (g1) is rejected
     with pytest.raises(sqlite3.IntegrityError, match="CH041101"):
         conn.execute(
-            "INSERT INTO grundstueck (id, nbident, nummer, egrid, entstehung, untergang) "
-            "VALUES ('g4','CH1','100','E4','n1',NULL)"
+            "INSERT INTO grundstueck (t_id, t_basket, nbident, nummer, egrid, entstehung, untergang) "
+            "VALUES (4,1,'CH1','100','E4',11,NULL)"
         )
     # a row that shares a key with g2 but is itself INVALID (untergang defined) is accepted - g2 is not "in the view"
     conn.execute(
-        "INSERT INTO grundstueck (id, nbident, nummer, egrid, entstehung, untergang) "
-        "VALUES ('g5','CH1','200','E5','n2e','n2u')"
+        "INSERT INTO grundstueck (t_id, t_basket, nbident, nummer, egrid, entstehung, untergang) "
+        "VALUES (5,1,'CH1','200','E5',12,13)"
     )
     # an UPDATE that turns a VALID row into a duplicate of another VALID row is rejected too
     with pytest.raises(sqlite3.IntegrityError, match="CH041101"):
-        conn.execute("UPDATE grundstueck SET nummer = '100' WHERE id = 'g6'")
+        conn.execute("UPDATE grundstueck SET nummer = '100' WHERE t_id = 6")
 
 
 def test_xtf_to_jsonfg_flattens_the_view_and_applies_the_where_filter():

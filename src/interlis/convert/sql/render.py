@@ -9,7 +9,17 @@ from dataclasses import replace
 
 from interlis.diagnostic_ids import note as _diag
 
-from .identifiers import OID_COLUMN, _index_name, _quote, _quote_list, _sql_identifier, _truncate_identifier
+from .identifiers import (
+    BASKET_COLUMN,
+    OID_COLUMN,
+    TID_COLUMN,
+    _index_name,
+    _quote,
+    _quote_list,
+    _sql_identifier,
+    _truncate_identifier,
+)
+from .ili2db import Ili2dbMeta, basket_column_ddl, meta_rows, meta_table_ddl
 from .model import Column, ForeignKey, SqlView, Table, UniqueConstraint
 from .views import (
     _render_view_unique_triggers_gpkg,
@@ -18,7 +28,7 @@ from .views import (
 )
 
 
-def render_postgresql(tables: list[Table], views: tuple[SqlView, ...] = ()) -> str:
+def render_postgresql(tables: list[Table], views: tuple[SqlView, ...] = (), meta: Ili2dbMeta | None = None) -> str:
     """Render `tables` as PostgreSQL DDL text - `CREATE TABLE` (with inline `UNIQUE`) then `ALTER TABLE ... ADD
     CONSTRAINT ... FOREIGN KEY`.
 
@@ -26,11 +36,11 @@ def render_postgresql(tables: list[Table], views: tuple[SqlView, ...] = ()) -> s
     TABLE` - sidesteps forward-reference ordering entirely instead of
     topologically sorting.
     """
-    statements: list[str] = []
+    statements: list[str] = meta_table_ddl(gpkg=False)
     union_views = [t for t in tables if t.union_of]
     tables = [t for t in tables if not t.union_of]
     for table in tables:
-        lines = [f"    {_quote(OID_COLUMN)} text PRIMARY KEY"]
+        lines = basket_column_ddl(table, gpkg=False)
         for column in table.columns:
             null_clause = "" if column.nullable else " NOT NULL"
             sql_type = f"geometry({column.geometry_type}, {column.srid})" if column.geometry_type else column.sql_type
@@ -45,6 +55,10 @@ def render_postgresql(tables: list[Table], views: tuple[SqlView, ...] = ()) -> s
         for note in table.notes:
             statements.append(f"-- NOTE ({table.name}): {note}")
     for table in tables:
+        statements.append(
+            f"ALTER TABLE {_quote(table.name)} ADD CONSTRAINT {_truncate_identifier(f'{table.name}_t_basket_fkey')} "
+            f"FOREIGN KEY ({_quote(BASKET_COLUMN)}) REFERENCES T_ILI2DB_BASKET DEFERRABLE INITIALLY DEFERRED;"
+        )
         for fk in table.foreign_keys:
             # Deferred: an XTF transfer lists objects in any order.
             statements.append(
@@ -54,7 +68,7 @@ def render_postgresql(tables: list[Table], views: tuple[SqlView, ...] = ()) -> s
                 "DEFERRABLE INITIALLY DEFERRED;",
             )
     for table in tables:
-        for column in _foreign_key_columns(table):
+        for column in [BASKET_COLUMN, *_foreign_key_columns(table)]:
             statements.append(
                 f"CREATE INDEX {_index_name(table.name, column)} ON {_quote(table.name)} ({_quote(column)});"
             )
@@ -67,12 +81,13 @@ def render_postgresql(tables: list[Table], views: tuple[SqlView, ...] = ()) -> s
     statements += [f"CREATE VIEW {_quote(v.name)} AS {_union_select(v)};" for v in union_views]
     statements += _render_views(views)
     statements += _render_view_unique_triggers_postgresql(views)
+    statements += meta_rows(tables, meta or Ili2dbMeta(), gpkg=False)
     return "\n".join(statements) + "\n"
 
 
 def _union_select(view: Table) -> str:
-    """`SELECT id, <columns> FROM a UNION ALL SELECT ... FROM b` - one branch per concrete subclass table."""
-    columns = _quote_list([OID_COLUMN, *(c.name for c in view.columns)])
+    """`SELECT t_id, t_basket, t_ili_tid, <columns> FROM a UNION ALL ...` - one branch per concrete subclass table."""
+    columns = _quote_list([OID_COLUMN, BASKET_COLUMN, TID_COLUMN, *(c.name for c in view.columns)])
     return " UNION ALL ".join(f"SELECT {columns} FROM {_quote(t)}" for t in view.union_of)
 
 
@@ -105,7 +120,7 @@ def _gpkg_base_geometry_type(geometry_type: str) -> tuple[str, bool]:
     return geometry_type, False
 
 
-def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = ()) -> str:
+def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = (), meta: Ili2dbMeta | None = None) -> str:
     """Render `tables` as SQLite/GeoPackage DDL text - everything inline at `CREATE TABLE` time, plus the GeoPackage
     bootstrap rows.
 
@@ -117,12 +132,12 @@ def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = ()) -> str:
     verify/replace it via an authoritative source before treating the
     result as fully spec-compliant.
     """
-    statements: list[str] = []
+    statements: list[str] = meta_table_ddl(gpkg=True)
     srids: set[int] = set()
     union_views = [t for t in tables if t.union_of]
     tables = [t for table in tables if not table.union_of for t in _one_geometry_per_table(table)]
     for table in tables:
-        lines = ['    "fid" INTEGER PRIMARY KEY AUTOINCREMENT', f"    {_quote(OID_COLUMN)} TEXT UNIQUE NOT NULL"]
+        lines = basket_column_ddl(table, gpkg=True)
         for column in table.columns:
             null_clause = "" if column.nullable else " NOT NULL"
             if column.geometry_type:
@@ -134,6 +149,10 @@ def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = ()) -> str:
             lines.append(f"    {_quote(column.name)} {sql_type}{null_clause}")
         for unique in table.unique_constraints:
             lines.append(f"    CONSTRAINT {unique.name} UNIQUE ({_quote_list(unique.columns)})")
+        lines.append(
+            f"    CONSTRAINT {_truncate_identifier(f'{table.name}_t_basket_fkey')} FOREIGN KEY "
+            f"({_quote(BASKET_COLUMN)}) REFERENCES T_ILI2DB_BASKET DEFERRABLE INITIALLY DEFERRED"
+        )
         for fk in table.foreign_keys:
             lines.append(
                 f"    CONSTRAINT {fk.name} FOREIGN KEY ({_quote_list(fk.columns)}) "
@@ -147,7 +166,7 @@ def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = ()) -> str:
         statements.append(f"CREATE TABLE {_quote(table.name)} (\n{body}\n);")
         for note in table.notes:
             statements.append(f"-- NOTE ({table.name}): {note}")
-        for column in _foreign_key_columns(table):
+        for column in [BASKET_COLUMN, *_foreign_key_columns(table)]:
             statements.append(
                 f"CREATE INDEX {_index_name(table.name, column)} ON {_quote(table.name)} ({_quote(column)});"
             )
@@ -198,6 +217,7 @@ def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = ()) -> str:
                 )
     statements += _render_views(views)
     statements += _render_view_unique_triggers_gpkg(views)
+    statements += meta_rows(tables, meta or Ili2dbMeta(), gpkg=True)
     return "\n".join(statements) + "\n"
 
 
@@ -210,6 +230,7 @@ _GPKG_TYPES = {
     "timestamp": "DATETIME",
     "time": "TEXT",
     "bytea": "BLOB",
+    "bigint": "INTEGER",
 }
 
 
@@ -240,7 +261,7 @@ def _one_geometry_per_table(table: Table) -> list[Table]:
         out.append(
             Table(
                 name=side_name,
-                columns=[Column(fk_column, "text", nullable=False), column],
+                columns=[Column(fk_column, "bigint", nullable=False), column],
                 unique_constraints=[UniqueConstraint(_truncate_identifier(f"uq_{side_name}_{fk_column}"), [fk_column])],
                 foreign_keys=[
                     ForeignKey(

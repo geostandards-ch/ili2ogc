@@ -60,20 +60,20 @@ def test_required_polymorphic_role_needs_exactly_one_target_and_cascades(tmp_pat
     """`Plan {1}` with a subclass `SubPlan`: one column per table, exactly one set, both cascading."""
     sql = _sql(tmp_path)
     part = _table(sql, "part")
-    assert '"plan" text,' in part
-    assert '"plan_subplan" text,' in part
+    assert '"plan" bigint,' in part
+    assert '"plan_subplan" bigint,' in part
     assert "ELSE 0 END) = 1)" in part
-    assert 'FOREIGN KEY ("plan") REFERENCES "plan" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;' in sql
+    assert 'FOREIGN KEY ("plan") REFERENCES "plan" ("t_id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;' in sql
     assert (
-        'FOREIGN KEY ("plan_subplan") REFERENCES "subplan" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;'
+        'FOREIGN KEY ("plan_subplan") REFERENCES "subplan" ("t_id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;'
         in sql
     )
 
 
 def test_n_to_m_association_gets_a_link_table(tmp_path: Path):
     link = _table(_sql(tmp_path), "part_tag")
-    assert '"part" text NOT NULL' in link
-    assert '"tag" text NOT NULL' in link
+    assert '"part" bigint NOT NULL' in link
+    assert '"tag" bigint NOT NULL' in link
 
 
 def test_embedded_association_gets_no_table(tmp_path: Path):

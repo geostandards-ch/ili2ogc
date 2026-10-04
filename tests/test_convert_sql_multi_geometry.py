@@ -83,8 +83,8 @@ def test_geopackage_keeps_one_geometry_per_table_and_applies(tmp_path: Path):
     con.execute("PRAGMA foreign_keys=ON")
     con.executescript(_GPKG_SYSTEM + sql)
     assert con.execute("SELECT count(*) FROM gpkg_geometry_columns").fetchone()[0] == 3
-    con.execute("INSERT INTO site (id, area) VALUES ('s1', x'00')")
-    con.execute("INSERT INTO site_spots (id, site_fk) VALUES ('s1-spots', 's1')")
+    con.execute("INSERT INTO site (t_id, t_basket, area) VALUES (100, 1, x'00')")
+    con.execute("INSERT INTO site_spots (t_id, t_basket, site_fk) VALUES (101, 1, 100)")
     con.execute("DELETE FROM site")
     assert con.execute("SELECT count(*) FROM site_spots").fetchone()[0] == 0
     con.close()

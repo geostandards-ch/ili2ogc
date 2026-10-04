@@ -53,11 +53,15 @@ def parse_file(path: Path):
     UnicodeDecodeError (a 1 byte <-> 1 character mapping over all 256
     values), so no further fallback is needed.
     """
+    return _parse_stream(InputStream(read_ili_text(path)))
+
+
+def read_ili_text(path: Path) -> str:
+    """An .ili file's text: UTF-8, else ISO-8859-1 (see `parse_file`)."""
     try:
-        text = path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
-        text = path.read_text(encoding="iso-8859-1")
-    return _parse_stream(InputStream(text))
+        return path.read_text(encoding="iso-8859-1")
 
 
 def parse_text(text: str):

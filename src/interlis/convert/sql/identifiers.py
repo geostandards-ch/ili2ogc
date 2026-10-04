@@ -9,11 +9,17 @@ from __future__ import annotations
 
 import hashlib
 
-OID_COLUMN = "id"
-"""The object's TID. A `text` PRIMARY KEY in PostgreSQL (GDAL only takes an
-integer key as its FID, so `ogr2ogr -append` still writes the TID there);
-GeoPackage requires an INTEGER PRIMARY KEY, so it keeps a separate `fid`.
-"""
+# ili2db's technical columns: every table is keyed by a surrogate `t_id`
+# (one sequence for the whole schema, so ids are unique across tables) that
+# every FOREIGN KEY targets, belongs to a basket (`t_basket`), and keeps the
+# transferred TID in `t_ili_tid` - several datasets can share one schema.
+OID_COLUMN = "t_id"
+BASKET_COLUMN = "t_basket"
+TID_COLUMN = "t_ili_tid"
+SEQ_COLUMN = "t_seq"
+SEQUENCE = "t_ili2db_seq"
+RESERVED_COLUMNS = frozenset({OID_COLUMN, BASKET_COLUMN, TID_COLUMN})
+"""Added to every table by the renderers - an attribute column of the same name must be renamed."""
 
 _MAX_IDENTIFIER_LENGTH = 63  # PostgreSQL's own identifier length limit - a real ceiling, not an arbitrary one.
 

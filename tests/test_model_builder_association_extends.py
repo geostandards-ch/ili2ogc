@@ -58,6 +58,6 @@ def test_derived_association_link_table(tmp_path: Path):
     derived = sql.split('CREATE TABLE "derived" (', 1)[1].split("\n);", 1)[0]
     assert '"weight" integer NOT NULL' in derived
     assert '"extra" varchar(5),' in derived
-    assert '"a" text NOT NULL' in derived
-    assert '"b" text NOT NULL' in derived
+    assert '"a" bigint NOT NULL' in derived
+    assert '"b" bigint NOT NULL' in derived
     assert 'CREATE TABLE "base"' not in sql

@@ -33,11 +33,14 @@ def _sql(tmp_path: Path) -> str:
 def test_abstract_class_is_a_union_view(tmp_path: Path):
     sql = _sql(tmp_path)
     assert 'CREATE TABLE "base"' not in sql
-    assert 'CREATE VIEW "base" AS SELECT "id", "code" FROM "one" UNION ALL SELECT "id", "code" FROM "two";' in sql
+    assert (
+        'CREATE VIEW "base" AS SELECT "t_id", "t_basket", "t_ili_tid", "code" FROM "one" UNION ALL '
+        'SELECT "t_id", "t_basket", "t_ili_tid", "code" FROM "two";' in sql
+    )
 
 
 def test_reference_to_abstract_class_targets_its_concrete_tables(tmp_path: Path):
     sql = _sql(tmp_path)
-    assert 'REFERENCES "one" ("id")' in sql
-    assert 'REFERENCES "two" ("id")' in sql
+    assert 'REFERENCES "one" ("t_id")' in sql
+    assert 'REFERENCES "two" ("t_id")' in sql
     assert 'REFERENCES "base"' not in sql

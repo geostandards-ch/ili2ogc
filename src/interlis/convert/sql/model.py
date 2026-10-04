@@ -24,6 +24,8 @@ class Column:
     """
     srid: int | None = None
     """EPSG numeric code - set ONLY alongside `geometry_type`."""
+    ili_name: str | None = None
+    """The INTERLIS attribute/role this column holds (`Model.Topic.Class.Attr`), for T_ILI2DB_ATTRNAME."""
     check: str | None = None
     """A value-domain CHECK on this column alone, `{col}` standing for its quoted name (filled at render time, so a
     later rename still applies)."""
@@ -72,6 +74,10 @@ class Table:
     check_constraints: list[CheckConstraint] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     """Human-readable reasons an attribute/constraint was skipped (RULE #5) - never a silent drop."""
+    ili_name: str | None = None
+    """The INTERLIS class/association this table holds (`Model.Topic.Class`), for T_ILI2DB_CLASSNAME."""
+    has_tid: bool = True
+    """Whether rows carry a transferred TID (`t_ili_tid`) - not for an association link table."""
     union_of: list[str] = field(default_factory=list)
     """For an ABSTRACT class: the concrete subclass tables this is a polymorphic VIEW over (`UNION ALL` of
     `columns`), rendered as a VIEW, not a table."""
