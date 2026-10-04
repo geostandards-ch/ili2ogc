@@ -4,6 +4,8 @@ See docs/jsonfg-conversion-strategy.md for the design decision and scope
 (JSON-FG "core" + "types-schemas" requirements classes only).
 """
 
+from types import SimpleNamespace
+
 from conftest import build_from_text
 
 from interlis.convert.jsonfg import (
@@ -11,12 +13,16 @@ from interlis.convert.jsonfg import (
     CONF_CORE,
     CONF_POLYHEDRA,
     CONF_TYPES_SCHEMAS,
+    UnmappedValue,
+    _attribute_value,
     _child_row_features,
+    _recording,
     object_to_feature,
     transfer_to_feature_collection,
 )
 from interlis.runtime.parse import meta_attribute_comments
 from interlis.xtf.parse import RawNode, XtfBasket, XtfObject, XtfTransfer
+from interlis.xtf.schema import ResolvedAttribute
 
 _MODEL = """INTERLIS 2.4;
 MODEL Foo AT "http://x" VERSION "1" =
@@ -235,7 +241,7 @@ def test_missing_tid_omits_id():
 def test_reference_node_flattened_to_leaf_text_yields_the_text():
     """A reference/CLASS-RESTRICTION node an exporter flattened to leaf text (`<Ref>obj-1</Ref>`, no `REF` attribute)
     yields that text - the OID/code string, mirroring the JSON Schema pipeline's `type: string` for the same construct,
-    not an `x-unsupported` marker.
+    not left out.
     """
     builder = _build(_MODEL)
     cls = _resolved_class(builder, "A")
@@ -423,11 +429,8 @@ def test_polyline_straight_then_arc_then_straight_becomes_compound_curve():
     assert CONF_CIRCULAR_ARCS in feature["conformsTo"]
 
 
-def test_custom_line_form_segment_falls_back_to_unsupported_property():
-    """A POLYLINE segment that's neither COORD nor ARC (a custom LINE FORM) stays out of scope.
-
-    RULE #5, never guessed.
-    """
+def test_custom_line_form_segment_is_left_out_and_recorded():
+    """A POLYLINE segment that's neither COORD nor ARC (a custom LINE FORM) has no GeoJSON form: never guessed."""
     builder = _build(_GEOM_MODEL, capture_meta=True)
     cls = _resolved_class(builder, "ALine")
     custom = _wrap("CustomForm", _node("X", "1"))
@@ -436,9 +439,27 @@ def test_custom_line_form_segment_falls_back_to_unsupported_property():
         qualified_class="Foo.T.ALine",
         attributes={"Geom": [_wrap("Geom", _wrap("POLYLINE", _coord("2600000.0", "1200000.0"), custom))]},
     )
-    feature = object_to_feature(obj, cls)
+    events: list[UnmappedValue] = []
+    with _recording(events):
+        feature = object_to_feature(obj, cls)
     assert "place" not in feature
-    assert feature["properties"]["Geom"] == {"x-unsupported": "LineType"}
+    assert "Geom" not in feature["properties"]
+    assert [(e.rule, e.element_path, e.tid) for e in events] == [("JSONFG-GEOMETRY-UNREADABLE", "ALine.Geom", "l-5")]
+
+
+def test_unresolved_type_value_is_passed_through_untyped():
+    """No `x-unsupported` marker: a scalar stays its text, a structure `{attribute: value}`, a reference its REF."""
+    attr = SimpleNamespace(Name="X")
+    unresolved = ResolvedAttribute(attr=attr, type_instance=None, type_kind=None, mandatory=False)
+    events: list[UnmappedValue] = []
+    with _recording(events):
+        scalar = _attribute_value(unresolved, [_node("X", "12")])
+        structure = _attribute_value(unresolved, [_wrap("X", _wrap("M.S", _node("A", "1"), _ref_node("B", "t9")))])
+        reference = _attribute_value(unresolved, [_wrap("X", _wrap("M.Ref", _ref_node("Reference", "t1")))])
+    assert scalar == "12"
+    assert structure == {"A": "1", "B": "t9"}
+    assert reference == "t1"
+    assert {e.rule for e in events} == {"JSONFG-TYPE-UNSUPPORTED"}
 
 
 def test_polyline_two_chained_arcs_become_one_circular_string():
@@ -1248,7 +1269,7 @@ def test_solid3d_without_resolvable_crs_stays_a_nested_structure_property():
     """Same conservative "no CRS -> no place" policy as any 2D geometry attribute (`_place_and_crs`).
 
     Like a top-level CoordType/LineType (which also keeps its converted
-    GeoJSON value in this case, not just an `x-unsupported` marker), a
+    GeoJSON value in this case, never left out), a
     Solid3D that can't become `place` keeps a useful representation in
     `properties` - here its full nested-STRUCTURE value rather than a
     flat geometry object.

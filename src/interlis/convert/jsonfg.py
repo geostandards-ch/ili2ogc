@@ -39,8 +39,11 @@ MULTI* wire conventions - convert() stays a decoupled stage from
 validate(), same split already established by convert/jsonschema.py.
 """
 
+import contextlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any
 
 from interlis.builder.forward_refs import SymbolTable
@@ -150,6 +153,63 @@ def _scalar_value(resolved: ResolvedAttribute, node: RawNode) -> Any:
     return text  # TextType/EnumType: the wire text itself (EnumType: a dotted path)
 
 
+@dataclass(frozen=True)
+class UnmappedValue:
+    """A wire value `convert-jsonfg` passed through untyped, or left out, for `collect_diagnostics`."""
+
+    rule: str
+    element_path: str
+    detail: str
+    tid: str | None
+
+
+_UNMAPPED: ContextVar[list[UnmappedValue] | None] = ContextVar("_UNMAPPED", default=None)
+_FEATURE: ContextVar[tuple[str, str | None]] = ContextVar("_FEATURE", default=("?", None))
+
+
+def _record(rule: str, attr: MetaInstance, detail: str) -> None:
+    sink = _UNMAPPED.get()
+    if sink is not None:
+        feature_type, tid = _FEATURE.get()
+        sink.append(UnmappedValue(rule, f"{feature_type}.{getattr(attr, 'Name', '?')}", detail, tid))
+
+
+@contextlib.contextmanager
+def _feature_scope(feature_type: str, tid: str | None) -> Iterator[None]:
+    token = _FEATURE.set((feature_type, tid))
+    try:
+        yield
+    finally:
+        _FEATURE.reset(token)
+
+
+@contextlib.contextmanager
+def _recording(sink: list[UnmappedValue] | None) -> Iterator[None]:
+    token = _UNMAPPED.set(sink)
+    try:
+        yield
+    finally:
+        _UNMAPPED.reset(token)
+
+
+def _raw_value(node: RawNode, *, unwrap: bool) -> Any:
+    """A value whose type didn't resolve, kept as on the wire: its text, its REF, or `{tag: value}` of its content.
+
+    The shape the typed conversion gives a scalar, a reference or a STRUCTURE (`unwrap` skips the attribute
+    element down to the structure's content wrapper), only untyped: numbers stay strings.
+    """
+    if not node.children:
+        return node.text if node.text is not None else _extract_reference(node)
+    content = node.children[0] if unwrap and len(node.children) == 1 and node.children[0].children else node
+    if all(not c.children and c.text is None for c in content.children):
+        return _extract_reference(content)
+    grouped = _group_by_tag(content.children)
+    return {
+        tag: _raw_value(nodes[0], unwrap=True) if len(nodes) == 1 else [_raw_value(n, unwrap=False) for n in nodes]
+        for tag, nodes in grouped.items()
+    }
+
+
 def _attribute_value(
     resolved: ResolvedAttribute,
     raw_nodes: list[RawNode],
@@ -166,8 +226,8 @@ def _attribute_value(
         # attribute (`_place_and_crs`). A nested one has nowhere native to
         # go in JSON-FG, so it becomes a plain GeoJSON geometry object in
         # `properties` (reusing the SAME `_coord_geometry`/`_line_geometry`
-        # builders, no parallel coordinate parsing) rather than a
-        # `x-unsupported` marker - real corpus DATA has this (nested
+        # builders, no parallel coordinate parsing) rather than being
+        # left out - real corpus DATA has this (nested
         # `CaptureMethod` geometry, SIA405 symbol positions, ...).
         geometry = (
             _coord_geometry(resolved, raw_nodes[0]) if kind == "CoordType" else _line_geometry(resolved, raw_nodes[0])
@@ -200,14 +260,19 @@ def _attribute_value(
         # RESTRICTION (...)`, on the wire as `<Owner>CH</Owner>`) - mirror
         # the JSON Schema pipeline, which emits `{"type": "string",
         # "x-reference-target": ...}` for the same construct: return the
-        # text as a string rather than an `x-unsupported` marker.
+        # text as a string.
         leaf = raw_nodes[0] if raw_nodes else None
         if leaf is not None and not leaf.children and leaf.text is not None:
             return leaf.text
-    # Same "unknown" fallback as convert/jsonschema.py's _attribute_schema,
-    # for an unresolved Type (type_kind is None - e.g. an external/
-    # unqualified reference not loaded via --repo).
-    return {"x-unsupported": kind or "unknown"}
+    # An unresolved Type (type_kind is None - e.g. a model not loaded via
+    # --repo): the wire value, untyped, rather than nothing.
+    value = _raw_value(raw_nodes[0], unwrap=not already_unwrapped) if raw_nodes else None
+    _record(
+        "JSONFG-TYPE-UNSUPPORTED",
+        resolved.attr,
+        f"type {kind or 'unresolved'}: " + ("passed through untyped" if value is not None else "left out (no value)"),
+    )
+    return value
 
 
 def _structure_value(
@@ -258,7 +323,8 @@ def _multi_value(resolved: ResolvedAttribute, raw_nodes: list[RawNode], *, symbo
     """
     base_type = getattr(resolved.type_instance, "BaseType", None)
     if not isinstance(base_type, MetaInstance):
-        return {"x-unsupported": "MultiValue"}
+        _record("JSONFG-MULTIVALUE-UNRESOLVED", resolved.attr, "BAG/LIST OF element type unresolved: untyped")
+        return [_raw_value(occurrence, unwrap=False) for node in raw_nodes for occurrence in node.children]
     base_kind = base_type._qualified_class.rsplit(".", 1)[-1]
     values: list[Any] = []
     for node in raw_nodes:
@@ -382,7 +448,10 @@ def _members_value(
     for name, raw_nodes in attrs.items():
         if name not in resolved_attrs:
             continue
-        result[name] = _attribute_value(resolved_attrs[name], raw_nodes, symbol_table=symbol_table)
+        value = _attribute_value(resolved_attrs[name], raw_nodes, symbol_table=symbol_table)
+        kind = resolved_attrs[name].type_kind
+        if value is not None or kind in _SCALAR_KINDS or kind in _GEOMETRY_KINDS:
+            result[name] = value
     return result
 
 
@@ -1194,7 +1263,7 @@ def object_to_feature(
     `_place_and_crs` - a `None` result, e.g. an unresolved CRS, leaves that
     one attribute in "properties" instead, still holding its own converted
     GeoJSON-object value; only a genuine parse failure, e.g. a custom LINE
-    FORM segment, falls back to the `x-unsupported` marker there - a
+    FORM segment, leaves it out, recorded as JSONFG-GEOMETRY-UNREADABLE - a
     STRUCTURE-wrapped shape (Solid3D and the others above) keeps its full
     nested-STRUCTURE value, already a complete, useful representation on
     its own - never a silent loss either way) is collected.
@@ -1214,6 +1283,29 @@ def object_to_feature(
     this pure-Python runtime; JSON-FG core explicitly allows this
     ("geometry" is `null` when no valid WGS84 representation exists).
     """
+    with _feature_scope(getattr(cls, "Name", None) or obj.qualified_class, obj.tid):
+        return _object_to_feature(
+            obj,
+            cls,
+            standalone=standalone,
+            symbol_table=symbol_table,
+            repository=repository,
+            schema_url=schema_url,
+            omit_multivalue=omit_multivalue,
+        )
+
+
+def _object_to_feature(
+    obj: XtfObject,
+    cls: MetaInstance,
+    *,
+    standalone: bool = True,
+    symbol_table: SymbolTable | None = None,
+    repository: ModelRepository | None = None,
+    schema_url: str | None = None,
+    omit_multivalue: bool = False,
+) -> dict[str, Any]:
+    """Body of `object_to_feature`, within its feature scope."""
     schema_attrs = schema_members_of(cls, symbol_table) if symbol_table is not None else attributes_of(cls)
     resolved_attrs = {name: resolve_attribute(attr) for name, attr in schema_attrs.items()}
     properties = _members_value(cls, obj.attributes, symbol_table=symbol_table)
@@ -1276,10 +1368,11 @@ def object_to_feature(
     # geometry (`_coord_geometry`/`_line_geometry`) - keep it rather than
     # discarding real coordinates. Only a genuine parse failure (custom
     # LINE FORM segment, unreadable wire data - `properties[name]` is
-    # `None`) falls back to the `x-unsupported` marker.
+    # `None`) is left out: no GeoJSON can stand for it.
     for name in geometry_names:
         if name in properties and name not in placed_names and not isinstance(properties[name], dict):
-            properties[name] = {"x-unsupported": resolved_attrs[name].type_kind}
+            del properties[name]
+            _record("JSONFG-GEOMETRY-UNREADABLE", resolved_attrs[name].attr, "geometry not readable: left out")
 
     feature: dict[str, Any] = {"type": "Feature"}
     if standalone:
@@ -2150,6 +2243,7 @@ def transfer_to_feature_collection(
     views: list[MetaInstance] | None = None,
     schema_url: str | None = None,
     include_child_rows: bool = False,
+    unmapped: list[UnmappedValue] | None = None,
 ) -> dict[str, Any]:
     """Convert every resolvable object of `transfer` into one JSON-FG FeatureCollection.
 
@@ -2225,7 +2319,30 @@ def transfer_to_feature_collection(
     (`featureschema.json`'s `oneOf` - a bare string would otherwise wrongly
     claim just one schema covers every Feature). `None` (the default)
     omits "featureSchema" entirely, same as `object_to_feature`.
+
+    `unmapped` (optional, out): receives each value passed through untyped or left out, for
+    `collect_diagnostics` - the document itself never carries a marker.
     """
+    with _recording(unmapped):
+        return _transfer_to_feature_collection(
+            transfer,
+            symbol_table=symbol_table,
+            repository=repository,
+            views=views,
+            schema_url=schema_url,
+            include_child_rows=include_child_rows,
+        )
+
+
+def _transfer_to_feature_collection(
+    transfer: XtfTransfer,
+    *,
+    symbol_table: SymbolTable,
+    repository: ModelRepository | None = None,
+    views: list[MetaInstance] | None = None,
+    schema_url: str | None = None,
+    include_child_rows: bool = False,
+) -> dict[str, Any]:
     features: list[dict[str, Any]] = []
     for basket in transfer.baskets:
         for obj in basket.objects:
@@ -2245,7 +2362,8 @@ def transfer_to_feature_collection(
                 )
             )
             if include_child_rows:
-                features.extend(_child_row_features(obj, cls, symbol_table=symbol_table))
+                with _feature_scope(getattr(cls, "Name", None) or obj.qualified_class, obj.tid):
+                    features.extend(_child_row_features(obj, cls, symbol_table=symbol_table))
 
     for view in views or []:
         features.extend(
@@ -2313,38 +2431,23 @@ def view_skip_diagnostic(view: MetaInstance, *, file: str | None = None):
     return Diagnostic(sev, rule, f"VIEW {name!r} skipped: {reason}", Location(file=file, element_path=name), help=hlp)
 
 
-def collect_diagnostics(collection: dict, *, file: str | None = None):
-    """Walk a built FeatureCollection for `x-unsupported` markers and emit a `Diagnostic` per marker.
+def collect_diagnostics(unmapped: list[UnmappedValue], *, file: str | None = None):
+    """One `Diagnostic` per value `transfer_to_feature_collection` recorded in its `unmapped` list.
 
-    The marker stays in the document; this is the parallel machine signal.
-    `"MultiValue"` means a BAG/LIST element type did not resolve (class C);
-    every other value is an unmapped attribute-value type (class A).
+    An unresolved BAG/LIST element type is class C (provide the model); an untyped or unreadable value class A.
     """
     from interlis.diagnostics import Diagnostic, Location
 
     out: list[Diagnostic] = []
-    for feature in collection.get("features", []):
-        ftype = feature.get("featureType", "?")
-        tid = feature.get("id")
-        for key, value in (feature.get("properties") or {}).items():
-            if not isinstance(value, dict) or "x-unsupported" not in value:
-                continue
-            marker = value["x-unsupported"]
-            if marker == "MultiValue":
-                rule, sev = "JSONFG-MULTIVALUE-UNRESOLVED", "warning"
-                msg = f"{ftype}.{key}: a BAG/LIST OF element type did not resolve"
-                hlp = "pass its model's directory to --repo"
-            else:
-                rule, sev = "JSONFG-TYPE-UNSUPPORTED", "note"
-                msg = f"{ftype}.{key}: value type {marker!r} is outside the mapped set (x-unsupported)"
-                hlp = None
-            out.append(
-                Diagnostic(
-                    sev,
-                    rule,
-                    msg,
-                    Location(file=file, element_path=f"{ftype}.{key}", tid=tid),
-                    help=hlp,
-                )
+    for event in unmapped:
+        resolvable = event.rule == "JSONFG-MULTIVALUE-UNRESOLVED"
+        out.append(
+            Diagnostic(
+                "warning" if resolvable else "note",
+                event.rule,
+                f"{event.element_path}: {event.detail}",
+                Location(file=file, element_path=event.element_path, tid=event.tid),
+                help="pass its model's directory to --repo" if resolvable else None,
             )
+        )
     return out

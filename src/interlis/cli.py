@@ -898,6 +898,7 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
             continue
         views.append(view)
 
+    unmapped: list[_jsonfg_mod.UnmappedValue] = []
     collection = transfer_to_feature_collection(
         transfer,
         symbol_table=builder.symbol_table,
@@ -905,8 +906,9 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
         views=views,
         schema_url=args.feature_schema_url,
         include_child_rows=args.include_child_rows,
+        unmapped=unmapped,
     )
-    bag.extend(_jsonfg_mod.collect_diagnostics(collection, file=str(xtf_path)))
+    bag.extend(_jsonfg_mod.collect_diagnostics(unmapped, file=str(xtf_path)))
     if args.lang:
         root_names = (
             builder.symbol_table.root_model_names() if hasattr(builder.symbol_table, "root_model_names") else []
