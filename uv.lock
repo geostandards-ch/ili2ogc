@@ -319,7 +319,7 @@ wheels = [
 
 [[package]]
 name = "ili2ogc"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "antlr4-python3-runtime" },
