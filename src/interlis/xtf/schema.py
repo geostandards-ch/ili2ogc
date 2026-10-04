@@ -12,7 +12,9 @@ instance is already registered under its full qualified name
 matches XtfObject.qualified_class exactly (same naming convention).
 """
 
+import functools
 from dataclasses import dataclass
+from typing import Any, cast
 
 from interlis.builder.forward_refs import SymbolTable
 from interlis.builder.repository import ModelRepository
@@ -44,38 +46,55 @@ def resolve_class(
 def home_symbol_table(
     qualified_class: str, *, symbol_table: SymbolTable, repository: ModelRepository | None
 ) -> SymbolTable:
-    """Return the symbol table that actually declares `qualified_class`.
+    """Return the symbol table that declares `qualified_class`, so `embedded_roles_of` sees its associations.
 
-    The root model's table if it already registers this class there,
-    otherwise the table of the model named by the qualified name's first
-    segment, via `ModelRepository.symbol_table_for` (same resolution
-    mechanism as `resolve_class` above - never duplicated/reinvented).
-
-    Needed for `embedded_roles_of` (below) to look up embedding
-    associations in the RIGHT table: it used to always search the root
-    table, regardless of the class's real owning model - confirmed real on
-    `2021-01-12_SectoralPlanForRoadInfrastructure_LV95.xtf` (770
-    occurrences): the XTF basket is qualified under the model that EXTENDS
-    the topic (`SectoralPlanForRoadInfrastructure_LV95_V1_4`, via `TOPIC
-    ... EXTENDS Base.Topic`, no association of its own), while EACH
-    individual object stays qualified under the BASE model
-    (`BaseModel_SectoralPlans_LV95_V1_4`, which declares the
-    `Object_SP`/`Document_Object`/`Facility_Object`/`Measure_Facility`
-    associations that actually embed roles on those same classes) - the
-    root table (extension model) never contains them, only the base
-    model's table does. Falls back silently to the root table if the model
-    isn't resolvable (same degradation as `resolve_class`: the class is
-    then simply not found further down).
+    The root table if it holds the class, else its model's table from `repository` (an extending topic's
+    objects can be qualified under the base model). It also enumerates the models declaring the class's
+    ancestors, whose associations embed roles on it too.
     """
-    found = symbol_table.resolve(qualified_class, kind_hint=["Class"])
-    if isinstance(found, MetaInstance):
-        return symbol_table
-    if repository is not None and "." in qualified_class:
-        model_name = qualified_class.split(".", 1)[0]
-        table = repository.symbol_table_for(model_name)
-        if table is not None:
-            return table
-    return symbol_table
+    table = symbol_table
+    if not isinstance(symbol_table.resolve(qualified_class, kind_hint=["Class"]), MetaInstance):
+        if repository is not None and "." in qualified_class:
+            table = repository.symbol_table_for(qualified_class.split(".", 1)[0]) or symbol_table
+    if repository is None:
+        return table
+    others = _ancestor_tables(qualified_class, table, repository)
+    return cast(SymbolTable, _WithAncestorTables(table, others)) if others else table
+
+
+@functools.lru_cache(maxsize=1024)
+def _ancestor_tables(qualified_class: str, table: SymbolTable, repository: ModelRepository) -> tuple[SymbolTable, ...]:
+    """The loaded models' tables declaring an ancestor of `qualified_class` that `table` doesn't hold."""
+    cls = table.resolve(qualified_class, kind_hint=["Class"])
+    found: dict[int, SymbolTable] = {}
+    seen: set[int] = set()
+    ancestor = getattr(cls, "Super", None)
+    while isinstance(ancestor, MetaInstance) and id(ancestor) not in seen:
+        seen.add(id(ancestor))
+        if table.qualified_name_of(ancestor) is None:
+            for other in repository.loaded_models().values():
+                if other is not table and other.qualified_name_of(ancestor) is not None:
+                    found.setdefault(id(other), other)
+        ancestor = getattr(ancestor, "Super", None)
+    return tuple(found.values())
+
+
+class _WithAncestorTables:
+    """A class's home table that also enumerates its ancestors' models.
+
+    An association declared in a base model embeds roles on the subclasses an extending topic declares
+    (`Facility_SPM EXTENDS Facility`): `embedded_roles_of` must scan the base model's associations too.
+    """
+
+    def __init__(self, home: SymbolTable, others: tuple[SymbolTable, ...]):
+        self._home = home
+        self._others = others
+
+    def all_registered(self) -> list[Any]:
+        return [*self._home.all_registered(), *(x for other in self._others for x in other.all_registered())]
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._home, name)
 
 
 def _own_attributes_of(class_instance: MetaInstance) -> dict[str, MetaInstance]:
