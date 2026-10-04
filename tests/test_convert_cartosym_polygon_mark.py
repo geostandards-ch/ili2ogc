@@ -1,4 +1,4 @@
-"""`convert/cartosym.py`'s square/diamond/triangle `FontSymbol_Surface` mapping, through to the SLD it produces.
+"""`convert/cartosym.py`'s square/diamond/triangle `FontSymbol` mapping, through to the SLD it produces.
 
 SE 1.1.0 has no `diamond` well-known mark name, so a diamond can only
 reach SLD as a `square` mark turned 45 degrees.
@@ -95,3 +95,17 @@ def test_triangle_symbol_sign_writes_a_triangle_mark():
     assert graphic is not None
     assert graphic.find(f"{_SE}Mark/{_SE}WellKnownName").text == "triangle"
     assert graphic.find(f"{_SE}Size").text == "15"
+
+
+def test_closed_polyline_square_is_an_outlined_mark():
+    """MapServer rejects the inline-SVG fallback (`data:` URI), so an outline square must stay a native mark."""
+    library = _library()
+    graphics = font_symbol_geometry_to_polygon_graphics(library, library.by_tid["25"])
+    assert graphics is not None and len(graphics) == 1
+    assert graphics[0].fill is None
+    assert graphics[0].outline is not None and graphics[0].outline.color is not None
+
+
+def test_open_polyline_is_left_to_the_svg_fallback():
+    library = _library()
+    assert font_symbol_geometry_to_polygon_graphics(library, library.by_tid["26"]) is None

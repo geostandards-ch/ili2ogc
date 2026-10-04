@@ -32,6 +32,7 @@ from pycartosym.models.symbolizers import (
     Marker,
     RectangleGraphic,
     Resource,
+    ShapeOutline,
     Stroke,
     TextAlignment,
     TextGraphic,
@@ -272,7 +273,7 @@ def _circle_radius_from_surface(node: RawNode) -> float | None:
     return radii[0] if radii and all(abs(r - radii[0]) < 1e-9 for r in radii) else None
 
 
-def _font_symbol_items(symbol_obj: XtfObject, structure_suffix: str) -> list[RawNode] | None:
+def _font_symbol_items(symbol_obj: XtfObject, structure_suffix: str | tuple[str, ...]) -> list[RawNode] | None:
     """Every `FontSymbol.Geometry` item's structure node, or `None` unless all of them are `structure_suffix`.
 
     A `FontSymbol` is "a collection of lines and surfaces" (its own model
@@ -322,8 +323,24 @@ def _boundary_ring(node: RawNode) -> list[tuple[float, float]] | None:
     return ring or None
 
 
-def _square_from_surface(node: RawNode) -> tuple[float, float] | None:
-    """Read a `FontSymbol_Surface` boundary as `(side, orientation in degrees)` - a square, possibly rotated.
+def _closed_polyline_ring(node: RawNode) -> list[tuple[float, float]] | None:
+    """Read an all-COORD `SS_Polyline` that closes on itself as a ring, without the repeated closing vertex."""
+    polyline = _find_child(node, "POLYLINE")
+    if polyline is None or not polyline.children:
+        return None
+    ring: list[tuple[float, float]] = []
+    for segment in polyline.children:
+        position = _read_coord(segment)
+        if position is None:
+            return None
+        ring.append((position[0], position[1]))
+    if len(ring) < 4 or math.dist(ring[0], ring[-1]) >= _SHAPE_TOLERANCE:
+        return None
+    return ring[:-1]
+
+
+def _square_from_ring(ring: list[tuple[float, float]] | None) -> tuple[float, float] | None:
+    """Read a symbol ring as `(side, orientation in degrees)` - a square, possibly rotated.
 
     Deliberately limited to the square case. A square's own 90-degree
     symmetry makes the rotation SIGN immaterial, so the emitted
@@ -337,7 +354,6 @@ def _square_from_surface(node: RawNode) -> tuple[float, float] | None:
     `diamond` well-known mark name, and a diamond is a square turned 45
     degrees.
     """
-    ring = _boundary_ring(node)
     if ring is None or len(ring) != 4:
         return None
     edges = [(ring[(i + 1) % 4][0] - ring[i][0], ring[(i + 1) % 4][1] - ring[i][1]) for i in range(4)]
@@ -356,13 +372,12 @@ def _square_from_surface(node: RawNode) -> tuple[float, float] | None:
 _UNIT_TRIANGLE = [(0.0, 0.5), (-0.5, -0.5), (0.5, -0.5)]
 
 
-def _triangle_from_surface(node: RawNode) -> float | None:
-    """Read a `FontSymbol_Surface` boundary as the size of an SE `triangle` mark, or `None` for any other triangle.
+def _triangle_from_ring(ring: list[tuple[float, float]] | None) -> float | None:
+    """Read a symbol ring as the size of an SE `triangle` mark, or `None` for any other triangle.
 
     Matched as a vertex set around the bounding-box centre, so neither
     the ring's start vertex, its winding nor its offset matters.
     """
-    ring = _boundary_ring(node)
     if ring is None or len(ring) != 3:
         return None
     xs, ys = [p[0] for p in ring], [p[1] for p in ring]
@@ -382,25 +397,34 @@ def _triangle_from_surface(node: RawNode) -> float | None:
 def _polygon_mark_graphic(
     library: SignLibrary, structure_node: RawNode, scale: float
 ) -> RectangleGraphic | ClosedPathGraphic | None:
+    """A square or triangle mark: filled from a `FontSymbol_Surface`, outlined from a closed `FontSymbol_Polyline`."""
     geometry_node = next((c for c in structure_node.children if c.tag == "Geometry"), None)
     if geometry_node is None:
         return None
-    square = _square_from_surface(geometry_node)
+    if structure_node.tag.endswith("FontSymbol_Polyline"):
+        ring = _closed_polyline_ring(geometry_node)
+        color_node = next((c for c in structure_node.children if c.tag == "Color"), None)
+        color, opacity = library._color_from_ref_node(color_node) if color_node is not None else (None, None)
+        paint: dict[str, Any] = {"outline": ShapeOutline(color=color, opacity=opacity)}
+    else:
+        ring = _boundary_ring(geometry_node)
+        paint = {"fill": _surface_fill(library, structure_node)}
+    square = _square_from_ring(ring)
     if square is not None:
         side, orientation = square
         return RectangleGraphic(
             type="Rectangle",
             width=meters(side * scale),
             height=meters(side * scale),
-            fill=_surface_fill(library, structure_node),
             transform=Transform2D(orientation=orientation) if orientation > _SHAPE_TOLERANCE else None,
+            **paint,
         )
-    size = _triangle_from_surface(geometry_node)
+    size = _triangle_from_ring(ring)
     if size is not None:
         return ClosedPathGraphic(
             type="ClosedPath",
             nodes=[UnitPoint(x=meters(x * size * scale), y=meters(y * size * scale)) for x, y in _UNIT_TRIANGLE],
-            fill=_surface_fill(library, structure_node),
+            **paint,
         )
     return None
 
@@ -408,14 +432,15 @@ def _polygon_mark_graphic(
 def font_symbol_geometry_to_polygon_graphics(
     library: SignLibrary, symbol_obj: XtfObject, *, scale: float = 1.0
 ) -> list[RectangleGraphic | ClosedPathGraphic] | None:
-    """Build one native mark per `FontSymbol_Surface` item that is a square or an SE `triangle`, else `None`.
+    """Build one native mark per `FontSymbol_Surface`/closed `FontSymbol_Polyline` item that is a square or an SE
+    `triangle`, else `None`.
 
     Gives a native `se:Mark`/`se:WellKnownName` - a square, the diamond
     real Sachplan symbology uses (a square turned 45 degrees), or a
     triangle - instead of the inline-SVG `ImageGraphic` fallback. See
-    `_square_from_surface` for why oblong rectangles don't qualify.
+    `_square_from_ring` for why oblong rectangles don't qualify.
     """
-    structure_nodes = _font_symbol_items(symbol_obj, "FontSymbol_Surface")
+    structure_nodes = _font_symbol_items(symbol_obj, ("FontSymbol_Surface", "FontSymbol_Polyline"))
     if structure_nodes is None:
         return None
     graphics: list[RectangleGraphic | ClosedPathGraphic] = []
