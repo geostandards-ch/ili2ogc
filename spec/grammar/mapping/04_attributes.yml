@@ -118,9 +118,9 @@ attributeDef:
         presence: true
     Derivates:
       source:
-        field: factor
+        field: expression
         multi: true
-      note: each factor (after optional ASSIGN) is an Expression appended to Derivates
+      note: each Expression after ASSIGN (eCH-0031 V2.1.0 3.6.1, ':=' Expression { ',' Expression }) is appended to Derivates
   note: Attribute type resolution
 attributePathConst:
   grammar:
@@ -316,7 +316,7 @@ restrictedStructureRef:
   attribute_bindings:
     resolved_ref:
       source:
-        field: structureRef|type_
+        field: structureRef|type_|referenceAttr
         index: 0
       note: '"(structureRef | type_ | ANYSTRUCTURE) (RESTRICTION LPAR structureRef ((COMMA|SEMI) structureRef)*
         RPAR)?". `kind: Reference, discriminator: {attribute:

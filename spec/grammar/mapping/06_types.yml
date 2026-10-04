@@ -39,24 +39,13 @@ attributeType:
 
         '
     Of:
-      source:
-        field: classType
-        attributePath: null
-        optional: true
-      note: 'Reference Manual eCH-0031 V2.1.0 (2024-04-24) §3.8.11 "Wertebereiche von Klassen und
-        Attributpfaden", exact EBNF: `AttributePathType = ''ATTRIBUTE'' [''OF'' (ClassType-AttributePath
-        | ''@'' Argument-Name)] [''RESTRICTION'' ''('' AttrTypeDef {'';'' AttrTypeDef} '')''].` - the
-        manual notes it can be required that [the path] belong to ONE class (not a subclass) per another
-        definition (OF). This form always resolves to a single class (never a restriction list),
-        consistent with `ARefOf.Of` (0..1 Class, confirmed in ilismeta16-associations.yml): fed by the
-        BASE class resolved by `classType()` (its `resolved_ref`, not its optional `Restrictions` list).
-        `attributePath` itself feeds no additional attribute - `AttributeRefType.own = {}`: the type only
-        fixes the target class, never the precise attribute name (that comes later, on the DATA side, via
-        `AttributePathConst = ''>>'' [ViewableRef ''->''] Attribute-Name` - the same type/constant
-        distinction already established for `ClassType`/`ClassConst`). ModelBuilder ignores the trailing
-        `DOT attributePath` (no target), feeding `ARefOf.Of` with `classType()`''s base class.
-
-        '
+      status: not_applicable
+      note: 'eCH-0031 V2.1.0 3.8.11: `AttributePathType = ''ATTRIBUTE'' [ ''OF'' ( ClassType-AttributePath
+        | ''@'' Argument-Name ) ] [ ''RESTRICTION'' ''('' AttrTypeDef { '';'' AttrTypeDef } '')'' ].` -
+        `ClassType-AttributePath` is an AttributePath leading to a ClassType-typed attribute ("Dabei kann
+        entweder auf ein ClassType-Attribut ... verwiesen werden"). `ARefOf.Of` (0..1 Class) is that
+        attribute''s class, known only once the path''s attribute types are resolved, after the build - not
+        bound here rather than guessed. No published model uses this form (only `ATTRIBUTE OF @arg`).'
     _at_symbol_name:
       source:
         field: AT_SYMBOL
@@ -826,8 +815,9 @@ lineFormTypeDef:
       source:
         field: Name
         index: 1
+        as_forward_ref: true
       note: 'confirmed IlisMeta16.ModelData.LineFormStructure: LineForm <-> Structure:Class (1..1) - the
-        ''LINE FORM { Name : Name ; }'' body''s second Name (after COLON) resolves the backing Structure
+        entry''s second Name (after COLON; `LINE FORM` opens the section in modeldef) resolves the backing Structure
         class that defines this custom line form''s coordinate attributes.'
 lineType:
   grammar:
@@ -972,39 +962,16 @@ numeric:
         {0..1} Unit;". Feeds the NumUnit association''s Unit role, not an own NumType attribute.
 
         '
-    _refsys_clause:
-      target: IlisMeta16.ModelData.NumsRefSys
-      note: '"{ Name [PosNumber] }"/"< Name >" (a bare token, inside numeric() itself) is equivalent to
-        refSys() (LCBR metaObjectRef.../domainRef... RCBR/GT -> NumsRefSys.RefSys+Axis) - a grammar
-        duplication/artifact (ANTLR4 adaptivePredict, no semantic justification), but semantically
-        identical either way: NumsRefSys.RefSys (resolved as a
-        MetaObjectDef if "{}", as a CoordType if "<>", by simple Name lookup, exactly as
-        metaObjectRef()/domainRef() would in their simplest unqualified form) and NumsRefSys.Axis (the
-        optional PosNumber). ModelBuilder treats an inline LCBR/LT+Name+RSBR/GT inside numeric() itself
-        exactly like a refSys() whose Name is already resolved (no qualification possible on this path -
-        only a simple Name, never Name.Name or INTERLIS.Name, consistent with numeric()''s inline clause
-        having only a single Name field with no DOT). Full investigation history (5 test cases, ANTLR
-        trees): docs/dev-notes/numeric-refsys-clause-investigation.md.
-
-        '
-      RefSys:
-        source:
-          field: Name
-        note: resolved as metaObjectRef() (if LCBR) or domainRef() (if LT) would for a simple unqualified
-          Name - same NumsRefSys.RefSys target as refSys().
-      Axis:
-        source:
-          field: PosNumber
-          optional: true
-        note: feeds NumsRefSys.Axis (AxisInd), identical to refSys().Axis - only present in numeric()''s
-          LCBR branch (the LT+axis case always goes through refSys(), see test F).
-    _trailing_lt_name_gt:
-      note: 'Merged with _refsys_clause above: "< Name >" is the same case documented in _refsys_clause
-        (the LT branch without an axis, absorbed by numeric()''s inline clause). Kept as a distinct key so
-        as not to lose the reference; see _refsys_clause for the full binding, and
-        docs/dev-notes/numeric-refsys-clause-investigation.md for the investigation.
-
-        '
+    RefSys:
+      source:
+        field: refSys
+        optional: true
+      note: '"{ MetaObjectRef [ Axis ] }" / "< DomainRef [ Axis ] >" after the range (eCH-0031 V2.1.0
+        3.8.5, NumericType = ... [ ''CLOCKWISE'' | ''COUNTERCLOCKWISE'' | RefSys ]), delegated to refSys()
+        exactly as numericType() does - qualified names and an axis in either form included. Parsed only:
+        the NumsRefSys link (NumType -> MetaObjectDef/CoordType, with its Axis association attribute) is
+        not materialized on the NumType, in either path - its MetaObjectDef end lives in a REFSYSTEM
+        basket''s data, outside the model build, and no converter reads it.'
   note: No direct IlisMeta16 instance expected. Min..Max numeric range with optional [unitRef] and CIRCULAR
     flag; feeds NumType.Min/Max/Circular on the enclosing NumType (created by numericType). Numeric types
 numericConst:
@@ -1095,6 +1062,8 @@ oIDType:
   kind: Conditional
   when_present:
     numeric:
+      target: IlisMeta16.ModelData.NumType
+    NUMERIC:
       target: IlisMeta16.ModelData.NumType
     textType:
       target: IlisMeta16.ModelData.TextType

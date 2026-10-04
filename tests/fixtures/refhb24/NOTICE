@@ -1,0 +1,5 @@
+# NOTICE
+
+`Time.ili` sourced unmodified from `https://models.interlis.ch/refhb24/Time.ili`
+(release 2020-02-20, KOGIS), one of the INTERLIS 2.4 reference manual's own
+models. Used to check that the official model text parses.

@@ -29,7 +29,7 @@ END Foo.
 def test_bracketed_unit_alias_and_primary_name_resolve_to_the_same_instance():
     builder = _build("""INTERLIS 2.4;
 MODEL Foo AT "http://x" VERSION "1" =
-  UNIT Meter [m] = m;
+  UNIT Meter [m] EXTENDS INTERLIS.LENGTH;
   DOMAIN
     ByPrimary = 0 .. 100 [Meter];
     ByAlias = 0 .. 100 [m];
@@ -43,7 +43,7 @@ END Foo.
 def test_unit_without_bracketed_alias_is_unaffected():
     builder = _build("""INTERLIS 2.4;
 MODEL Foo AT "http://x" VERSION "1" =
-  UNIT Meter = m;
+  UNIT Meter EXTENDS INTERLIS.LENGTH;
   DOMAIN
     Length = 0..1000 [Meter];
 END Foo.

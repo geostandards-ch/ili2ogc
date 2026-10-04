@@ -77,19 +77,14 @@ derivedUnit:
     rule: derivedUnit
   kind: Container
   attribute_bindings:
-    _status:
+    _definition:
       status: not_applicable
-      note: 'derivedUnit is never called from anywhere else in the compiled
-        parser (only from its own method definition) - an orphaned,
-        unreachable grammar rule. ModelBuilder does not need to handle
-        DerivedUnitContext for a normal .ili parse. Background:
-        docs/dev-notes/unit-function-def-investigation.md.'
-  note: 'No direct IlisMeta16 instance expected. Would set Kind=DerivedU on
-    the enclosing Unit (created by unitDef); decConst/unitRef would feed the
-    Unit''s Definition (Expression). Grammar (.g4 line 352): decConst
-    ((MUL|DIV|POW) decConst)* LSBR unitRef RSBR. Unreachable in practice (see
-    _status above), and in any case already covered via unitDef''s own
-    bracket-unitRef branches.'
+      note: 'The factor (DecConst { (''*''|''/'') DecConst }) or FUNCTION Explanation and the [UnitRef]
+        describe the conversion to the base unit; Unit.Definition (an Expression) is not built from them -
+        no converter reads it. The unit itself is built by unitDef with Kind=DerivedU.'
+  note: 'eCH-0031 V2.1.0 3.9.3: DerivedUnit = [ DecConst { ( ''*'' | ''/'' ) DecConst } | ''FUNCTION''
+    Explanation ] ''['' UnitRef '']''. Reached from unitDef''s ''='' clause; sets Kind=DerivedU on the
+    enclosing Unit (unitDef''s dynamic discriminant).'
 functionDef:
   grammar:
     rule: functionDef
@@ -104,44 +99,19 @@ functionDef:
         field: Name
         index: 0
       note: Inherited attribute FunctionDef.Name (mandatory, ilismeta16-classes.yml).
-  note: 'Grammar (functionDef()): FUNCTION Name LPAR argumentDef (SEMI
-    argumentDef)* RPAR COLON (BOOLEAN | attrTypeDef | Name) SEMI. Renamed
+    Explanation:
+      source:
+        field: Explanation
+        optional: true
+      note: FunctionDef.Explanation (own, 0..1), the raw `// ... //` text as written.
+  note: 'Grammar (functionDef()): FUNCTION Name LPAR (argumentDef (SEMI
+    argumentDef)*)? RPAR COLON (BOOLEAN | argumentType | Name) Explanation? SEMI
+    (eCH-0031 V2.1.0 3.14: the argument list may be empty, the result is an
+    ArgumentType - OBJECTS OF included - and may be followed by an Explanation). Renamed
     from functionDecl (upstream issue #2, geostandards-ch/interlis-antlr4) -
     this rule builds the real FunctionDef of the INTERLIS 2 spec; the
     unrelated unit-adjacent rule below was renamed to functionallyDerivedUnit
     to free up this name.'
-functionallyDerivedUnit:
-  grammar:
-    rule: functionallyDerivedUnit
-  kind: Container
-  attribute_bindings:
-    _status:
-      status: not_applicable
-      note: 'Design decision: (a) an adjacent [functionallyDerivedUnit-alt1
-        (header), functionallyDerivedUnit-alt2-bare-SEMI] pair is merged and
-        treated as a unitDef with Kind=BaseU (Name/ShortName/EXTENDS ->
-        Inheritance, same bindings as unitDef); (b) a complete
-        functionallyDerivedUnit-alt2 (EQ FUNCTION Explanation LSBR unitRef
-        RSBR) encountered without an immediately preceding alt1 has no Name
-        and cannot build a Unit instance, so it raises an explicit error
-        rather than guessing a name. This rule, formerly named functionDef
-        in this project (a name reused - confusingly - by the real FunctionDef
-        rule below, before upstream issue #2''s rename), is distinct from
-        the real FunctionDef of the INTERLIS 2 spec. Background:
-        docs/dev-notes/unit-function-def-investigation.md.'
-  note: 'No direct IlisMeta16 instance expected. Despite the grammar keyword
-    FUNCTION appearing in its 2nd alternative, this rule does NOT create the
-    FunctionDef instance (that''s functionDef above) - it''s an optional
-    trailing clause on a function/unit name specifying its result unit
-    ([unitRef], EXTENDS unitRef) and Explanation text, feeding
-    attributes/associations of the enclosing construct - matching ili2c''s
-    own FunctionallyDerivedUnit concept (interlis24.g, derivedUnit rule),
-    which this project''s rule name now mirrors. Grammar (.g4 lines
-    509-515): functionallyDerivedUnit : UNIT? Name (LSBR Name RSBR)? (EXTENDS
-    unitRef)? | (EQ FUNCTION Explanation LSBR unitRef RSBR)? SEMI. Full
-    background on the 3 real call sites and how alt2 (EQ FUNCTION Explanation
-    LSBR unitRef RSBR) maps onto IlisMeta16.ModelData.UnitFunction:
-    docs/dev-notes/unit-function-def-investigation.md.'
 parameterDef:
   grammar:
     rule: parameterDef
@@ -189,19 +159,10 @@ runTimeParameterDef:
     Name:
       source:
         field: Name
-    Abstract:
-      source:
-        field: ABSTRACT
-        presence: true
-      note: Same optional single-token modifier pattern as parameterDef, but
-        without surrounding LPAR/RPAR here (bare (ABSTRACT|EXTENDED|FINAL)?
-        directly after Name, per grammar).
-    Final:
-      source:
-        field: FINAL
-        presence: true
-  note: 'Grammar (runTimeParameterDef()): PARAMETER Name (ABSTRACT|EXTENDED|FINAL)?
-    COLON attrTypeDef SEMI.'
+  note: 'Grammar (runTimeParameterDef()): Name COLON attrTypeDef SEMI - one entry of a model''s
+    PARAMETER section; the keyword opens the section in modeldef (eCH-0031 V2.1.0 3.11,
+    RunTimeParameterDef = ''PARAMETER'' { RunTimeParameter-Name '':'' AttrTypeDef '';'' }). A run-time
+    parameter has no Properties in the manual.'
 unitDef:
   grammar:
     rule: unitDef
@@ -211,9 +172,9 @@ unitDef:
     attribute: Kind
     dynamic: true
     rule:
-      unitRef: BaseU
       derivedUnit: DerivedU
       composedUnit: ComposedU
+    default: BaseU
   parent:
     association: PackageElements
     role: Element
@@ -229,18 +190,12 @@ unitDef:
         presence: true
       note: Inherited attribute (ExtendableME.Abstract), resolved from the
         optional (LPAR ABSTRACT RPAR) group.
-    Definition:
-      source:
-        field: expression
-        optional: true
-      note: 'Attribute Unit.Definition: IlisMeta16.ModelData.Expression (0..1,
-        ilismeta16-classes.yml); populated only for the first unitDef
-        alternative (bare expression, with or without a bracketed unitRef).'
-  note: 'Kind resolved dynamically: plain unitRef -> BaseU, derivedUnit ->
-    DerivedU, composedUnit -> ComposedU. Grammar (.g4 lines 339-349): UNIT?
-    Name (LSBR Name RSBR)? (LPAR ABSTRACT RPAR)? (EXTENDS unitRef)? EQ
-    ( expression (LSBR unitRef RSBR)? | composedUnit | functionallyDerivedUnit
-    | LSBR unitRef RSBR )? SEMI.'
+  note: 'eCH-0031 V2.1.0 3.9.3: UnitDef = ''UNIT'' { Unit-Name [ ''('' ''ABSTRACT'' '')'' | ''[''
+    UnitShort-Name '']'' ] [ ''EXTENDS'' Abstract-UnitRef ] [ ''='' ( DerivedUnit | ComposedUnit ) ]
+    '';'' }. Grammar: UNIT? Name (LSBR Name RSBR)? (LPAR ABSTRACT RPAR)? (EXTENDS unitRef)? (EQ
+    (derivedUnit | composedUnit))? SEMI - one entry per context, UNIT optional so the entries of one
+    UNIT section follow each other. Kind (mandatory): DerivedU or ComposedU after ''='', BaseU
+    otherwise (a base or abstract unit, possibly EXTENDS another).'
 unitRef:
   grammar:
     rule: unitRef

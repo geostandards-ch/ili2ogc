@@ -1218,10 +1218,13 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
         # Holznutzungsbewilligung_V1_0.ili "TEXT*50"). Relay directly to
         # building the inline type instead of name resolution.
         has_structure_ref = ca.has_accessor(ctx, "structureRef") and bool(ca.call_list(ctx, "structureRef"))
-        if ca.has_accessor(ctx, "type_") and not has_structure_ref:
-            node = ca.call(ctx, "type_")
-            if node is not None:
-                return self.visit(node)
+        # The same holds for a `REFERENCE TO` element (`BAG OF REFERENCE TO X`,
+        # eCH-0031 3.6.1 `'OF' AttrType`): it builds its own ReferenceType.
+        for inline in ("type_", "referenceAttr"):
+            if ca.has_accessor(ctx, inline) and not has_structure_ref:
+                node = ca.call(ctx, inline)
+                if node is not None:
+                    return self.visit(node)
         if has_structure_ref:
             # The base type is always structureRef(0) - an optional trailing
             # `RESTRICTION(structureRef (,|;) structureRef...)` clause sits in
@@ -1696,6 +1699,8 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
             for token_or_rule, value in extra["rule"].items():
                 if ca.has_accessor(ctx, token_or_rule) and ca.is_present(ctx, token_or_rule):
                     return value
+            # `default`: the value when no listed alternative matched (a unit with no '=' is a BaseU).
+            return extra.get("default")
         return None
 
     # ------------------------------------------------------------------

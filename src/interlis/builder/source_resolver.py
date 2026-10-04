@@ -97,6 +97,33 @@ def resolve_source(
     binding_key: str | None = None,
     wrap_map: dict | None = None,
 ) -> Any:
+    value = _resolve_source(
+        ctx,
+        source,
+        rule=rule,
+        construction_context=construction_context,
+        builder=builder,
+        rule_map=rule_map,
+        binding_key=binding_key,
+        wrap_map=wrap_map,
+    )
+    if source and source.get("as_forward_ref") and source.get("field") is not None and isinstance(value, str):
+        # A name read from the parse tree (e.g. a LINE FORM's structure) names an element to resolve.
+        return ForwardRef(name=value, rule=rule, home_model=builder._current_model_name())
+    return value
+
+
+def _resolve_source(
+    ctx: Any,
+    source: dict,
+    *,
+    rule: str,
+    construction_context: dict,
+    builder: Any,
+    rule_map: dict | None = None,
+    binding_key: str | None = None,
+    wrap_map: dict | None = None,
+) -> Any:
     if not source:
         return None
 

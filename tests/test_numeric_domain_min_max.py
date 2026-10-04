@@ -50,7 +50,7 @@ def test_numeric_domain_with_unit_clause_attaches_unit():
     # perdu avant (meme bag jamais atteint), pas seulement Min/Max.
     builder = _build("""INTERLIS 2.4;
 MODEL Foo AT "http://x" VERSION "1" =
-  UNIT Meter = m;
+  UNIT Meter EXTENDS INTERLIS.LENGTH;
   DOMAIN
     Length = 0..1000 [Meter];
 END Foo.

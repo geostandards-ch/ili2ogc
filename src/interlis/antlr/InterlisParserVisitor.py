@@ -499,11 +499,6 @@ class InterlisParserVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
-    # Visit a parse tree produced by InterlisParser#functionallyDerivedUnit.
-    def visitFunctionallyDerivedUnit(self, ctx:InterlisParser.FunctionallyDerivedUnitContext):
-        return self.visitChildren(ctx)
-
-
     # Visit a parse tree produced by InterlisParser#argumentDef.
     def visitArgumentDef(self, ctx:InterlisParser.ArgumentDefContext):
         return self.visitChildren(ctx)
