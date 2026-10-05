@@ -164,11 +164,6 @@ class InterlisParserVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
-    # Visit a parse tree produced by InterlisParser#enumerationType.
-    def visitEnumerationType(self, ctx:InterlisParser.EnumerationTypeContext):
-        return self.visitChildren(ctx)
-
-
     # Visit a parse tree produced by InterlisParser#enumTreeValueType.
     def visitEnumTreeValueType(self, ctx:InterlisParser.EnumTreeValueTypeContext):
         return self.visitChildren(ctx)

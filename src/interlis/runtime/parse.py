@@ -26,9 +26,74 @@ class SyntaxErrorCollector(ErrorListener):
         self.errors.append(f"line {line}:{column} {msg}")
 
 
+# Keywords INTERLIS 2.4 added: plain names in a 2.3 model (ili2c's 2.3 lexer does not reserve them).
+_KEYWORDS_SINCE_24 = frozenset(
+    getattr(InterlisLexer, name)
+    for name in (
+        "CHARSET",
+        "CONTEXT",
+        "DATE",
+        "DATETIME",
+        "DEFERRED",
+        "GENERIC",
+        "GENERICS",
+        "MULTIAREA",
+        "MULTICOORD",
+        "MULTIPOLYLINE",
+        "MULTISURFACE",
+        "NOINCREMENTALTRANSFER",
+        "REFSYS",
+        "TIMEOFDAY",
+        "XMLNS",
+    )
+)
+# Tokens an operand ends with: a sign right after one is a binary operator (`a-1` is `a - 1`), not part of a number.
+_OPERAND_END = frozenset(
+    getattr(InterlisLexer, name)
+    for name in ("Name", "PosNumber", "Number", "Dec", "Float", "STRING", "RPAR", "RSBR", "THIS", "PI", "LNBASE")
+)
+_SIGNED = frozenset((InterlisLexer.Number, InterlisLexer.Dec, InterlisLexer.Float))
+_VERSION_RE = re.compile(r"^\s*(?:!![^\n]*\n\s*|/\*.*?\*/\s*)*INTERLIS\s+(\d\.\d)", re.S)
+
+
+class _TokenSource:
+    """The lexer's tokens with the two context-dependent rules a plain lexer cannot apply.
+
+    A 2.3 model may use a 2.4-only keyword as a name; and the lexer reads `-1` as one signed number even where
+    the `-` is a subtraction (`a-1`, eCH-0031 3.13 Term0 = Term1 { ( '+' | '-' ) Term1 }).
+    """
+
+    def __init__(self, lexer: InterlisLexer, version: str | None):
+        self._lexer = lexer
+        self._pending: list = []
+        self._previous: int | None = None
+        self._as_names = _KEYWORDS_SINCE_24 if version == "2.3" else frozenset()
+
+    def __getattr__(self, name: str):
+        return getattr(self._lexer, name)
+
+    def nextToken(self):
+        token = self._pending.pop(0) if self._pending else self._lexer.nextToken()
+        if token.type in self._as_names:
+            token.type = InterlisLexer.Name
+        if token.type in _SIGNED and token.text[:1] in "+-" and self._previous in _OPERAND_END:
+            sign, number = token.clone(), token.clone()
+            sign.type = InterlisLexer.PLUS if token.text[0] == "+" else InterlisLexer.MINUS
+            sign.text, sign.stop = token.text[0], token.start
+            number.text, number.start, number.column = token.text[1:], token.start + 1, token.column + 1
+            if number.type == InterlisLexer.Number:
+                number.type = InterlisLexer.PosNumber
+            self._pending.insert(0, number)
+            token = sign
+        if token.channel == 0:
+            self._previous = token.type
+        return token
+
+
 def _parse_stream(stream):
     lexer = InterlisLexer(stream)
-    tokens = CommonTokenStream(lexer)
+    version = _VERSION_RE.match(str(stream))
+    tokens = CommonTokenStream(_TokenSource(lexer, version.group(1) if version else None))
     parser = InterlisParser(tokens)
 
     collector = SyntaxErrorCollector()

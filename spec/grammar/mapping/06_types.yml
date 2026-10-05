@@ -68,7 +68,7 @@ baseType:
   attribute_bindings:
     _dispatch:
       note: Pure dispatcher, no own class - 13 mutually exclusive alternatives, each delegating to an
-        already-bound rule from earlier lots (textType/enumerationType/enumTreeValueType/alignmentType/booleanType/numericType/formattedType/dateTimeType/coordinateType/oIDType/blackboxType/classType/attributeType).
+        already-bound rule from earlier lots (textType/enumTreeValueType/alignmentType/booleanType/numericType/formattedType/dateTimeType/coordinateType/oIDType/blackboxType/classType/attributeType).
 blackboxType:
   grammar:
     rule: blackboxType
@@ -372,7 +372,7 @@ domainDef:
     role: Element
   note: 'No fixed target: IlisMeta16.ModelData.DomainType is abstract (isAbstract=true in the XMI). The
     concrete instantiated subclass is resolved by the type_ dispatcher (-> textType/numericType/
-    booleanType/enumerationType/coordinateType/lineType/classType/attributeType/oIDType/blackboxType),
+    booleanType/coordinateType/lineType/classType/attributeType/oIDType/blackboxType),
     each already individually mapped with its own qualified_name.
 
     `domainDef()` grammatically loops over N declarations sharing one `DOMAIN` keyword, each with its
@@ -463,7 +463,7 @@ enumElement:
         '
     _parent_association_dispatch:
       note: 'The rule-level `parent: {association: TopNode, role: TopNode}` is only correct for
-        enumElement instances directly under enumerationType()/enumeration() at the top of a new EnumType
+        enumElement instances directly under enumeration() at the top of a new EnumType
         (TopNode: EnumType {0..1} -- TopNode {1} EnumNode, confirmed in ilismeta16-associations.yml). For
         enumElement instances appearing INSIDE another enumElement''s nested enumeration() (see Children
         above), the correct association is SubNode (ParentNode=the enclosing EnumNode), not TopNode.
@@ -498,7 +498,7 @@ enumeration:
       source:
         field: enumElement
         multi: true
-      note: 'Each enumElement -> EnumNode instance (same TopNode/SubNode construction as in enumerationType).
+      note: 'Each enumElement -> EnumNode instance (TopNode/SubNode construction).
         enumeration() is a restriction/extension list of an existing
         enumeration domain, not a new EnumType declaration, so these EnumNode instances restrict/extend
         the referenced base EnumType''s node tree rather than populating a freshly-created EnumType.
@@ -518,7 +518,7 @@ enumeration:
         - Top-level call (from attrType - itself from domainDef or roleDef alt2 - "Name COLON MANDATORY?
         (attrTypeDef|enumeration|numeric|constraintDef) SEMI"): enumeration() is the equivalent of the
         official EnumerationType for this anonymous type -> builds a new IlisMeta16.ModelData.EnumType
-        (same target as enumerationType()), Final = EnumType.Final (inherited from ExtendableME, confirmed
+        (EnumType), Final = EnumType.Final (inherited from ExtendableME, confirmed
         in ilismeta16-classes.yml).
         - Nested call (as enumElement''s optional Sub-Enumeration: ''(enumeration)?''): does NOT create a
         new EnumType (confirmed by the manual''s official example: ''JoursSemaine = (JoursOuvrables
@@ -535,7 +535,7 @@ enumeration:
         neither: Unordered
         ORDERED: Ordered
         CIRCULAR: Circular
-      note: 'For the top-level call: same mechanism as enumerationType.Order (values Unordered/Ordered/
+      note: 'For the top-level call: EnumType.Order (values Unordered/Ordered/
         Circular, ilismeta16-kind-values.yml) - targets EnumType.Order (own, mandatory). For the nested
         call (a enumElement''s Sub-Enumeration): effectively not_applicable - EnumNode has no Order
         attribute at all (ilismeta16-classes.yml, own: {} plus only what it inherits from ExtendableME)
@@ -547,7 +547,7 @@ enumeration:
 
         '
   note: No direct IlisMeta16 instance expected. "(el1, el2, ...)" restriction/extension list of an existing
-    enumeration domain, not a new EnumType declaration (see enumerationType for that). || Reference
+    enumeration domain or a new anonymous EnumType (see the Final binding above). || Reference
     Manual eCH-0031 V2.1.0 (2024-04-24) §3.8.2, EBNF
 enumerationConst:
   grammar:
@@ -576,33 +576,6 @@ enumerationConst:
         '
   note: No direct IlisMeta16 instance expected. "#Name" or "#OTHERS" symbolic enum literal; feeds Constant.Value
     (Type=Enumeration) on the enclosing Constant.
-enumerationType:
-  grammar:
-    rule: enumerationType
-  kind: Instance
-  target: IlisMeta16.ModelData.EnumType
-  attribute_bindings:
-    Order:
-      source:
-        field: CIRCULAR|ORDERED
-        presence: true
-      rule:
-        neither: Unordered
-        ORDERED: Ordered
-        CIRCULAR: Circular
-      note: 'enumerationType() = ENUM LCBR enumElement (COMMA enumElement)* RCBR (CIRCULAR|ORDERED)?.
-        Values confirmed via ilismeta16-kind-values.yml IlisMeta16.ModelData.EnumType.Order: [Unordered,
-        Ordered, Circular] (mandatory, so absence of both tokens resolves to Unordered).
-
-        '
-    Elements:
-      source:
-        field: enumElement
-        multi: true
-      note: 'Each enumElement -> EnumNode instance, linked via the TopNode association (see the enumElement
-        binding''s own parent: association TopNode / role TopNode).
-
-        '
 formatDef:
   grammar:
     rule: formatDef

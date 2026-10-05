@@ -115,7 +115,7 @@ modeldef:
         ''CHARSET''"). Reference Manual eCH-0031 V2.1.0 (2024-04-24), exact EBNF: ''... ''='' [ ''CHARSET''
         IANA-Name-String '';'' ] [ ''XMLNS'' XMLNS-String '';'' ] { ''IMPORTS'' ... } ...'' - absent from
         the 2006 edition (a 2.4 extension). Fixed in vendor/interlis-antlr4/InterlisParser.g4: added
-        ''(CHARSET STRING SEMI)?'' right after EQ (and after the existing CONTRACT ISSUED BY extension).
+        ''(CHARSET STRING SEMI)?'' right after EQ .
         ''anchor: CHARSET'' means: the STRING immediately adjacent to the CHARSET token in ctx.children,
         not a flat STRING(i) index (the flat position depends on which optional clauses actually precede
         it - AT/VERSION, TRANSLATION - see also xmlns below).
@@ -157,20 +157,6 @@ modeldef:
         external to the .ili 2.x syntax (e.g. ili2c command-line options or a separate INTERLIS 1
         format description file), not by parsing the model itself. Not expressible in .ili syntax - a
         legitimate closure, not a mapping gap.
-
-        '
-    contract_issued_by:
-      status: not_applicable
-      note: 'Confirmed grammar divergence (not a bug): the ''(CONTRACT ISSUED BY Name SEMI)?'' clause
-        present in InterlisParser.g4 exists in neither edition of the official ModelDef EBNF (2006-04-13
-        nor eCH-0031 V2.1.0/2024-04-24); IlisMeta16.ModelData.Model has no own attribute for a
-        "contract issuer" (own attributes confirmed by exhaustive grep: iliVersion/Contracted/Kind/
-        Language/At/Version/NoIncrementalTransfer/CharSetIANAName/xmlns/ili1Transfername/ili1Format -
-        nothing else). The 2024 manual also notes that the concept of contracts found no practical use
-        and was abandoned - consistent with a residual grammar extension for a notion the standard
-        itself dropped, similar to the POW (composedUnit) divergence. Grammar left unchanged (a
-        harmless, already-optional extension). ModelBuilder ignores this clause if encountered (no
-        metamodel target).
 
         '
     imports:

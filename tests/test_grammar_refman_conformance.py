@@ -260,3 +260,28 @@ def test_cross_checked_forms_are_built():
     assert [a.Name for a in st.resolve("M.T0.R").ClassAttribute] == ["w"]
     cp = next(c for c in st.resolve("M.T0.B").Constraint if c.Name == "cp")
     assert cp.LogicalExpression.SubExpressions[1].Value._qualified_class.endswith(".AttributeConst")
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        # 3.13 Term0 = Term1 { ( '+' | '-' ) Term1 }: a sign right after an operand is an operator.
+        _topic(
+            "    CLASS A =\n      a : 0 .. 10;\n"
+            "      MANDATORY CONSTRAINT a-1 > 0;\n      MANDATORY CONSTRAINT a+1.5 > -2;\n    END A;"
+        ),
+        # 3.2.7: CONTRACT, ISSUED and ENUM are not reserved words.
+        _model("  DOMAIN CONTRACT = TEXT;\n  ISSUED = TEXT;\n  ENUM = TEXT;\n  R = -10 .. -1;"),
+        # INTERLIS 2.3 reserves none of the keywords 2.4 added (DATE, CONTEXT, ...).
+        'INTERLIS 2.3;\nMODEL M AT "http://x" VERSION "1" =\n  DOMAIN DATE = TEXT;\n  CONTEXT = TEXT;\nEND M.\n',
+    ],
+    ids=["binary-sign", "non-reserved-words", "ili23-names"],
+)
+def test_context_dependent_tokens(src: str):
+    _tree, errors = parse_text(src)
+    assert errors == [], errors
+
+
+def test_keyword_added_in_24_stays_reserved_in_24():
+    _tree, errors = parse_text(_model("  DOMAIN DATE = TEXT;"))
+    assert errors
