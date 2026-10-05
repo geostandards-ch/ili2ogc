@@ -101,7 +101,11 @@ attributeDef:
   attribute_bindings:
     Name:
       source:
-        field: Name
+        field: Name|UUIDOID
+        index: 0
+        kind: alt_token_or_rule
+      note: 'UUIDOID is a lexer keyword of this grammar but not a reserved word of INTERLIS 2 (eCH-0031
+        V2.1.0 3.2.7, Tabelle 1): a published model names an attribute UUIDOID.'
     SubdivisionKind:
       source:
         field: SUBDIVISION
@@ -131,10 +135,10 @@ attributePathConst:
     Attribute:
       source:
         field: viewableRef
-        DOT: null
         Name: null
         join: .
-      note: '"GT GT (viewableRef DOT)? Name" (e.g. ">>MyAttr" or ">>MyClass.MyAttr"). AttributeConst is
+      note: '"GT GT (viewableRef MINUS GT)? Name" (eCH-0031 V2.1.0 3.8.11, AttributePathConst = ''>>''
+        [ ViewableRef ''->'' ] Attribute-Name; e.g. ">>MyAttr" or ">>M.T.MyClass->MyAttr"). AttributeConst is
         a DataType with a single own attribute Attribute: INTERLIS.NAME (0..1), confirmed in ilismeta16-datatypes.yml,
         so the optional viewableRef qualifier and the mandatory Name are joined with "." into this single
         Attribute string (analogous to classRef.Ref).

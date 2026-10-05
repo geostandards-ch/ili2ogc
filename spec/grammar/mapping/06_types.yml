@@ -420,7 +420,7 @@ enumElement:
   attribute_bindings:
     Name:
       source:
-        field: BASKET|LOCAL|Name
+        field: BASKET|LOCAL|INTERLIS1|UUIDOID|Name
         index: 0
         kind: alt_token_or_rule
       note: 'enumElement() = (BASKET|LOCAL|Name) (DOT Name)* enumeration()?. The first segment is matched

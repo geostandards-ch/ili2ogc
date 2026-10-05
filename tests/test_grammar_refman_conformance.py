@@ -41,6 +41,73 @@ _CASES = {
     #        { 'OBJECTS' 'OF' Class-Name ':' MetaObject-Name { ',' MetaObject-Name } } ';'.
     "3.10.1-basket-final": _model("  SIGN BASKET B (FINAL) ~ S.T\n    OBJECTS OF A: a, b;"),
     "3.10.1-basket-no-objects": _model("  SIGN BASKET B ~ S.T;"),
+    # 3.2.3 String = '"' { <any character except '\\' or '"'> | ... } '"'.
+    "3.2.3-string-apostrophe": _topic(
+        '    CLASS A =\n      x : TEXT;\n      MANDATORY CONSTRAINT x == "l\'eau";\n    END A;'
+    ),
+    # 3.6.1 AttrTypeDef = ( 'MANDATORY' [ AttrType ] | ... ).
+    "3.6.1-mandatory-without-type": _topic(
+        "    CLASS A =\n      a : TEXT;\n    END A;\n"
+        "    CLASS B EXTENDS A =\n      a (EXTENDED) : MANDATORY;\n    END B;"
+    ),
+    # 3.8 DomainDef = 'DOMAIN' { ... '=' ( 'MANDATORY' [ Type ] | Type ) [ 'CONSTRAINTS' Name ':' Logical-Expression
+    #     { ',' Name ':' Logical-Expression } ] ';' }.
+    "3.8-domain-mandatory-without-type": _model("  DOMAIN D = TEXT;\n  D2 EXTENDS D = MANDATORY;"),
+    "3.8-domain-constraints": _model("  DOMAIN D = 0 .. 10 CONSTRAINTS c1: THIS > 1, c2: THIS < 9;"),
+    # 3.8 / 3.9.3 / 3.8.8: 'DOMAIN' { ... }, 'UNIT' { ... }, 'CONTEXT' { ... } may be empty.
+    "3.8-empty-sections": _model("  DOMAIN\n  UNIT\n  CONTEXT\n  DOMAIN D = TEXT;"),
+    # 3.5.3 ClassOrStructureDef = [ 'ATTRIBUTE' ] { AttributeDef } { ConstraintDef } [ 'PARAMETER' { ParameterDef } ].
+    "3.5.3-empty-attribute-and-parameter": _topic(
+        "    CLASS A =\n      ATTRIBUTE\n    END A;\n    CLASS B EXTENDS INTERLIS.SIGN =\n      PARAMETER\n    END B;"
+    ),
+    # 3.7.1 AssociationDef = ... { RoleDef } [ 'ATTRIBUTE' ] { AttributeDef } ...  (keyword optional);
+    #       [ 'DERIVED' 'FROM' RenamedViewableRef ]; RoleDef = ... [ ':=' Role-Factor ] ';'.
+    "3.7.1-association-attributes": _topic(
+        "    CLASS A = END A;\n    ASSOCIATION R =\n      a -- A;\n      b -- A;\n"
+        "      x (FINAL) : TEXT*5;\n      y : 0 .. 10 := x;\n    END R;"
+    ),
+    "3.7.1-derived-from": _topic(
+        "    CLASS A = END A;\n    VIEW V PROJECTION OF A; =\n    END V;\n"
+        "    ASSOCIATION R DERIVED FROM v ~ M.T.V =\n      a -- A := THIS;\n      b -- A := THIS;\n    END R;"
+    ),
+    # 3.8.5 NumericType = ( ... | 'NUMERIC' ) [ 'CIRCULAR' ] [ '[' UnitRef ']' ] [ 'CLOCKWISE' | ... | RefSys ].
+    "3.8.5-numeric-keyword-forms": _model(
+        "  DOMAIN C = COORD 0 .. 10, 0 .. 10;\n"
+        "  DOMAIN N1 = NUMERIC CIRCULAR [INTERLIS.rad] COUNTERCLOCKWISE;\n"
+        "  DOMAIN N2 = NUMERIC [INTERLIS.rad] CLOCKWISE;\n"
+        "  DOMAIN N3 = NUMERIC <C[1]>;"
+    ),
+    # 3.8.8 CoordinateType = ( 'COORD' | 'MULTICOORD' ) NumericType [ ',' NumericType [ ',' NumericType ]
+    #       [ ',' RotationDef ] [ 'REFSYS' Name-String ] ].
+    "3.8.8-coord-numeric-axes": _model(
+        "  DOMAIN C1 = COORD NUMERIC [INTERLIS.m], NUMERIC [INTERLIS.m];\n"
+        "  DOMAIN C2 = COORD NUMERIC {CHLV03[1]}, NUMERIC {CHLV03[2]};"
+    ),
+    # 3.8.11 AttributePathConst = '>>' [ ViewableRef '->' ] Attribute-Name.
+    "3.8.11-attribute-path-const": _topic(
+        "    CLASS A =\n      x : TEXT;\n    END A;\n    CLASS B =\n      p : ATTRIBUTE;\n"
+        "      MANDATORY CONSTRAINT p == >>M.T.A->x;\n    END B;"
+    ),
+    # 3.10.2.2 ParameterDef = ... ( AttrTypeDef | 'METAOBJECT' [ 'OF' MetaObject-ClassRef ] ) ';'.
+    "3.10.2-metaobject-of-class": _topic(
+        "    CLASS A EXTENDS INTERLIS.SIGN =\n      PARAMETER\n        s : METAOBJECT OF INTERLIS.SIGN;\n    END A;"
+    ),
+    # 3.13 AttributeRef = Attribute-Name [ '[' ( 'FIRST' | 'LAST' | AxisListIndex-PosNumber ) ']' ] | ...
+    # 3.13 FunctionCall = [ Model-Name '.' [ Topic-Name '.' ] ] Function-Name '(' [ Argument { ',' Argument } ] ')'.
+    # 3.13 Argument = ( Expression | 'ALL' [ '(' ( RestrictedClassOrAssRef | ViewableRef ) ')' ] ).
+    "3.13-calls-and-indexes": _model(
+        "  FUNCTION f (): BOOLEAN;\n  TOPIC T =\n    CLASS A =\n      c : TEXT;\n"
+        "      MANDATORY CONSTRAINT DEFINED(c[1]);\n      MANDATORY CONSTRAINT M.f();\n"
+        "      MANDATORY CONSTRAINT INTERLIS.objectCount(ALL(M.T.A)) > 0;\n    END A;\n  END T;"
+    ),
+    # 3.8.3 INTERLIS.HALIGNMENT / VALIGNMENT are domains of the INTERLIS model.
+    "3.8.3-alignment-domains": _topic(
+        "    CLASS A =\n      h : INTERLIS.HALIGNMENT;\n      v : INTERLIS.VALIGNMENT;\n    END A;"
+    ),
+    # 3.2.7: UUIDOID and INTERLIS1 are not reserved words - usable as names.
+    "3.2.7-non-reserved-keywords": _topic(
+        "    CLASS A =\n      UUIDOID : OID TEXT*36;\n      k : (INTERLIS1, INTERLIS2);\n    END A;"
+    ),
     # 3.9.3 UnitDef = ... Unit-Name [ '(' 'ABSTRACT' ')' | ... ] [ 'EXTENDS' ... ] [ '=' ... ] ';' - '=' is optional.
     "3.9.3-abstract-unit": _model("  UNIT\n    Angle (ABSTRACT);\n    Grad [gr] EXTENDS Angle;"),
     # 3.11 RunTimeParameterDef = 'PARAMETER' { RunTimeParameter-Name ':' AttrTypeDef ';' }.
@@ -173,3 +240,23 @@ def test_bag_of_reference_and_class_parameters_are_built():
     sign = builder.symbol_table.resolve("M.T.Sign")
     assert [p.Name for p in sign.ClassParameter] == ["p1", "p2"]
     assert not getattr(sign, "ClassAttribute", None)
+
+
+def test_cross_checked_forms_are_built():
+    builder = build_from_text(
+        _model(
+            "  DOMAIN\n  DOMAIN D = 0 .. 10 CONSTRAINTS c1: THIS > 1, c2: THIS < 9;\n"
+            "  DOMAIN T = TEXT;\n  T2 EXTENDS T = MANDATORY;\n"
+            "  TOPIC T0 =\n    CLASS A =\n      x : TEXT;\n    END A;\n"
+            "    CLASS B =\n      p : ATTRIBUTE;\n      MANDATORY CONSTRAINT cp: p == >>M.T0.A->x;\n    END B;\n"
+            "    ASSOCIATION R =\n      a -- A;\n      b -- A;\n      w (FINAL) : TEXT*5;\n    END R;\n"
+            "  END T0;"
+        )
+    )
+    st = builder.symbol_table
+    assert [c.Name for c in st.resolve("M.D").Constraint] == ["c1", "c2"]
+    t2 = st.resolve("M.T2")
+    assert t2._qualified_class.endswith(".TextType") and t2.Mandatory is True
+    assert [a.Name for a in st.resolve("M.T0.R").ClassAttribute] == ["w"]
+    cp = next(c for c in st.resolve("M.T0.B").Constraint if c.Name == "cp")
+    assert cp.LogicalExpression.SubExpressions[1].Value._qualified_class.endswith(".AttributeConst")

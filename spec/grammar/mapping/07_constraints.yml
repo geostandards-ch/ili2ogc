@@ -8,7 +8,7 @@ argument:
     dynamic: true
     rule:
       ALL: AllOf
-      default: Expression
+    default: Expression
   attribute_bindings:
     Expression:
       source:

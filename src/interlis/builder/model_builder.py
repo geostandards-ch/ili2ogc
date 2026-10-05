@@ -584,10 +584,26 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
                     None,
                 )
                 if class_token is None:
-                    # Unreachable in practice: a bare "STRING DOTDOT STRING" domainDef
-                    # alternative parses via type_'s own alternative instead (ANTLR
-                    # resolves the ambiguity there - see type.text_range_alt,
-                    # spec/grammar/mapping/06_types.yml). A defensive no-op, not a real gap.
+                    # `D2 EXTENDS D = MANDATORY;` (eCH-0031 3.8, 'MANDATORY' [ Type ]): the base's type, mandatory.
+                    instance = self._build_domain_mandatory_only(segment, rule_name) if mandatory else None
+                    if not isinstance(instance, MetaInstance):
+                        continue
+                    instance.Name = name_node.getText()
+                    instance.Mandatory = True
+                    instance._source_ctx = name_node.symbol
+                    self._maybe_register_symbol(instance)
+                    self._attach_domain_extends(instance, segment, rule_name)
+                    self._attach_domain_constraints(instance, segment, rule_name)
+                    if entry.parent and self._parent_stack:
+                        self.attachment.attach(
+                            self._parent_stack[-1],
+                            entry.parent.role,
+                            instance,
+                            association=entry.parent.association,
+                            role=entry.parent.role,
+                            rule=rule_name,
+                        )
+                    results.append(instance)
                     continue
                 instance = self._build_domain_class_restriction(segment, rule_name)
                 if not isinstance(instance, MetaInstance):
@@ -634,6 +650,7 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
             if not isinstance(instance, MetaInstance):
                 continue
             self._attach_domain_extends(instance, segment, rule_name)
+            self._attach_domain_constraints(instance, segment, rule_name)
             if getattr(instance, "Name", None) is None:
                 instance.Name = name_node.getText()
                 self._maybe_register_symbol(instance)
@@ -760,6 +777,52 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
         value.graceful = True
         self.attachment.attach(instance, "Super", value, association="Inheritance", role="Super", rule=rule_name)
         self.forward_refs.register_pending(value, instance, "Super")
+
+    def _build_domain_mandatory_only(self, segment: list[Any], rule_name: str) -> MetaInstance | None:
+        """A new instance of the `EXTENDS` base's own type class, for `D2 EXTENDS D = MANDATORY;`.
+
+        The base must already be declared (the usual order); otherwise nothing is built rather than a guessed type.
+        """
+        ref_node = next(
+            (c for c in segment if isinstance(c, ParserRuleContext) and self._rule_name(c) == "domainRef"), None
+        )
+        ref = self.visit(ref_node) if ref_node is not None else None
+        name = ref.name if isinstance(ref, ForwardRef) else None
+        base = self.symbol_table.resolve(name, home_model=self._current_model_name()) if name else None
+        if not isinstance(base, MetaInstance):
+            return None
+        return self.registry.new_instance(base._qualified_class)
+
+    def _attach_domain_constraints(self, instance: MetaInstance, segment: list[Any], rule_name: str) -> None:
+        """Build `CONSTRAINTS Name: Logical-Expression, ...` (eCH-0031 3.8) as mandatory constraints on the domain."""
+        children = list(segment)
+        start = next(
+            (
+                i
+                for i, c in enumerate(children)
+                if isinstance(c, TerminalNode) and c.symbol.type == InterlisParser.CONSTRAINTS
+            ),
+            None,
+        )
+        if start is None:
+            return
+        name = None
+        for child in children[start + 1 :]:
+            if isinstance(child, TerminalNode) and child.symbol.type == InterlisParser.Name:
+                name = child.getText()
+            elif isinstance(child, ParserRuleContext) and self._rule_name(child) == "expression":
+                constraint = self.registry.new_instance("IlisMeta16.ModelData.SimpleConstraint")
+                constraint.Name = name
+                constraint.Kind = "MandC"
+                constraint.LogicalExpression = self.visit(child)
+                self.attachment.attach(
+                    instance,
+                    "Constraint",
+                    constraint,
+                    association="DomainConstraint",
+                    role="Constraint",
+                    rule=rule_name,
+                )
 
     def _build_domain_class_restriction(self, segment: list[Any], rule_name: str) -> MetaInstance:
         """Build `DOMAIN X = CLASS RESTRICTION(A; B; ...);`.
@@ -1912,30 +1975,16 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
             instance.SubExpression = value
 
     def _set_predefined_function_call(self, instance: MetaInstance, ctx: ParserRuleContext) -> None:
-        """Set `FunctionCall.Function`/`.Arguments` from `factor`'s alt4 (predefined functions, e.g.
-        `INTERLIS.len(...)`).
+        """Set `FunctionCall.Function`/`.Arguments` for a predefined call (`INTERLIS.len(...)`, `factor` alt4).
 
-        `Function` needs 2 tokens joined (`INTERLIS` + the matched
-        `Name`/`URI`/`UUIDOID`), and `Arguments` needs each bare
-        `expression()` wrapped in a synthetic `ActualArgument` - this alt
-        never goes through the `argument()` rule, so neither has a
-        matching direct accessor.
+        `Function` joins `INTERLIS` and the matched name token; each `argument()` builds its own `ActualArgument`.
         """
         names = ctx.Name()
         name_token = names[0] if names else (ctx.URI() or ctx.UUIDOID())
         if name_token is None:
             return
         instance.Function = f"INTERLIS.{name_token.getText()}"
-        arguments = []
-        for expr_ctx in ctx.expression():
-            value = self.visit(expr_ctx)
-            if value is None:
-                continue
-            argument = self.registry.new_instance("IlisMeta16.ModelData.ActualArgument")
-            argument.Kind = "Expression"
-            argument.Expression = value
-            arguments.append(argument)
-        instance.Arguments = arguments
+        instance.Arguments = [a for a in (self.visit(arg) for arg in ctx.argument()) if a is not None]
 
     def _qualify_name(self, name: str) -> str:
         parts = [getattr(inst, "Name", None) for inst in self._parent_stack if getattr(inst, "Name", None)]

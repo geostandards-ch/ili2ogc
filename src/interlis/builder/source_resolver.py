@@ -429,7 +429,8 @@ def _resolve_join(ctx: Any, source: dict, builder: Any, rule: str) -> str:
         node = ca.call(ctx, key)
         if node is not None:
             segments.append(_resolve_node(node, builder, rule))
-    return separator.join(s for s in segments if s is not None)
+    # A reference rule among the joined parts (e.g. `>>M.T.A->x`'s viewableRef) contributes its name.
+    return separator.join(s.name if isinstance(s, ForwardRef) else s for s in segments if s is not None)
 
 
 def _match_sequence_pattern(
