@@ -319,7 +319,7 @@ wheels = [
 
 [[package]]
 name = "ili2ogc"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "antlr4-python3-runtime" },
@@ -358,7 +358,7 @@ requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.0" },
     { name = "jsonschema", specifier = ">=4.23.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
-    { name = "pycartosym", extras = ["sld"], specifier = ">=0.3.7" },
+    { name = "pycartosym", extras = ["sld"], specifier = ">=0.3.8" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0.0" },
@@ -823,16 +823,16 @@ wheels = [
 
 [[package]]
 name = "pycartosym"
-version = "0.3.7"
+version = "0.3.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "antlr4-python3-runtime" },
     { name = "jsonschema" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8d/2a/fc1dd12052f29fa882baee6c14f7e6e25bcfcf10958a63454947ba8eba5f/pycartosym-0.3.7.tar.gz", hash = "sha256:1942040839d1ecdf01709a59bb4ee911e037fc69f02634c2adae4807c35139a9", size = 351191, upload-time = "2026-10-06T21:13:50.9Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6b/f9/df1cd0ef144a70bd073135880ea701228598dcfd3e9c1c3264bca7e5d58b/pycartosym-0.3.8.tar.gz", hash = "sha256:532e06da8405f925a33b586c38888e3c608c25e80a6c2c42992cd90c2acc00d1", size = 352280, upload-time = "2026-10-06T22:21:27.068Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1d/fc/2fa8150d45ecadb184810c16437025b80383d9190541d2faa1e09513d7a4/pycartosym-0.3.7-py3-none-any.whl", hash = "sha256:c785e1d7491a566c83963662be4c6706d850930bb29eefd9ba5bc05889a490aa", size = 284835, upload-time = "2026-10-06T21:13:48.931Z" },
+    { url = "https://files.pythonhosted.org/packages/46/7b/5c14044b909fba6cc948b0da8ade5ab4fd0226fdc161de424f88772a4c23/pycartosym-0.3.8-py3-none-any.whl", hash = "sha256:53c2893bb50b8d6bb08a51c2d0c727211088edecb436c4e8a9e5568f58eb33de", size = 285349, upload-time = "2026-10-06T22:21:25.246Z" },
 ]
 
 [package.optional-dependencies]
