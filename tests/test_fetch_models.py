@@ -24,7 +24,9 @@ _CATALOG = """<?xml version="1.0" encoding="UTF-8"?>
 
 _FILES = {
     "https://cat.example/ilimodels.xml": _CATALOG,
-    "https://cat.example/Base.ili": 'INTERLIS 2.3;\nMODEL Base AT "x" VERSION "2020-01-01" =\n  IMPORTS Units;\nEND Base.\n',
+    "https://cat.example/Base.ili": (
+        'INTERLIS 2.3;\nMODEL Base AT "x" VERSION "2020-01-01" =\n  IMPORTS Units;\nEND Base.\n'
+    ),
     "https://cat.example/Units.ili": 'INTERLIS 2.3;\nTYPE MODEL Units AT "x" VERSION "2012-02-20" =\nEND Units.\n',
 }
 
