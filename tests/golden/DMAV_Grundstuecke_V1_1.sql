@@ -164,6 +164,7 @@ CREATE INDEX idx_grundstueck_textposition_grundstueck_fk ON "grundstueck_textpos
 CREATE VIEW "grenzpunkt_gueltig" AS
     SELECT
         "grenzpunkt"."t_id" AS "t_id",
+        "grenzpunkt"."t_ili_tid" AS "t_ili_tid",
         "grenzpunkt"."nbident" AS "nbident",
         "grenzpunkt"."nummer" AS "nummer",
         "grenzpunkt"."hoehengeometrie" AS "hoehengeometrie",
@@ -184,6 +185,7 @@ CREATE VIEW "grenzpunkt_gueltig" AS
 CREATE VIEW "grundstueck_gueltig" AS
     SELECT
         "grundstueck"."t_id" AS "t_id",
+        "grundstueck"."t_ili_tid" AS "t_ili_tid",
         "grundstueck"."nbident" AS "nbident",
         "grundstueck"."nummer" AS "nummer",
         "grundstueck"."egrid" AS "egrid",
@@ -202,6 +204,7 @@ CREATE VIEW "grundstueck_gueltig" AS
 CREATE VIEW "liegenschaft_gueltig" AS
     SELECT
         "liegenschaft"."t_id" AS "t_id",
+        "liegenschaft"."t_ili_tid" AS "t_ili_tid",
         "liegenschaft"."nummerteilgrundstueck" AS "nummerteilgrundstueck",
         "liegenschaft"."fiktiv" AS "fiktiv",
         "liegenschaft"."flaechenmass" AS "flaechenmass",
@@ -215,6 +218,7 @@ CREATE VIEW "liegenschaft_gueltig" AS
 CREATE VIEW "selbstaendigesdauerndesrecht_gueltig" AS
     SELECT
         "selbstaendigesdauerndesrecht"."t_id" AS "t_id",
+        "selbstaendigesdauerndesrecht"."t_ili_tid" AS "t_ili_tid",
         "selbstaendigesdauerndesrecht"."nummerteilgrundstueck" AS "nummerteilgrundstueck",
         "selbstaendigesdauerndesrecht"."flaechenmass" AS "flaechenmass",
         "selbstaendigesdauerndesrecht"."istbaurecht" AS "istbaurecht"
@@ -227,6 +231,7 @@ CREATE VIEW "selbstaendigesdauerndesrecht_gueltig" AS
 CREATE VIEW "bergwerk_gueltig" AS
     SELECT
         "bergwerk"."t_id" AS "t_id",
+        "bergwerk"."t_ili_tid" AS "t_ili_tid",
         "bergwerk"."nummerteilgrundstueck" AS "nummerteilgrundstueck",
         "bergwerk"."flaechenmass" AS "flaechenmass"
     FROM "bergwerk" "bergwerk"

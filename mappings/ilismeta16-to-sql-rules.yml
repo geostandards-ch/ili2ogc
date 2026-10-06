@@ -147,6 +147,9 @@ concepts:
       View to a `-- NOTE` rather than a half-built statement (RULE #5); a
       VIEW-level `UNIQUE`/`SET`/`EXISTENCE` constraint is likewise a
       `-- NOTE` alongside the view (a `CREATE VIEW` cannot carry it).
+      An attribute naming a multilingual text resolves to its text in the
+      `--feature-views` language (as the `_features` views do); a
+      single-base View also carries its base's `t_ili_tid`.
       Verified end-to-end (a real `CREATE VIEW` executing and returning
       correct rows) against both a live SQLite and a live PostgreSQL
       engine. Full per-`FormationKind` SQL shape, base-model resolution,

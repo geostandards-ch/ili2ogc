@@ -48,9 +48,11 @@ def _views():
 
 def test_projection_view_exposes_its_base_id():
     con = sqlite3.connect(":memory:")
-    con.executescript("CREATE TABLE road (t_id INTEGER, name TEXT); INSERT INTO road VALUES (1, 'A1');")
+    con.executescript(
+        "CREATE TABLE road (t_id INTEGER, t_ili_tid TEXT, name TEXT); INSERT INTO road VALUES (1, 'r1', 'A1');"
+    )
     body = _views()["roadnames"].body
-    assert con.execute(f"SELECT t_id, roadname FROM ({body})").fetchall() == [(1, "A1")]
+    assert con.execute(f"SELECT t_id, t_ili_tid, roadname FROM ({body})").fetchall() == [(1, "r1", "A1")]
 
 
 def test_join_view_id_combines_both_bases():

@@ -615,6 +615,7 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
             symbol_table=builder.symbol_table,
             class_symbol_tables=class_symbol_tables,
             class_table_names=class_table_names,
+            lang=args.feature_views,
         )
     )
     class_by_name = {
@@ -1285,7 +1286,9 @@ def main(argv: list[str] | None = None) -> int:
         "column is replaced by the referenced object's key (its UNIQUE attributes, else its transferred TID and "
         "plain attributes) "
         "and multilingual names, and the table's own multilingual texts (LocalisationCH) become plain columns - "
-        "texts in LANG (e.g. de), else in another language the value carries.",
+        "texts in LANG (e.g. de), else in another language the value carries. A VIEW attribute naming a "
+        "multilingual text (e.g. name := M -> Name) also becomes its text in LANG; without this option such a VIEW "
+        "is left out with a note.",
     )
     convert_sql_parser.add_argument(
         "--lang",

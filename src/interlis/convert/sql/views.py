@@ -26,7 +26,8 @@ from interlis.xtf.schema import (
 )
 
 from .expressions import _SQL_RELATIONAL_OPERATORS, _numeric_sql_literal, _text_sql_literal
-from .identifiers import OID_COLUMN, _dedup_name, _quote, _sql_identifier, _truncate_identifier
+from .feature_views import _localised_texts, _text_in
+from .identifiers import OID_COLUMN, TID_COLUMN, _dedup_name, _quote, _sql_identifier, _truncate_identifier
 from .model import SqlView, Table, UniqueViewTrigger
 from .tables import _columns_for_class
 
@@ -63,7 +64,9 @@ class _ViewResolver:
         symbol_for,
         assoc_near_roles: dict[str, str] | None = None,
         table_names: dict[int, str] | None = None,
+        lang: str | None = None,
     ) -> None:
+        self.lang = lang
         self.by_alias = {alias: (cls, table) for alias, cls, table in bases}
         self.table_names = table_names or {}
         self.tables_by_name = tables_by_name
@@ -71,6 +74,7 @@ class _ViewResolver:
         self.assoc_near_roles = assoc_near_roles or {}
         self.extra_joins: list[tuple[str, str, str]] = []  # (table, alias, ON-condition SQL)
         self._counter = 0
+        self._joined: dict[tuple[str, str], str] = {}
 
     def _members(self, cls: MetaInstance) -> dict[str, MetaInstance]:
         st = self.symbol_for(cls)
@@ -98,6 +102,22 @@ class _ViewResolver:
             return None
         flattened = sub_columns[0].name
         return flattened if flattened in self._columns(table) else None
+
+    def _localised_text(self, col: str, table: str, alias: str) -> str | None:
+        """A multilingual attribute (LocalisationCH child table) as its text in `lang`, like `--feature-views`."""
+        found = next(
+            (
+                (child, fk)
+                for attr, child, fk in _localised_texts(self.tables_by_name[table], self.tables_by_name.values())
+                if attr == col
+            ),
+            None,
+        )
+        if found is None:
+            return None
+        if self.lang is None:
+            raise _UnsupportedView(f"{col!r} is a multilingual text - pick its language with --feature-views LANG")
+        return _text_in(found[0], found[1], f'"{alias}"', self.lang)
 
     def scalar_ref(self, factor: MetaInstance) -> str:
         """Return `"alias"."column"` for a `PathOrInspFactor`, registering any JOINs its intermediate reference hops
@@ -140,6 +160,9 @@ class _ViewResolver:
                 continue
             if is_last:
                 if col not in self._columns(table):
+                    text = self._localised_text(col, table, cur_alias)
+                    if text is not None:
+                        return text
                     flattened = self._flattened_struct_column(resolved, col, table)
                     if flattened is None:
                         raise _UnsupportedView(f"{hop!r} has no mapped column on table {table!r}")
@@ -156,11 +179,14 @@ class _ViewResolver:
                 )
             if col not in self._columns(table):
                 raise _UnsupportedView(f"reference {hop!r} has no FK column on table {table!r}")
-            self._counter += 1
-            new_alias = _truncate_identifier(f"j{self._counter}_{target_table}")
-            self.extra_joins.append(
-                (target_table, new_alias, f'"{cur_alias}"."{col}" = "{new_alias}"."{OID_COLUMN}"'),
-            )
+            new_alias = self._joined.get((cur_alias, col))
+            if new_alias is None:  # paths sharing a reference hop share its join
+                self._counter += 1
+                new_alias = _truncate_identifier(f"j{self._counter}_{target_table}")
+                self._joined[(cur_alias, col)] = new_alias
+                self.extra_joins.append(
+                    (target_table, new_alias, f'"{cur_alias}"."{col}" = "{new_alias}"."{OID_COLUMN}"'),
+                )
             cls, table, cur_alias, prefix = target, target_table, new_alias, ""
         raise _UnsupportedView("unreachable")  # pragma: no cover
 
@@ -315,12 +341,14 @@ def build_views(
     symbol_table: SymbolTable | None = None,
     class_symbol_tables: dict[int, SymbolTable] | None = None,
     class_table_names: dict[int, str] | None = None,
+    lang: str | None = None,
 ) -> list[SqlView]:
     """Translate each `View` (`FormationKind` Projection/Join only) into a `CREATE VIEW` body, or a `-- NOTE` when it
     can't be done faithfully.
 
     Becomes `SELECT <attr := path> ... FROM <base tables, comma-joined>
-    WHERE <predicates>`. Base classes must be among `tables` (`--catalog`).
+    WHERE <predicates>`. Base classes must be among `tables` (`--catalog`). An attribute naming a multilingual
+    text becomes its text in `lang` (none given: the view gets a note).
     Anything outside the translatable subset demotes the WHOLE view to
     `body=None` with a note (RULE #5), never a half-built `CREATE VIEW`.
     """
@@ -352,7 +380,9 @@ def build_views(
                 body = _build_aggregation_view(view, bases, tables_by_name, symbol_for, assoc_near_roles)
                 result.append(SqlView(vname, body, _view_constraint_notes(view)))
                 continue
-            resolver = _ViewResolver(bases, tables_by_name, symbol_for, assoc_near_roles, table_name_by_class_id)
+            resolver = _ViewResolver(
+                bases, tables_by_name, symbol_for, assoc_near_roles, table_name_by_class_id, lang=lang
+            )
             select_items: list[str] = []
             notes: list[str] = []
             attr_col: dict[str, str] = {}
@@ -378,6 +408,10 @@ def build_views(
                 raise _UnsupportedView("view has no projectable ATTRIBUTE definitions", "SQL-VIEW-NO-ATTRS")
             if OID_COLUMN not in {_sql_identifier(getattr(a, "Name", None) or "") for a in view.ClassAttribute or []}:
                 select_items.insert(0, f'{_view_row_id(bases)} AS "{OID_COLUMN}"')
+            declared = {_sql_identifier(getattr(a, "Name", None) or "") for a in view.ClassAttribute or []}
+            if len(bases) == 1 and tables_by_name[bases[0][2]].has_tid and TID_COLUMN not in declared:
+                # A projected row is its base object: its transfer TID is a stable feature id.
+                select_items.insert(1, f'"{bases[0][0]}"."{TID_COLUMN}" AS "{TID_COLUMN}"')
             where = _view_where_conjuncts(getattr(view, "Where", None), resolver)
             if len(bases) > 1 and getattr(view, "Where", None) is None:
                 where += _auto_join_conditions(bases, symbol_for)

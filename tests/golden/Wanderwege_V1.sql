@@ -39,6 +39,7 @@ CREATE INDEX idx_wegweiser_wegabschnitt ON "wegweiser" ("wegabschnitt");
 CREATE VIEW "wegabschnitt_mitwegweiser" AS
     SELECT
         "wegabschnitt"."t_id" AS "t_id",
+        "wegabschnitt"."t_ili_tid" AS "t_ili_tid",
         "wegabschnitt"."bezeichnung" AS "bezeichnung",
         "wegabschnitt"."kategorie" AS "kategorie",
         "wegabschnitt"."belagsart" AS "belagsart"

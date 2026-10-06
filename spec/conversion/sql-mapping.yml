@@ -113,6 +113,12 @@ View:
         whose synthetic identity path resolves to no single column is
         dropped with a per-attribute note (it was not named), not a
         whole-View demotion.
+        A last hop naming a LocalisationCH multilingual text (child table
+        <table>_<attr>_localisedtext) becomes a scalar subquery picking the
+        text in the --feature-views LANG, else another language present;
+        without LANG the View is a note. Paths sharing a reference hop share
+        one join. A single-base View also exposes its base's t_ili_tid: the
+        projected row is that object, so its TID is a stable feature id.
     where:
       source: {field: Where}
       note: >

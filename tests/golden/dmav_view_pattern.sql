@@ -43,6 +43,7 @@ CREATE INDEX idx_grundstueck_untergang ON "grundstueck" ("untergang");
 CREATE VIEW "grundstueck_gueltig" AS
     SELECT
         "grundstueck"."t_id" AS "t_id",
+        "grundstueck"."t_ili_tid" AS "t_ili_tid",
         "grundstueck"."nbident" AS "nbident",
         "grundstueck"."nummer" AS "nummer",
         "grundstueck"."egrid" AS "egrid"
