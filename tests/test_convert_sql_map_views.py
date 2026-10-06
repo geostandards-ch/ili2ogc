@@ -153,3 +153,31 @@ def test_graphic_based_on_a_view_gets_a_note_not_a_view(tmp_path: Path, capsys):
     assert '"code"' in ddl.split('CREATE VIEW "site_map"', 1)[1].split(";", 1)[0]
     assert 'CREATE VIEW "site_graphics"' not in ddl
     assert "SQL-VIEW-GRAPHIC-ON-VIEW" in capsys.readouterr().err
+
+
+def test_graphic_based_on_a_view_with_several_priorities_orders_its_rows_by_priority(tmp_path: Path):
+    """MapServer draws in data order: the view lists the lowest Priority's features first, so higher ones stack on
+    top."""
+    _sql(tmp_path)
+    (tmp_path / "V.ili").write_text(_VIEWS, encoding="utf-8")
+    symbology = _VIEW_SYMBOLOGY.replace(
+        """    END Site_Graphics;""",
+        """      other OF StandardSymbology.StandardSigns.SymbolSign:
+        WHERE code == "b" (
+          Sign := {Dot};
+          Geometry := pos;
+          Priority := 0);
+    END Site_Graphics;""",
+    )
+    (tmp_path / "W.ili").write_text(symbology, encoding="utf-8")
+    out = tmp_path / "views.sql"
+    main(
+        ["convert-sql", str(tmp_path / "V.ili"), "--repo", str(tmp_path), "--map-views", str(tmp_path / "W.ili")]
+        + ["--dialect", "gpkg", "-o", str(out)]
+    )
+    con = sqlite3.connect(":memory:")
+    con.executescript("\n".join(line for line in out.read_text().splitlines() if "gpkg_" not in line))
+    con.execute("INSERT INTO kind (t_id, t_basket, code) VALUES (1, 1, 'a'), (2, 1, 'b')")
+    con.execute("INSERT INTO site (t_id, t_basket, pos, kind_reference) VALUES (10, 1, x'00', 1), (11, 1, x'00', 2)")
+    rows = con.execute("SELECT t_id, code, priority FROM site_graphics").fetchall()
+    assert rows == [(11, "b", 0), (10, "a", 1)]

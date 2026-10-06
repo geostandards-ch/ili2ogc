@@ -94,8 +94,9 @@ def _view_ddl(tmp_path: Path, *options: str) -> str:
     return out.read_text(encoding="utf-8")
 
 
-def test_view_attribute_naming_a_multilingual_text_is_its_text_in_the_language(tmp_path: Path):
-    ddl = _view_ddl(tmp_path, "--feature-views", "fr")
+def test_view_attribute_naming_a_multilingual_text_is_one_column_per_language(tmp_path: Path):
+    """Its whole value, as ili2db's --expandMultilingual: `<attr>` (no language) and `<attr>_<lang>` per language."""
+    ddl = _view_ddl(tmp_path)
     con = sqlite3.connect(":memory:")
     con.executescript("\n".join(line for line in ddl.splitlines() if "gpkg_" not in line))
     con.execute("INSERT INTO kind (t_id, t_basket, t_ili_tid, code) VALUES (1, 1, 'k1', 'A')")
@@ -103,12 +104,9 @@ def test_view_attribute_naming_a_multilingual_text_is_its_text_in_the_language(t
     con.execute("INSERT INTO site (t_id, t_basket, t_ili_tid, pos, kind) VALUES (10, 1, 's1', x'00', 1)")
     con.execute("INSERT INTO site (t_id, t_basket, t_ili_tid, pos) VALUES (11, 1, 's2', x'00')")
     con.execute("INSERT INTO site_name_localisedtext (t_basket, site_fk, language, text) VALUES (1, 10, 'de', 'Nord')")
-    rows = con.execute("SELECT t_id, t_ili_tid, name, kind_name FROM site_view").fetchall()
-    # s2 has no Kind: filtered out by the VIEW's WHERE. No French name for s1: German is shown.
-    assert rows == [(10, "s1", "Nord", "Maison")]
-
-
-def test_view_with_a_multilingual_text_and_no_language_gets_a_note(tmp_path: Path, capsys):
-    ddl = _view_ddl(tmp_path)
-    assert 'CREATE VIEW "site_view"' not in ddl
-    assert "is a multilingual text - pick its language with --feature-views LANG" in capsys.readouterr().err
+    con.execute("INSERT INTO site_name_localisedtext (t_basket, site_fk, text) VALUES (1, 10, 'North')")
+    columns = [c[1] for c in con.execute("PRAGMA table_info(site_view)")]
+    assert columns == ["t_id", "t_ili_tid", "name", "name_de", "name_fr", "kind_name", "kind_name_de", "kind_name_fr"]
+    rows = con.execute("SELECT t_ili_tid, name, name_de, name_fr, kind_name_fr FROM site_view").fetchall()
+    # s2 has no Kind: filtered out by the VIEW's WHERE.
+    assert rows == [("s1", "North", "Nord", None, "Maison")]

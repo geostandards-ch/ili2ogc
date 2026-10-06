@@ -19,6 +19,7 @@ from interlis.xtf.schema import (
     _class_related_base_class,
     _role_is_multi,
     attributes_of,
+    enum_values,
     is_class_compatible,
     reference_target_class,
     resolve_attribute,
@@ -26,10 +27,10 @@ from interlis.xtf.schema import (
 )
 
 from .expressions import _SQL_RELATIONAL_OPERATORS, _numeric_sql_literal, _text_sql_literal
-from .feature_views import _localised_texts, _text_in
+from .feature_views import _localised_texts, _text_of
 from .identifiers import OID_COLUMN, TID_COLUMN, _dedup_name, _quote, _sql_identifier, _truncate_identifier
 from .model import SqlView, Table, UniqueViewTrigger
-from .tables import _columns_for_class
+from .tables import _columns_for_class, _inherited_constraints
 
 
 class _UnsupportedView(Exception):
@@ -44,6 +45,46 @@ class _UnsupportedView(Exception):
     def __init__(self, message: str, rule: str = "SQL-VIEW-EXPR-UNTRANSLATABLE") -> None:
         super().__init__(message)
         self.rule = rule
+
+
+class _MultilingualAttribute(_UnsupportedView):
+    """A path ending on a LocalisationCH multilingual text: one SQL expression per language, not one column.
+
+    `columns` maps a column suffix (`""` for the undefined language, else `"_de"`...) to its SQL; only a whole
+    VIEW attribute can hold it (`build_views`), anywhere else it stays an untranslatable expression.
+    """
+
+    def __init__(self, name: str, columns: dict[str, str]) -> None:
+        super().__init__(f"{name!r} is a multilingual text - only a whole VIEW attribute can hold it")
+        self.columns = columns
+
+
+def _constrained_values(structure: MetaInstance, attribute: str) -> set[str] | None:
+    """The enumeration values a MANDATORY CONSTRAINT `attribute == #a OR attribute == #b ...` allows, if one does."""
+    for constraint in _inherited_constraints(structure):
+        if constraint._qualified_class.rsplit(".", 1)[-1] == "SimpleConstraint" and getattr(
+            constraint, "Kind", None
+        ) in (None, "MandC"):
+            values = _equality_alternatives(getattr(constraint, "LogicalExpression", None), attribute)
+            if values:
+                return values
+    return None
+
+
+def _equality_alternatives(expr: MetaInstance | None, attribute: str) -> set[str] | None:
+    """`{a, b}` for `attribute == #a OR attribute == #b`, `None` for any other shape."""
+    if expr is None or expr._qualified_class.rsplit(".", 1)[-1] != "CompoundExpr":
+        return None
+    op, subs = getattr(expr, "Operation", None), list(getattr(expr, "SubExpressions", None) or [])
+    if op == "Or":
+        parts = [_equality_alternatives(sub, attribute) for sub in subs]
+        return set().union(*parts) if parts and all(parts) else None  # type: ignore[arg-type]
+    if op == "Equal" and len(subs) == 2:
+        path, constant = subs
+        refs = [getattr(el, "Ref", None) for el in getattr(path, "PathEls", None) or []]
+        if refs == [attribute] and getattr(constant, "Type", None) == "Enumeration":
+            return {constant.Value}
+    return None
 
 
 class _ViewResolver:
@@ -64,9 +105,7 @@ class _ViewResolver:
         symbol_for,
         assoc_near_roles: dict[str, str] | None = None,
         table_names: dict[int, str] | None = None,
-        lang: str | None = None,
     ) -> None:
-        self.lang = lang
         self.by_alias = {alias: (cls, table) for alias, cls, table in bases}
         self.table_names = table_names or {}
         self.tables_by_name = tables_by_name
@@ -103,8 +142,13 @@ class _ViewResolver:
         flattened = sub_columns[0].name
         return flattened if flattened in self._columns(table) else None
 
-    def _localised_text(self, col: str, table: str, alias: str) -> str | None:
-        """A multilingual attribute (LocalisationCH child table) as its text in `lang`, like `--feature-views`."""
+    def _localised_columns(
+        self, resolved: ResolvedAttribute, col: str, table: str, alias: str
+    ) -> dict[str, str] | None:
+        """A multilingual attribute (LocalisationCH child table) as one text per language of its `Language`
+        enumeration, plus the undefined language - ili2db's `--expandMultilingual` columns, so no language is chosen
+        and none is lost.
+        """
         found = next(
             (
                 (child, fk)
@@ -115,9 +159,28 @@ class _ViewResolver:
         )
         if found is None:
             return None
-        if self.lang is None:
-            raise _UnsupportedView(f"{col!r} is a multilingual text - pick its language with --feature-views LANG")
-        return _text_in(found[0], found[1], f'"{alias}"', self.lang)
+        languages = self._text_languages(resolved.type_instance)
+        if not languages:
+            raise _UnsupportedView(f"{col!r}: no Language enumeration found for its multilingual text")
+        return {
+            "" if lang is None else f"_{lang}": _text_of(found[0], found[1], f'"{alias}"', lang)
+            for lang in [None, *languages]
+        }
+
+    def _text_languages(self, structure: MetaInstance | None) -> list[str]:
+        """The `Language` values of a multilingual STRUCTURE's `BAG OF LocalisedText` element."""
+        for attr in self._members(structure).values() if isinstance(structure, MetaInstance) else []:
+            resolved = resolve_attribute(attr)
+            element = getattr(resolved.type_instance, "BaseType", None) if resolved.type_kind == "MultiValue" else None
+            language = self._members(element).get("Language") if isinstance(element, MetaInstance) else None
+            if language is not None:
+                resolved_language = resolve_attribute(language)
+                if resolved_language.type_kind == "EnumType":
+                    values = enum_values(resolved_language.type_instance) - {"OTHERS"}
+                    # LocalisationCH narrows the ISO 639-1 domain to de/fr/it/rm/en by a MANDATORY CONSTRAINT.
+                    allowed = _constrained_values(element, "Language")
+                    return sorted(values & allowed if allowed else values)
+        return []
 
     def scalar_ref(self, factor: MetaInstance) -> str:
         """Return `"alias"."column"` for a `PathOrInspFactor`, registering any JOINs its intermediate reference hops
@@ -182,8 +245,22 @@ class _ViewResolver:
                 if last_attr is None:
                     raise _UnsupportedView(f"{last!r} is not an attribute of {getattr(target, 'Name', None)!r}")
                 last_resolved = resolve_attribute(last_attr)
-                parts = [self._final_column(last_resolved, last, _sql_identifier(last), t, a) for a, t in aliases]
-                return "COALESCE(" + ", ".join(parts) + ")"
+                parts: list[str | dict[str, str]] = []
+                for target_alias, target_table in aliases:
+                    try:
+                        parts.append(
+                            self._final_column(last_resolved, last, _sql_identifier(last), target_table, target_alias)
+                        )
+                    except _MultilingualAttribute as multilingual:
+                        parts.append(multilingual.columns)
+                if all(isinstance(p, dict) for p in parts):
+                    columns = {
+                        suffix: "COALESCE(" + ", ".join(p[suffix] for p in parts) + ")"  # type: ignore[index]
+                        for suffix in parts[0]  # type: ignore[union-attr]
+                    }
+                    raise _MultilingualAttribute(last, columns)
+                return "COALESCE(" + ", ".join(str(p) for p in parts) + ")"
+
             new_alias, table = aliases[0]
             cls, cur_alias, prefix = target, new_alias, ""
         raise _UnsupportedView("unreachable")  # pragma: no cover
@@ -191,9 +268,9 @@ class _ViewResolver:
     def _final_column(self, resolved: ResolvedAttribute, hop: str, col: str, table: str, alias: str) -> str:
         """The SQL for a path's last attribute on `table`: its column, a multilingual text, or a flattened STRUCTURE."""
         if col not in self._columns(table):
-            text = self._localised_text(col, table, alias)
-            if text is not None:
-                return text
+            columns = self._localised_columns(resolved, col, table, alias)
+            if columns is not None:
+                raise _MultilingualAttribute(hop, columns)
             flattened = self._flattened_struct_column(resolved, col, table)
             if flattened is None:
                 raise _UnsupportedView(f"{hop!r} has no mapped column on table {table!r}")
@@ -385,14 +462,15 @@ def build_views(
     symbol_table: SymbolTable | None = None,
     class_symbol_tables: dict[int, SymbolTable] | None = None,
     class_table_names: dict[int, str] | None = None,
-    lang: str | None = None,
+    view_names: dict[int, str] | None = None,
 ) -> list[SqlView]:
     """Translate each `View` (`FormationKind` Projection/Join only) into a `CREATE VIEW` body, or a `-- NOTE` when it
     can't be done faithfully.
 
     Becomes `SELECT <attr := path> ... FROM <base tables, comma-joined>
     WHERE <predicates>`. Base classes must be among `tables` (`--catalog`). An attribute naming a multilingual
-    text becomes its text in `lang` (none given: the view gets a note).
+    text becomes one column per language (`<attr>`, `<attr>_de`...). `view_names` (optional out-param) maps each
+    View to its SQL view name.
     Anything outside the translatable subset demotes the WHOLE view to
     `body=None` with a note (RULE #5), never a half-built `CREATE VIEW`.
     """
@@ -409,6 +487,8 @@ def build_views(
         while vname in used_names:
             vname = _truncate_identifier(f"{vname}_v")
         used_names.add(vname)
+        if view_names is not None:
+            view_names[id(view)] = vname
         try:
             bases, assoc_near_roles = _resolve_view_bases(view, tables_by_name, table_name_by_class_id)
             formation = getattr(view, "FormationKind", None)
@@ -424,9 +504,7 @@ def build_views(
                 body = _build_aggregation_view(view, bases, tables_by_name, symbol_for, assoc_near_roles)
                 result.append(SqlView(vname, body, _view_constraint_notes(view)))
                 continue
-            resolver = _ViewResolver(
-                bases, tables_by_name, symbol_for, assoc_near_roles, table_name_by_class_id, lang=lang
-            )
+            resolver = _ViewResolver(bases, tables_by_name, symbol_for, assoc_near_roles, table_name_by_class_id)
             select_items: list[str] = []
             notes: list[str] = []
             attr_col: dict[str, str] = {}
@@ -440,6 +518,11 @@ def build_views(
                     col_ref = resolver.scalar_ref(derivates[0])
                     select_items.append(f'{col_ref} AS "{out_col}"')
                     attr_col[(aname or "").lower()] = col_ref
+                except _MultilingualAttribute as multilingual:
+                    select_items += [
+                        f'{sql} AS "{_truncate_identifier(out_col + suffix)}"'
+                        for suffix, sql in multilingual.columns.items()
+                    ]
                 except _UnsupportedView as exc:
                     # An `ALL OF` pass-through re-exports every base attribute; one it
                     # cannot project as a single column (a STRUCTURE, an unmapped type)
@@ -1185,6 +1268,65 @@ def _rooted(factor: MetaInstance, alias: str) -> SimpleNamespace:
     )
 
 
+class _ViewColumns:
+    """Resolves a GRAPHIC rule's `WHERE` against the columns of the VIEW it is based on (one path element each)."""
+
+    def __init__(self, view: MetaInstance) -> None:
+        names = [getattr(a, "Name", None) or "" for a in getattr(view, "ClassAttribute", None) or []]
+        self.columns = {_sql_identifier(n) for n in names}
+
+    def scalar_ref(self, factor: MetaInstance) -> str:
+        if factor._qualified_class.endswith("Constant"):
+            return _view_constant_literal(factor)
+        refs = [getattr(el, "Ref", None) for el in getattr(factor, "PathEls", None) or []]
+        column = _sql_identifier(refs[0]) if len(refs) == 1 and refs[0] else None
+        if column not in self.columns:
+            raise _UnsupportedView(f"{refs!r} is not an attribute of the VIEW")
+        return f'"g"."{column}"'
+
+    def defined_sql(self, factor: MetaInstance) -> str:
+        return f"{self.scalar_ref(factor)} IS NOT NULL"
+
+
+def _priority_ordered_view(graphic: MetaInstance, view: MetaInstance, vname: str, view_sql_name: str | None) -> SqlView:
+    """The VIEW's rows ordered by the `Priority` of the first rule (lowest Priority) each matches.
+
+    A renderer that draws features in data order, as MapServer does (it flattens SLD FeatureTypeStyles into one
+    class list), then stacks them by `Priority`, which the SLD's one-FeatureTypeStyle-per-Priority cannot do there.
+    `ORDER BY` in a view is honoured by PostgreSQL and SQLite on a plain read, not guaranteed by SQL itself.
+    """
+    rules = graphic.DrawingRule if isinstance(graphic.DrawingRule, list) else [graphic.DrawingRule]
+    conditions = [c for rule in rules for c in (rule.Rule if isinstance(rule.Rule, list) else [rule.Rule])]
+    prioritized = []
+    for condition in conditions:
+        assignments = condition.Assignments if isinstance(condition.Assignments, list) else [condition.Assignments]
+        value = next((a.Assignment for a in assignments if a.Param == "Priority"), None)
+        number = getattr(value, "Value", None) if getattr(value, "Type", None) == "Numeric" else None
+        prioritized.append((number, condition))
+    label = f"GRAPHIC {getattr(graphic, 'Name', None)!r} is BASED ON VIEW {getattr(view, 'Name', None)!r}"
+    if view_sql_name is None or len({p for p, _ in prioritized}) < 2 or None in {p for p, _ in prioritized}:
+        message = (
+            f"{label}: no map view - the CREATE VIEW converting that VIEW already exposes the attributes its SLD "
+            "filters test, and its rules share one Priority (nothing to order)"
+        )
+        return SqlView(vname, None, [_diag("SQL-VIEW-GRAPHIC-ON-VIEW", message)])
+    resolver = _ViewColumns(view)
+    try:
+        cases = [
+            f"WHEN {_view_where_sql(c.Where, resolver) if getattr(c, 'Where', None) else '1 = 1'} "
+            f"THEN {_numeric_sql_literal(p)}"
+            for p, c in sorted(prioritized, key=lambda item: float(item[0]))
+        ]
+    except (_UnsupportedView, UnsupportedExpressionError, AttributeError) as exc:
+        return SqlView(vname, None, [_diag("SQL-VIEW-GRAPHIC", f"{label}: {exc}")])
+    priority = _dedup_name("priority", set(resolver.columns))
+    body = (
+        f'SELECT\n    "g".*,\n    CASE {" ".join(cases)} END AS "{priority}"\nFROM "{view_sql_name}" "g"'
+        f'\nORDER BY "{priority}"'
+    )
+    return SqlView(vname, body, [])
+
+
 def build_graphic_views(
     graphics: list[MetaInstance],
     tables: list[Table],
@@ -1194,6 +1336,8 @@ def build_graphic_views(
     class_table_names: dict[int, str] | None = None,
     graphic_symbol_tables: list[SymbolTable] | None = None,
     class_by_name: dict[str, MetaInstance] | None = None,
+    view_by_name: dict[str, MetaInstance] | None = None,
+    view_names: dict[int, str] | None = None,
 ) -> list[SqlView]:
     """One `CREATE VIEW <graphic>` per `GRAPHIC` whose `BASED ON` class is converted: its `t_id`, the drawing
     rules' geometry column, and one column per attribute path their `WHERE`s test - named exactly like the SLD's
@@ -1202,8 +1346,9 @@ def build_graphic_views(
     name (`graphic_symbol_tables`, `class_by_name`).
 
     A `GRAPHIC` based on a class of another conversion is skipped; one whose paths can't all be resolved becomes a
-    note, never a view missing a filtered column. One based on a VIEW becomes a note too: the VIEW's own
-    `CREATE VIEW` already holds what its SLD filters test, by attribute name.
+    note, never a view missing a filtered column. One based on a converted VIEW (`view_by_name`, `view_names`) needs
+    no such columns - the VIEW's own `CREATE VIEW` has them, by attribute name - but when its rules use several
+    `Priority` values it gets an ordered view (`_priority_ordered_view`); with a single one, a note.
     """
     tables_by_name = {t.name: t for t in tables}
     names = class_table_names or {}
@@ -1219,14 +1364,11 @@ def build_graphic_views(
             qualified = next((q for t in graphic_symbol_tables or [] if (q := t.qualified_name_of(base))), None)
             base = (class_by_name or {}).get(qualified or "", base)
             if base._qualified_class.rsplit(".", 1)[-1] == "View":
+                base = (view_by_name or {}).get(qualified or "", base)
                 vname = _dedup_name(
                     _truncate_identifier(_sql_identifier(getattr(graphic, "Name", None) or "graphic")), used_names
                 )
-                message = (
-                    f"GRAPHIC {graphic.Name!r} is BASED ON VIEW {getattr(base, 'Name', None)!r}: no map view - "
-                    "the CREATE VIEW converting that VIEW already exposes the attributes its SLD filters test"
-                )
-                result.append(SqlView(vname, None, [_diag("SQL-VIEW-GRAPHIC-ON-VIEW", message)]))
+                result.append(_priority_ordered_view(graphic, base, vname, (view_names or {}).get(id(base))))
                 continue
         table = names.get(id(base)) if isinstance(base, MetaInstance) else None
         if table is None or table not in tables_by_name:

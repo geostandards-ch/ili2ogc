@@ -42,6 +42,15 @@ def _text_in(child: Table, fk: str, owner: str, lang: str) -> str:
     )
 
 
+def _text_of(child: Table, fk: str, owner: str, lang: str | None) -> str:
+    """The text in exactly `lang` (`None`: the text whose language is undefined), NULL when absent."""
+    language = '"c"."language" IS NULL' if lang is None else '"c"."language" = \'' + lang.replace("'", "''") + "'"
+    return (
+        f'(SELECT "c"."text" FROM {_quote(child.name)} "c" WHERE "c".{_quote(fk)} = {owner}."{OID_COLUMN}" '
+        f"AND {language} LIMIT 1)"
+    )
+
+
 def build_feature_views(tables: list[Table], lang: str, used_names: set[str]) -> list[SqlView]:
     """One `<table>_features` view per class table with a reference or a multilingual text to make readable.
 

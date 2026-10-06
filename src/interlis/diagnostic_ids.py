@@ -34,7 +34,8 @@ REGISTRY: dict[str, tuple[str, str]] = {
     ),
     "SQL-VIEW-GRAPHIC-ON-VIEW": (
         "B",
-        "a GRAPHIC BASED ON a VIEW gets no map view: that VIEW's own CREATE VIEW is the table its SLD filters run on",
+        "a GRAPHIC BASED ON a VIEW with a single Priority gets no map view: that VIEW's own CREATE VIEW is its "
+        "map table",
     ),
     "SQL-VIEW-JOIN-ASSOCIATION": (
         "B",

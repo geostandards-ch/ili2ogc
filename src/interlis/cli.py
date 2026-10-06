@@ -608,6 +608,7 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
         class_table_names=class_table_names,
         name_tables=tuple({id(t): t for t in (repository.loaded_models() if repository else {}).values()}.values()),
     )
+    view_names: dict[int, str] = {}
     sql_views = tuple(
         build_views(
             views,
@@ -615,7 +616,7 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
             symbol_table=builder.symbol_table,
             class_symbol_tables=class_symbol_tables,
             class_table_names=class_table_names,
-            lang=args.feature_views,
+            view_names=view_names,
         )
     )
     class_by_name = {
@@ -623,6 +624,7 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
         for cls in classes
         if (name := class_symbol_tables.get(id(cls), builder.symbol_table).qualified_name_of(cls))
     }
+    view_by_name = {name: view for view in views if (name := builder.symbol_table.qualified_name_of(view))}
     for symbology_arg in args.map_views:
         symbology_path = Path(symbology_arg)
         symbology_tree, symbology_errors = (
@@ -649,6 +651,8 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
                 class_table_names=class_table_names,
                 graphic_symbol_tables=[symbology_builder.symbol_table, *repository.loaded_models().values()],
                 class_by_name=class_by_name,
+                view_by_name=view_by_name,
+                view_names=view_names,
             )
         )
     if args.feature_views:
@@ -1275,8 +1279,9 @@ def main(argv: list[str] | None = None) -> int:
         "a CREATE VIEW named after it, with t_id, the drawing rules' geometry column and one column per "
         "attribute path their WHERE clauses test, named like the SLD PropertyName `interlis convert-sld` "
         'writes (e.g. "MeasureType.Reference.TypeID") - a map server can apply that SLD to the view as is. '
-        "Not needed for a GRAPHIC BASED ON a VIEW: converting that VIEW already gives the map server its table, "
-        "with the SLD's PropertyNames as columns (such a GRAPHIC only gets a note).",
+        "A GRAPHIC BASED ON a VIEW needs no such columns (converting that VIEW gives them, named like the SLD's "
+        "PropertyNames); when its rules use several Priority values it becomes a view of that VIEW's rows ordered "
+        "by Priority (lowest first), for a map server that draws features in data order, like MapServer.",
     )
     convert_sql_parser.add_argument(
         "--feature-views",
@@ -1286,9 +1291,7 @@ def main(argv: list[str] | None = None) -> int:
         "column is replaced by the referenced object's key (its UNIQUE attributes, else its transferred TID and "
         "plain attributes) "
         "and multilingual names, and the table's own multilingual texts (LocalisationCH) become plain columns - "
-        "texts in LANG (e.g. de), else in another language the value carries. A VIEW attribute naming a "
-        "multilingual text (e.g. name := M -> Name) also becomes its text in LANG; without this option such a VIEW "
-        "is left out with a note.",
+        "texts in LANG (e.g. de), else in another language the value carries.",
     )
     convert_sql_parser.add_argument(
         "--lang",
