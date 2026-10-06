@@ -1273,7 +1273,9 @@ def main(argv: list[str] | None = None) -> int:
         help="A model declaring GRAPHICs (repeatable): each GRAPHIC BASED ON a class of this conversion becomes "
         "a CREATE VIEW named after it, with t_id, the drawing rules' geometry column and one column per "
         "attribute path their WHERE clauses test, named like the SLD PropertyName `interlis convert-sld` "
-        'writes (e.g. "MeasureType.Reference.TypeID") - a map server can apply that SLD to the view as is.',
+        'writes (e.g. "MeasureType.Reference.TypeID") - a map server can apply that SLD to the view as is. '
+        "Not needed for a GRAPHIC BASED ON a VIEW: converting that VIEW already gives the map server its table, "
+        "with the SLD's PropertyNames as columns (such a GRAPHIC only gets a note).",
     )
     convert_sql_parser.add_argument(
         "--feature-views",

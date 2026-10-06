@@ -32,6 +32,10 @@ REGISTRY: dict[str, tuple[str, str]] = {
         "A",
         "a GRAPHIC's drawing-rule paths or geometry could not all be mapped to columns - no map view for it",
     ),
+    "SQL-VIEW-GRAPHIC-ON-VIEW": (
+        "B",
+        "a GRAPHIC BASED ON a VIEW gets no map view: that VIEW's own CREATE VIEW is the table its SLD filters run on",
+    ),
     "SQL-VIEW-JOIN-ASSOCIATION": (
         "B",
         "JOIN OF without WHERE (a cross product in INTERLIS) joined along the association linking its bases",

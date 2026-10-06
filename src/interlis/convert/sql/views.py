@@ -1134,7 +1134,8 @@ def build_graphic_views(
     name (`graphic_symbol_tables`, `class_by_name`).
 
     A `GRAPHIC` based on a class of another conversion is skipped; one whose paths can't all be resolved becomes a
-    note, never a view missing a filtered column.
+    note, never a view missing a filtered column. One based on a VIEW becomes a note too: the VIEW's own
+    `CREATE VIEW` already holds what its SLD filters test, by attribute name.
     """
     tables_by_name = {t.name: t for t in tables}
     names = class_table_names or {}
@@ -1149,6 +1150,16 @@ def build_graphic_views(
         if isinstance(base, MetaInstance):
             qualified = next((q for t in graphic_symbol_tables or [] if (q := t.qualified_name_of(base))), None)
             base = (class_by_name or {}).get(qualified or "", base)
+            if base._qualified_class.rsplit(".", 1)[-1] == "View":
+                vname = _dedup_name(
+                    _truncate_identifier(_sql_identifier(getattr(graphic, "Name", None) or "graphic")), used_names
+                )
+                message = (
+                    f"GRAPHIC {graphic.Name!r} is BASED ON VIEW {getattr(base, 'Name', None)!r}: no map view - "
+                    "the CREATE VIEW converting that VIEW already exposes the attributes its SLD filters test"
+                )
+                result.append(SqlView(vname, None, [_diag("SQL-VIEW-GRAPHIC-ON-VIEW", message)]))
+                continue
         table = names.get(id(base)) if isinstance(base, MetaInstance) else None
         if table is None or table not in tables_by_name:
             continue

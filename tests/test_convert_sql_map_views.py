@@ -93,3 +93,63 @@ def test_graphic_view_answers_the_sld_filter(tmp_path: Path):
     con.execute("INSERT INTO site (t_id, t_basket, pos, kind_reference, level) VALUES (10, 1, x'00', 1, 3)")
     rows = con.execute('SELECT t_id FROM site_graphics WHERE "Kind.Reference.Code" = \'a\' AND "Level" = 3').fetchall()
     assert rows == [(10,)]
+
+
+_VIEWS = """INTERLIS 2.4;
+MODEL V AT "http://x" VERSION "1" =
+  IMPORTS D;
+  VIEW TOPIC VT EXTENDS D.T =
+    VIEW site_map
+      PROJECTION OF S ~ D.T.Site;
+      =
+      ATTRIBUTE
+        code := S -> Kind -> Reference -> Code;
+        pos := S -> Pos;
+    END site_map;
+  END VT;
+END V.
+"""
+
+_VIEW_SYMBOLOGY = """INTERLIS 2.4;
+MODEL W AT "http://x" VERSION "1" =
+  IMPORTS V, StandardSymbology;
+  SIGN BASKET Signs ~ StandardSymbology.StandardSigns
+    OBJECTS OF SymbolSign: Dot;
+  TOPIC G =
+    DEPENDS ON V.VT;
+    GRAPHIC Site_Graphics BASED ON V.VT.site_map =
+      big OF StandardSymbology.StandardSigns.SymbolSign:
+        WHERE code == "a" (
+          Sign := {Dot};
+          Geometry := pos;
+          Priority := 1);
+    END Site_Graphics;
+  END G;
+END W.
+"""
+
+
+def test_graphic_based_on_a_view_gets_a_note_not_a_view(tmp_path: Path, capsys):
+    """The VIEW's own CREATE VIEW already has the columns the SLD filters test, by attribute name."""
+    _sql(tmp_path)  # writes D.ili and the symbology models into tmp_path
+    (tmp_path / "V.ili").write_text(_VIEWS, encoding="utf-8")
+    (tmp_path / "W.ili").write_text(_VIEW_SYMBOLOGY, encoding="utf-8")
+    out = tmp_path / "views.sql"
+    capsys.readouterr()
+    main(
+        [
+            "convert-sql",
+            str(tmp_path / "V.ili"),
+            "--repo",
+            str(tmp_path),
+            "--map-views",
+            str(tmp_path / "W.ili"),
+            "-o",
+            str(out),
+        ]
+    )
+    ddl = out.read_text(encoding="utf-8")
+    assert 'CREATE VIEW "site_map"' in ddl
+    assert '"code"' in ddl.split('CREATE VIEW "site_map"', 1)[1].split(";", 1)[0]
+    assert 'CREATE VIEW "site_graphics"' not in ddl
+    assert "SQL-VIEW-GRAPHIC-ON-VIEW" in capsys.readouterr().err
