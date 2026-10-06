@@ -19,17 +19,21 @@ so no grammar build step is needed.
 ## Usage
 
 ```sh
+interlis fetch-models model.ili transfer.xtf -o models/                 # download the models they import
 interlis build model.ili --repo models/                                 # parse + print the built model
 interlis validate transfer.xtf --repo models/                           # check .xtf against its .ili schema
 interlis convert model.ili -o model.schema.json                         # .ili -> JSON Schema
 interlis convert-sql model.ili --dialect postgresql -o model.sql        # .ili -> SQL DDL
+interlis import transfer.xtf --model model.ili --repo models/ -o data.sql # .xtf -> INSERTs into that schema
 interlis convert-jsonfg transfer.xtf --repo models/ -o out.jsonfg.json   # .xtf -> OGC JSON-FG
 interlis convert-cql2 model.ili -o model.cql2.json                      # CONSTRAINT -> CQL2-JSON filters
+interlis convert-sld symbology.ili --sign-xtf signs.xtf -o styles/      # GRAPHIC -> OGC SLD/SE
 interlis write-xtf view-model.ili source.xtf -o view.xtf                # VIEW TOPIC data -> .xtf
 ```
 
 `--repo DIR` (repeatable) resolves `IMPORTS`/schema references against a
-directory of `.ili` files. Run `interlis <command> --help` for every option.
+directory of `.ili` files; `fetch-models` is the only command that goes
+online, to fill such a directory. Run `interlis <command> --help` for every option.
 
 ## Python API
 

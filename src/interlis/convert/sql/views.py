@@ -27,9 +27,9 @@ from interlis.xtf.schema import (
 )
 
 from .expressions import _SQL_RELATIONAL_OPERATORS, _numeric_sql_literal, _text_sql_literal
-from .feature_views import _localised_texts, _text_of
 from .identifiers import OID_COLUMN, TID_COLUMN, _dedup_name, _quote, _sql_identifier, _truncate_identifier
 from .model import SqlView, Table, UniqueViewTrigger
+from .multilingual import _localised_texts, _text_of
 from .tables import _columns_for_class, _inherited_constraints
 
 

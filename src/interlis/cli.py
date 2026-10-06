@@ -15,6 +15,7 @@ import sys
 import warnings
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from interlis.builder.forward_refs import SymbolTable
@@ -32,7 +33,6 @@ from interlis.convert import xtf_writer as _xtf_writer_mod
 from interlis.convert.jsonfg import transfer_to_feature_collection
 from interlis.convert.jsonschema import model_to_json_schema
 from interlis.convert.sql import build_tables, build_views, render_gpkg, render_postgresql
-from interlis.convert.sql.feature_views import build_feature_views
 from interlis.convert.sql.ili2db import Ili2dbMeta, model_file
 from interlis.convert.sql.views import build_graphic_views
 from interlis.convert.translation import (
@@ -458,49 +458,10 @@ def _ili2db_meta(path: Path, repository, classes, symbol_table, class_symbol_tab
     )
 
 
-def cmd_convert_sql(args: argparse.Namespace) -> int:
-    """Convert an .ili model to SQL DDL, PostgreSQL or GeoPackage/SQLite.
+def _sql_schema(args: argparse.Namespace, bag: DiagnosticBag) -> SimpleNamespace | int:
+    """Build `args.file` (and its `--catalog`/`--repo` models) into SQL tables, as `convert-sql` and `import` share.
 
-    This project generates the full schema (`CREATE TABLE` + `UNIQUE` +
-    `FOREIGN KEY` + `CHECK`, the latter from a row-local `MANDATORY
-    CONSTRAINT`); GDAL (`ogr2ogr -append`) is expected to load the actual
-    .xtf-derived data into the tables this command creates, never the
-    other way around. `--dialect gpkg` assumes the target `.gpkg` file
-    already has the standard GeoPackage system tables (created by GDAL
-    beforehand) and declares every constraint INLINE, at `CREATE TABLE`
-    time (SQLite cannot add one to an existing table at all, unlike
-    `--dialect postgresql`'s default, which uses a separate `ALTER TABLE
-    ... ADD CONSTRAINT` pass for `FOREIGN KEY` only - `UNIQUE`/`CHECK` are
-    inline in both dialects). `Kind=Class` roots become a `CREATE TABLE`;
-    every `View` becomes a `CREATE VIEW` - Projection/Join as
-    `SELECT ... FROM <bases> WHERE`, Union as `SELECT ... UNION ALL ...`,
-    Inspection as a `SELECT` over the child table `build_tables` already
-    emits for the inspected `BAG`/`LIST OF` attribute, Aggregation as
-    `SELECT ... GROUP BY <key>`. A branch that can't be translated
-    faithfully (an AGGREGATION column that is a user-FUNCTION call over the
-    implicit `AGGREGATES` bag, a geometry INSPECTION) demotes that whole
-    View to a `-- NOTE`. A View's
-    base classes live in an IMPORTED model, so pass that model via
-    `--catalog` too - a View whose base table isn't in this conversion, or
-    whose `Where`/`ATTRIBUTE` expressions fall outside the translatable
-    subset, is emitted as a `-- NOTE` rather than a half-built `CREATE
-    VIEW`. An attribute/constraint outside this module's mapped set never
-    disappears silently - it becomes a `-- NOTE` SQL comment instead
-    (RULE #5).
-
-    `--catalog FILE.ili` (repeatable): each is built with its OWN
-    `InterlisModelBuilder` (sharing `repository` so cross-references
-    between `file` and a catalogue, or between two catalogues, still
-    resolve) and its classes are appended to the SAME `classes` list
-    `build_tables` receives - closes `build_tables`'s own documented
-    cross-model FK-drop (see its "3rd real bug" comment): a `REFERENCE TO`
-    a class NOT among `classes` gets its `FOREIGN KEY` constraint dropped,
-    column kept, because that target table doesn't exist in THIS
-    conversion's output. A catalogue model (e.g. a value-list Class
-    hierarchy extending `CatalogueObjects_V1.Catalogues.Item`) is the
-    single most common real case - but
-    this flag is generic, not catalogue-specific: any additional model
-    works the same way.
+    Returns the pieces both need, or an exit code when an input can't be read.
     """
     path = Path(args.file)
     if not path.exists():
@@ -515,7 +476,6 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
         return ExitCode.INVALID
 
     repository = ModelRepository([Path(d) for d in args.repo]) if args.repo else None
-    bag = DiagnosticBag()
     builder = _open_builder(repository)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -608,6 +568,69 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
         class_table_names=class_table_names,
         name_tables=tuple({id(t): t for t in (repository.loaded_models() if repository else {}).values()}.values()),
     )
+    return SimpleNamespace(
+        path=path,
+        repository=repository,
+        builder=builder,
+        classes=classes,
+        views=views,
+        class_symbol_tables=class_symbol_tables,
+        class_table_names=class_table_names,
+        tables=tables,
+    )
+
+
+def cmd_convert_sql(args: argparse.Namespace) -> int:
+    """Convert an .ili model to SQL DDL, PostgreSQL or GeoPackage/SQLite.
+
+    This project generates the full schema (`CREATE TABLE` + `UNIQUE` +
+    `FOREIGN KEY` + `CHECK`, the latter from a row-local `MANDATORY
+    CONSTRAINT`); GDAL (`ogr2ogr -append`) is expected to load the actual
+    .xtf-derived data into the tables this command creates, never the
+    other way around. `--dialect gpkg` assumes the target `.gpkg` file
+    already has the standard GeoPackage system tables (created by GDAL
+    beforehand) and declares every constraint INLINE, at `CREATE TABLE`
+    time (SQLite cannot add one to an existing table at all, unlike
+    `--dialect postgresql`'s default, which uses a separate `ALTER TABLE
+    ... ADD CONSTRAINT` pass for `FOREIGN KEY` only - `UNIQUE`/`CHECK` are
+    inline in both dialects). `Kind=Class` roots become a `CREATE TABLE`;
+    every `View` becomes a `CREATE VIEW` - Projection/Join as
+    `SELECT ... FROM <bases> WHERE`, Union as `SELECT ... UNION ALL ...`,
+    Inspection as a `SELECT` over the child table `build_tables` already
+    emits for the inspected `BAG`/`LIST OF` attribute, Aggregation as
+    `SELECT ... GROUP BY <key>`. A branch that can't be translated
+    faithfully (an AGGREGATION column that is a user-FUNCTION call over the
+    implicit `AGGREGATES` bag, a geometry INSPECTION) demotes that whole
+    View to a `-- NOTE`. A View's
+    base classes live in an IMPORTED model, so pass that model via
+    `--catalog` too - a View whose base table isn't in this conversion, or
+    whose `Where`/`ATTRIBUTE` expressions fall outside the translatable
+    subset, is emitted as a `-- NOTE` rather than a half-built `CREATE
+    VIEW`. An attribute/constraint outside this module's mapped set never
+    disappears silently - it becomes a `-- NOTE` SQL comment instead
+    (RULE #5).
+
+    `--catalog FILE.ili` (repeatable): each is built with its OWN
+    `InterlisModelBuilder` (sharing `repository` so cross-references
+    between `file` and a catalogue, or between two catalogues, still
+    resolve) and its classes are appended to the SAME `classes` list
+    `build_tables` receives - closes `build_tables`'s own documented
+    cross-model FK-drop (see its "3rd real bug" comment): a `REFERENCE TO`
+    a class NOT among `classes` gets its `FOREIGN KEY` constraint dropped,
+    column kept, because that target table doesn't exist in THIS
+    conversion's output. A catalogue model (e.g. a value-list Class
+    hierarchy extending `CatalogueObjects_V1.Catalogues.Item`) is the
+    single most common real case - but
+    this flag is generic, not catalogue-specific: any additional model
+    works the same way.
+    """
+    bag = DiagnosticBag()
+    schema = _sql_schema(args, bag)
+    if isinstance(schema, int):
+        return schema
+    path, repository, builder = schema.path, schema.repository, schema.builder
+    classes, views, class_symbol_tables = schema.classes, schema.views, schema.class_symbol_tables
+    class_table_names, tables = schema.class_table_names, schema.tables
     view_names: dict[int, str] = {}
     sql_views = tuple(
         build_views(
@@ -625,13 +648,13 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
         if (name := class_symbol_tables.get(id(cls), builder.symbol_table).qualified_name_of(cls))
     }
     view_by_name = {name: view for view in views if (name := builder.symbol_table.qualified_name_of(view))}
-    for symbology_arg in args.map_views:
+    for symbology_arg in args.symbology:
         symbology_path = Path(symbology_arg)
         symbology_tree, symbology_errors = (
             parse_file(symbology_path) if symbology_path.exists() else (None, ["missing"])
         )
         if symbology_errors:
-            _error(f"--map-views: cannot read {symbology_path}")
+            _error(f"--symbology: cannot read {symbology_path}")
             return ExitCode.INVALID
         symbology_builder = _open_builder(repository)
         with warnings.catch_warnings():
@@ -655,9 +678,6 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
                 view_names=view_names,
             )
         )
-    if args.feature_views:
-        used_names = {t.name for t in tables} | {v.name for v in sql_views}
-        sql_views += tuple(build_feature_views(tables, args.feature_views, used_names))
     bag.extend(_sql_mod.collect_diagnostics(tables, sql_views, file=str(path)))
     meta = _ili2db_meta(path, repository, classes, builder.symbol_table, class_symbol_tables)
     ddl = render_gpkg(tables, sql_views, meta) if args.dialect == "gpkg" else render_postgresql(tables, sql_views, meta)
@@ -823,6 +843,74 @@ def cmd_validate(args: argparse.Namespace) -> int:
         return ExitCode.ERROR
     if getattr(args, "strict", False) and len(issues):
         return ExitCode.ERROR
+    return ExitCode.OK
+
+
+def cmd_fetch_models(args: argparse.Namespace) -> int:
+    """Download the models FILEs need, transitively, into a directory to pass as `--repo` afterwards."""
+    from interlis.builder.fetch import fetch_models
+
+    paths = [Path(f) for f in args.files]
+    for path in paths:
+        if not path.exists():
+            _error(f"file not found: {path}")
+            return ExitCode.NOT_FOUND
+    downloaded, missing = fetch_models(paths, Path(args.output), repo_dirs=[Path(d) for d in args.repo])
+    for line in downloaded:
+        print(f"fetched {line}", file=sys.stderr)
+    for line in missing:
+        print(f"missing {line}", file=sys.stderr)
+    return ExitCode.NOT_FOUND if missing else ExitCode.OK
+
+
+def cmd_import(args: argparse.Namespace) -> int:
+    """Write the objects of XTF transfers as PostgreSQL INSERTs into the schema `convert-sql MODEL` creates."""
+    from interlis.convert.sql.data import transfer_inserts
+    from interlis.xtf.parse import parse_xtf
+    from interlis.xtf.schema import home_symbol_table, resolve_class
+
+    bag = DiagnosticBag()
+    args.file, args.catalog = args.model, []
+    schema = _sql_schema(args, bag)
+    if isinstance(schema, int):
+        return schema
+    transfers = []
+    for xtf in args.xtf:
+        if not Path(xtf).exists():
+            _error(f"file not found: {xtf}")
+            return ExitCode.NOT_FOUND
+        transfers.append(parse_xtf(Path(xtf)))
+    names = schema.class_table_names
+    by_qualified = {
+        name: names[id(cls)]
+        for cls in schema.classes
+        if id(cls) in names
+        and (name := schema.class_symbol_tables.get(id(cls), schema.builder.symbol_table).qualified_name_of(cls))
+    }
+
+    def table_of(qualified_class: str):
+        root = schema.builder.symbol_table
+        cls = resolve_class(qualified_class, symbol_table=root, repository=schema.repository)
+        if cls is None:
+            return None
+        home = home_symbol_table(qualified_class, symbol_table=root, repository=schema.repository)
+        table = names.get(id(cls)) or by_qualified.get(home.qualified_name_of(cls) or "")
+        return (cls, table, home) if table else None
+
+    sql, counts, notes = transfer_inserts(
+        transfers,
+        schema.tables,
+        table_of,
+        dataset=args.dataset or Path(args.xtf[0]).stem,
+        attachment=", ".join(Path(x).name for x in args.xtf),
+    )
+    if args.output:
+        Path(args.output).write_text(sql, encoding="utf-8")
+    else:
+        sys.stdout.write(sql)
+    for note in notes:
+        print(f"note {note}", file=sys.stderr)
+    print(", ".join(f"{n} {t}" for t, n in counts.items()), file=sys.stderr)
     return ExitCode.OK
 
 
@@ -1271,27 +1359,16 @@ def main(argv: list[str] | None = None) -> int:
         "'-- NOTE' comment instead.",
     )
     convert_sql_parser.add_argument(
-        "--map-views",
+        "--symbology",
         action="append",
         default=[],
         metavar="SYMBOLOGY.ili",
-        help="A model declaring GRAPHICs (repeatable): each GRAPHIC BASED ON a class of this conversion becomes "
-        "a CREATE VIEW named after it, with t_id, the drawing rules' geometry column and one column per "
-        "attribute path their WHERE clauses test, named like the SLD PropertyName `interlis convert-sld` "
-        'writes (e.g. "MeasureType.Reference.TypeID") - a map server can apply that SLD to the view as is. '
-        "A GRAPHIC BASED ON a VIEW needs no such columns (converting that VIEW gives them, named like the SLD's "
-        "PropertyNames); when its rules use several Priority values it becomes a view of that VIEW's rows ordered "
-        "by Priority (lowest first), for a map server that draws features in data order, like MapServer.",
-    )
-    convert_sql_parser.add_argument(
-        "--feature-views",
-        default=None,
-        metavar="LANG",
-        help="Also emit a readable <table>_features view per class table, for feature services: each reference "
-        "column is replaced by the referenced object's key (its UNIQUE attributes, else its transferred TID and "
-        "plain attributes) "
-        "and multilingual names, and the table's own multilingual texts (LocalisationCH) become plain columns - "
-        "texts in LANG (e.g. de), else in another language the value carries.",
+        help="A model declaring GRAPHICs (repeatable): also emit the tables a map server draws them from. A "
+        "GRAPHIC BASED ON a VIEW is drawn from that VIEW's own view, whose columns are named like the SLD "
+        "PropertyNames `interlis convert-sld` writes; when its rules use several Priority values it gets a view "
+        "of those rows ordered by Priority (lowest first), for a map server that draws in data order "
+        "(MapServer). A GRAPHIC BASED ON a class gets a view with the drawing rules' geometry and one column per "
+        'attribute path their WHERE clauses test (e.g. "MeasureType.Reference.TypeID").',
     )
     convert_sql_parser.add_argument(
         "--lang",
@@ -1306,6 +1383,39 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_diagnostic_args(convert_sql_parser)
     convert_sql_parser.set_defaults(func=cmd_convert_sql)
+
+    fetch_models_parser = subparsers.add_parser(
+        "fetch-models",
+        help="Download the models .ili files or .xtf transfers need (their IMPORTS, or the models their header "
+        "names, transitively) from models.interlis.ch, models.geo.admin.ch and models.kgk-cgc.ch, into a "
+        "directory to pass as --repo afterwards. The only command that goes online.",
+    )
+    fetch_models_parser.add_argument("files", nargs="+", metavar="FILE", help=".ili model or .xtf transfer.")
+    fetch_models_parser.add_argument(
+        "-o", "--output", required=True, metavar="DIR", help="Where the models go; one already there is kept."
+    )
+    fetch_models_parser.add_argument(
+        "--repo", action="append", default=[], metavar="DIR", help="Local models not to download (repeatable)."
+    )
+    fetch_models_parser.set_defaults(func=cmd_fetch_models)
+
+    import_parser = subparsers.add_parser(
+        "import",
+        help="Write the objects of XTF transfers as PostgreSQL INSERTs into the schema `convert-sql MODEL` "
+        "creates (ili2db layout: dataset, baskets, TIDs, references by t_id), as one dataset.",
+    )
+    import_parser.add_argument(
+        "xtf", nargs="+", help="Transfer(s), e.g. data and its catalogues: references across them resolve."
+    )
+    import_parser.add_argument(
+        "--model", required=True, metavar="FILE.ili", help="The model given to convert-sql for this schema."
+    )
+    import_parser.add_argument(
+        "--repo", action="append", default=[], metavar="DIR", help="Directory of .ili models (repeatable)."
+    )
+    import_parser.add_argument("--dataset", default=None, help="Dataset name (default: the first transfer's name).")
+    import_parser.add_argument("-o", "--output", default=None, metavar="FILE", help="Write to FILE instead of stdout.")
+    import_parser.set_defaults(func=cmd_import)
 
     validate_parser = subparsers.add_parser(
         "validate",

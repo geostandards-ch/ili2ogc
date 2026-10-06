@@ -66,6 +66,8 @@ def _columns_for_class(
     presence_checks: list[tuple[str, list[str], list[str]]] | None = None,
     child_ili_names: dict[str, str] | None = None,
     name_tables: tuple[SymbolTable, ...] = (),
+    path: tuple[str, ...] = (),
+    child_paths: dict[str, tuple[str, ...]] | None = None,
 ) -> tuple[
     list[Column],
     list[ForeignKey],
@@ -109,6 +111,7 @@ def _columns_for_class(
     for name, attr in members.items():
         resolved = resolve_attribute(attr)
         label = f"{prefix}{name}"
+        here = (*path, name)
         col_name = _sql_identifier(label)
 
         if resolved.type_kind == "MultiValue":
@@ -134,6 +137,8 @@ def _columns_for_class(
                 abstract_specs.append((label, element, bool(getattr(multi_value, "Ordered", False)), True))
                 continue
             child_specs.append((label, multi_value))
+            if child_paths is not None:
+                child_paths[label] = here
             continue
 
         if resolved.type_kind == "Class" and _is_structure(resolved.type_instance):
@@ -159,6 +164,7 @@ def _columns_for_class(
                         geometry_type=sfa_type,
                         srid=srid,
                         ili_name=ili_name(attr),
+                        source=here,
                     )
                 )
                 continue
@@ -181,6 +187,8 @@ def _columns_for_class(
                 presence_checks=presence_checks,
                 child_ili_names=child_ili_names,
                 name_tables=name_tables,
+                path=here,
+                child_paths=child_paths,
             )
             if not resolved.mandatory:
                 required = [c.name for c in sub_columns if not c.nullable]
@@ -217,7 +225,13 @@ def _columns_for_class(
             # A link-table row always carries both ends, whatever the role's cardinality.
             link_role = getattr(cls, "Kind", None) == "Association"
             columns.append(
-                Column(col_name, "bigint", nullable=not (resolved.mandatory or link_role), ili_name=ili_name(attr))
+                Column(
+                    col_name,
+                    "bigint",
+                    nullable=not (resolved.mandatory or link_role),
+                    ili_name=ili_name(attr),
+                    source=here,
+                )
             )
             fk_name = _truncate_identifier(_sql_identifier(f"fk_{getattr(cls, 'Name', '')}_{label}"))
             # A composition role (`-<#>`) names the whole: deleting it deletes its parts.
@@ -250,6 +264,7 @@ def _columns_for_class(
                     sql_type="",
                     nullable=not resolved.mandatory,
                     ili_name=ili_name(attr),
+                    source=here,
                     geometry_type=sfa_type,
                     srid=srid,
                 )
@@ -265,6 +280,7 @@ def _columns_for_class(
                     nullable=not resolved.mandatory,
                     check=_domain_check(resolved),
                     ili_name=ili_name(attr),
+                    source=here,
                 )
             )
             continue
@@ -775,7 +791,7 @@ def _split_polymorphic_fk(
         else:
             name = _dedup_name(_truncate_identifier(_sql_identifier(f"{column.name}_{ref_table}")), used)
             fk_name = _truncate_identifier(_sql_identifier(f"{fk.name}_{ref_table}"))
-        new_columns.append(Column(name, column.sql_type, nullable=True))
+        new_columns.append(Column(name, column.sql_type, nullable=True, source=column.source))
         new_fks.append(
             ForeignKey(fk_name, [name], ref_table, fk.ref_columns, ref_class_id=id(target), on_delete=fk.on_delete)
         )
@@ -846,6 +862,7 @@ def build_tables(
         home_table = (class_symbol_tables or {}).get(id(cls), symbol_table)
         presence_checks: list[tuple[str, list[str], list[str]]] = []
         child_ili_names: dict[str, str] = {}
+        child_paths: dict[str, tuple[str, ...]] = {}
         columns, foreign_keys, notes, child_specs, nested_local_unique, abstract_specs = _columns_for_class(
             cls,
             home_table,
@@ -853,6 +870,7 @@ def build_tables(
             presence_checks=presence_checks,
             child_ili_names=child_ili_names,
             name_tables=name_tables,
+            child_paths=child_paths,
         )
         if getattr(cls, "Kind", None) == "Association" and not foreign_keys:
             notes.append(
@@ -921,6 +939,7 @@ def build_tables(
                 suffix += 1
             used_table_names.add(child_name)
             child_table.name = child_name
+            child_table.parent, child_table.source = table_name, child_paths.get(attr_name, (attr_name,))
             # Its link back to the parent stands for the multi-valued attribute itself.
             child_table.columns[0].ili_name = child_ili_names.get(attr_name)
 

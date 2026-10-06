@@ -147,8 +147,8 @@ concepts:
       View to a `-- NOTE` rather than a half-built statement (RULE #5); a
       VIEW-level `UNIQUE`/`SET`/`EXISTENCE` constraint is likewise a
       `-- NOTE` alongside the view (a `CREATE VIEW` cannot carry it).
-      An attribute naming a multilingual text resolves to its text in the
-      `--feature-views` language (as the `_features` views do); a
+      An attribute naming a multilingual text becomes one column per
+      language (`<attr>`, `<attr>_de`...), ili2db's `--expandMultilingual`; a
       single-base View also carries its base's `t_ili_tid`. Reference hops
       are LEFT JOINs, following a reference into its subclass tables.
       Verified end-to-end (a real `CREATE VIEW` executing and returning
@@ -161,7 +161,7 @@ concepts:
     qualified_name: IlisMeta16.ModelData.Graphic
     status: mapped
     note: >
-      Only with `--map-views SYMBOLOGY.ili`: a GRAPHIC whose `BASED ON`
+      Only with `--symbology SYMBOLOGY.ili`: a GRAPHIC whose `BASED ON`
       class is converted becomes a `CREATE VIEW <graphic>` exposing `t_id`,
       the drawing rules' geometry column and one column per attribute path
       their `WHERE`s test, named like the SLD `PropertyName` (`Kind.Reference.Code`),
@@ -170,7 +170,9 @@ concepts:
       without any hand-written view. The symbology model is built
       separately, so the base class is matched by qualified name. A path
       that can't be resolved makes the whole GRAPHIC a `SQL-VIEW-GRAPHIC`
-      note, never a view missing a filtered column.
+      note, never a view missing a filtered column. A GRAPHIC `BASED ON` a
+      VIEW whose rules use several `Priority` values gets that VIEW's rows
+      ordered by Priority (for map servers drawing in data order).
 
   ObjectOID:
     qualified_name: IlisMeta16.ModelData.ObjectOID
@@ -228,11 +230,6 @@ concepts:
       `<column>_<table>`) plus a CHECK that at most one - exactly one when
       MANDATORY - is set. An ABSTRACT target with a single concrete subclass
       just retargets the plain FK to it.
-      With `--feature-views LANG`, a `<table>_features` view shows each
-      reference as the target's UNIQUE key (else its TID and plain
-      attributes) and multilingual
-      names, LEFT JOINed, for feature services that would otherwise expose
-      raw `t_id`s.
 
   Role:
     qualified_name: IlisMeta16.ModelData.Role

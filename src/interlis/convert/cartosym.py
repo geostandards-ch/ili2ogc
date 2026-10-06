@@ -21,6 +21,7 @@ from typing import Any
 
 from lxml import etree
 from pycartosym import get_codec
+from pycartosym.codecs.sld import WELL_KNOWN_SHAPES
 from pycartosym.models.styles import Metadata, Style, StylingRule, Symbolizer
 from pycartosym.models.symbolizers import (
     CircleGraphic,
@@ -366,38 +367,51 @@ def _square_from_ring(ring: list[tuple[float, float]] | None) -> tuple[float, fl
     return sides[0], math.degrees(math.atan2(edges[0][1], edges[0][0])) % 90.0
 
 
-# pycartosym's own canonical `triangle` (apex up, base as wide as the
-# height, in the unit box `se:Size` scales) - the only vertex order its
-# SLD writer maps back to `se:WellKnownName` triangle.
-_UNIT_TRIANGLE = [(0.0, 0.5), (-0.5, -0.5), (0.5, -0.5)]
+def _well_known_from_ring(ring: list[tuple[float, float]] | None) -> tuple[tuple, float, float] | None:
+    """Read a symbol ring as one of pycartosym's well-known shapes (`triangle`, `star`, `cross`, `x`):
+    `(its canonical nodes, size, clockwise orientation in degrees)`, or `None`.
 
-
-def _triangle_from_ring(ring: list[tuple[float, float]] | None) -> float | None:
-    """Read a symbol ring as the size of an SE `triangle` mark, or `None` for any other triangle.
-
-    Matched as a vertex set around the bounding-box centre, so neither
-    the ring's start vertex, its winding nor its offset matters.
+    Matched whatever the ring's offset, start vertex, winding and rotation; the canonical nodes, scaled by `size`,
+    are what pycartosym's SLD writer turns back into the `se:WellKnownName`. The orientation is clockwise, as
+    `se:Rotation` is, the INTERLIS symbol space being y-up; the smallest one that matches is kept.
     """
-    if ring is None or len(ring) != 3:
+    if ring is None or len(ring) < 3:
         return None
-    xs, ys = [p[0] for p in ring], [p[1] for p in ring]
-    size = max(ys) - min(ys)
-    if size < _SHAPE_TOLERANCE:
-        return None
-    cx, cy = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2
-    remaining = [((x - cx) / size, (y - cy) / size) for x, y in ring]
-    for expected in _UNIT_TRIANGLE:
-        match = next((p for p in remaining if math.dist(p, expected) < _SHAPE_TOLERANCE), None)
-        if match is None:
-            return None
-        remaining.remove(match)
-    return size
+    best: tuple[tuple, float, float] | None = None
+    for unit in WELL_KNOWN_SHAPES.values():
+        if len(unit) != len(ring):
+            continue
+        n = len(unit)
+        ux, uy = sum(p[0] for p in unit) / n, sum(p[1] for p in unit) / n
+        rx, ry = sum(p[0] for p in ring) / n, sum(p[1] for p in ring) / n
+        centred_unit = [(x - ux, y - uy) for x, y in unit]
+        centred_ring = [(x - rx, y - ry) for x, y in ring]
+        unit_radius = math.sqrt(sum(x * x + y * y for x, y in centred_unit) / n)
+        size = math.sqrt(sum(x * x + y * y for x, y in centred_ring) / n) / unit_radius
+        if size < _SHAPE_TOLERANCE:
+            continue
+        tolerance = 1e-3 * size
+        for sequence in (centred_ring, centred_ring[::-1]):
+            for start in range(n):
+                candidate = sequence[start:] + sequence[:start]
+                theta = math.atan2(candidate[0][1], candidate[0][0]) - math.atan2(
+                    centred_unit[0][1], centred_unit[0][0]
+                )
+                cos, sin = math.cos(theta), math.sin(theta)
+                if all(
+                    math.dist(((x * cos - y * sin) * size, (x * sin + y * cos) * size), point) < tolerance
+                    for (x, y), point in zip(centred_unit, candidate)
+                ):
+                    orientation = round(-math.degrees(theta), 2) % 360  # transfers round coordinates
+                    if best is None or min(orientation, 360 - orientation) < min(best[2], 360 - best[2]):
+                        best = (unit, float(f"{size:.5g}"), orientation)
+    return best
 
 
 def _polygon_mark_graphic(
     library: SignLibrary, structure_node: RawNode, scale: float
 ) -> RectangleGraphic | ClosedPathGraphic | None:
-    """A square or triangle mark: filled from a `FontSymbol_Surface`, outlined from a closed `FontSymbol_Polyline`."""
+    """A square or well-known mark: filled from a `FontSymbol_Surface`, outlined from a closed `FontSymbol_Polyline`."""
     geometry_node = next((c for c in structure_node.children if c.tag == "Geometry"), None)
     if geometry_node is None:
         return None
@@ -419,11 +433,13 @@ def _polygon_mark_graphic(
             transform=Transform2D(orientation=orientation) if orientation > _SHAPE_TOLERANCE else None,
             **paint,
         )
-    size = _triangle_from_ring(ring)
-    if size is not None:
+    shape = _well_known_from_ring(ring)
+    if shape is not None:
+        nodes, size, orientation = shape
         return ClosedPathGraphic(
             type="ClosedPath",
-            nodes=[UnitPoint(x=meters(x * size * scale), y=meters(y * size * scale)) for x, y in _UNIT_TRIANGLE],
+            nodes=[UnitPoint(x=meters(x * size * scale), y=meters(y * size * scale)) for x, y in nodes],
+            transform=Transform2D(orientation=orientation) if min(orientation, 360 - orientation) > 0 else None,
             **paint,
         )
     return None
@@ -809,6 +825,8 @@ def polyline_sign_object_to_stroke(library: SignLibrary, obj: XtfObject) -> Stro
     color, opacity = library.resolve_color(obj, "Color")
     width = join = cap = dashes = None
     style_obj = library.resolve_ref(obj, "Style")
+    if style_obj is not None and style_obj.qualified_class.endswith("LineStyle_Pattern"):
+        return _pattern_stroke(library, style_obj)
     if style_obj is not None:
         if color is None:
             color, opacity = library.resolve_color(style_obj, "Color")
@@ -821,6 +839,36 @@ def polyline_sign_object_to_stroke(library: SignLibrary, obj: XtfObject) -> Stro
         if style_obj.qualified_class.endswith("LineStyle_Dashed"):
             dashes = library.dash_pattern(style_obj)
     return polyline_sign_to_stroke(color=color, opacity=opacity, width=width, join=join, cap=cap, dash_pattern=dashes)
+
+
+def _pattern_stroke(library: SignLibrary, style_obj: XtfObject) -> Stroke:
+    """A `LineStyle_Pattern` as a `Stroke.pattern` repeated every `PLength` along the line (`se:GraphicStroke`).
+
+    Its first `Pattern_Symbol` gives the graphic (a native mark built from its `FontSymbol`, at `Scale`, filled with
+    `ColorRef`), `Dist` the initial gap; the gap between two graphics is `PLength` less the graphic's own size, SE
+    measuring it edge to edge. Further `Pattern_Symbol`s and `Offset` have no target in one `Stroke`.
+    """
+    occurrence = (style_obj.attributes.get("Symbols") or [None])[0]
+    symbol_node = occurrence.children[0] if occurrence is not None and occurrence.children else None
+    fields = {c.tag: c for c in symbol_node.children} if symbol_node is not None else {}
+    font_ref = fields.get("FontSymbRef")
+    tid = _extract_reference(font_ref) if font_ref is not None else None
+    font_symbol = library.by_tid.get(tid) if tid else None
+    if font_symbol is None:
+        return Stroke()
+    scale = float(fields["Scale"].text) if "Scale" in fields and fields["Scale"].text else 1.0
+    graphics = font_symbol_geometry_to_circle_graphics(
+        library, font_symbol, scale=scale
+    ) or font_symbol_geometry_to_polygon_graphics(library, font_symbol, scale=scale)
+    if not graphics:
+        return Stroke()
+    graphic = graphics[0]
+    if "ColorRef" in fields:
+        color, opacity = library._color_from_ref_node(fields["ColorRef"])
+        graphic.fill = Fill(color=color, opacity=opacity)
+    period = float(library.scalar(style_obj, "PLength") or 0)
+    dist = float(fields["Dist"].text) if "Dist" in fields and fields["Dist"].text else None
+    return Stroke(pattern=graphic, pattern_gap=max(period - scale, 0.0), pattern_initial_gap=dist)
 
 
 def _symbol_sign_kwargs(library: SignLibrary, obj: XtfObject) -> dict[str, Any]:

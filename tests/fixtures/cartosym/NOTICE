@@ -49,3 +49,11 @@ triangle and a flatter one) exercising
 vendored corpus `.xtf` carries a polygonal mark of a single shape; the
 marks themselves are real (Sachplan Asyl's published SLD uses a
 `diamond` and a `triangle` `se:Mark`).
+
+`pattern_x_symbols.xtf`: synthetic (not corpus-sourced) `SIGN BASKET`
+data - an X (pycartosym's canonical diagonal cross, started at another
+vertex), a triangle pointing right, and a `LineStyle_Pattern` repeating
+the X along a line, exercising the well-known shape matcher and
+`LineStyle_Pattern`. The marks themselves are real: Sachplan
+Übertragungsleitungen's published SLD repeats a WESP X along its lines
+and draws a right-pointing arrow on its points.

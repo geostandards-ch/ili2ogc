@@ -65,7 +65,7 @@ def test_scalar_and_mandatory_columns():
     owner = _resolved_class(builder, "Foo.T.Owner")
     tables = build_tables([owner])
     table = _table(tables, "owner")
-    assert table.columns == [Column("code", "varchar(20)", nullable=False)]
+    assert table.columns == [Column("code", "varchar(20)", nullable=False, source=("Code",))]
 
 
 def test_primary_key_and_unique_constraint():

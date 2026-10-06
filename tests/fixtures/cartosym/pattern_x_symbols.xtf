@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- Synthetic SIGN BASKET data: an X (diagonal cross, another start
+     vertex than pycartosym's canonical one), a triangle pointing right,
+     and a LineStyle_Pattern repeating the X along a line. See
+     tests/fixtures/cartosym/NOTICE. -->
+
+<ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS"
+  xmlns="http://www.interlis.ch/xtf/2.4/StandardSymbology">
+   <ili:headersection>
+      <ili:models>
+         <ili:model>StandardSymbology</ili:model>
+      </ili:models>
+      <ili:sender>ili2ogc test fixture</ili:sender>
+   </ili:headersection>
+   <ili:datasection>
+      <StandardSigns ili:bid="StandardSymbology.StandardSigns">
+         <Color ili:tid="1"><!-- #cc0000 -->
+            <Name>red</Name>
+            <L>42.5172</L>
+            <C>88.3896</C>
+            <H>40.0002</H>
+            <T>1.0</T>
+         </Color>
+         <Font ili:tid="10">
+            <Name>Marks</Name>
+            <Internal>true</Internal>
+            <Type>symbol</Type>
+         </Font>
+         <FontSymbol ili:tid="30">
+            <Name>X</Name>
+            <Font ili:ref="10"></Font>
+            <Geometry>
+               <FontSymbol_Surface>
+                  <FillColor ili:ref="1"></FillColor>
+                  <Geometry><SURFACE><BOUNDARY><POLYLINE>
+                     <COORD><C1>0.471405</C1><C2>-0.235702</C2></COORD>
+                     <COORD><C1>0.235702</C1><C2>-0.471405</C2></COORD>
+                     <COORD><C1>-0.000000</C1><C2>-0.235702</C2></COORD>
+                     <COORD><C1>-0.235702</C1><C2>-0.471405</C2></COORD>
+                     <COORD><C1>-0.471405</C1><C2>-0.235702</C2></COORD>
+                     <COORD><C1>-0.235702</C1><C2>0.000000</C2></COORD>
+                     <COORD><C1>-0.471405</C1><C2>0.235702</C2></COORD>
+                     <COORD><C1>-0.235702</C1><C2>0.471405</C2></COORD>
+                     <COORD><C1>0.000000</C1><C2>0.235702</C2></COORD>
+                     <COORD><C1>0.235702</C1><C2>0.471405</C2></COORD>
+                     <COORD><C1>0.471405</C1><C2>0.235702</C2></COORD>
+                     <COORD><C1>0.235702</C1><C2>-0.000000</C2></COORD>
+                     <COORD><C1>0.471405</C1><C2>-0.235702</C2></COORD>
+                  </POLYLINE></BOUNDARY></SURFACE></Geometry>
+               </FontSymbol_Surface>
+            </Geometry>
+         </FontSymbol>
+         <FontSymbol ili:tid="31">
+            <Name>TriangleRight</Name>
+            <Font ili:ref="10"></Font>
+            <Geometry>
+               <FontSymbol_Surface>
+                  <FillColor ili:ref="1"></FillColor>
+                  <Geometry><SURFACE><BOUNDARY><POLYLINE>
+                     <COORD><C1>0.500000</C1><C2>-0.000000</C2></COORD>
+                     <COORD><C1>-0.500000</C1><C2>0.500000</C2></COORD>
+                     <COORD><C1>-0.500000</C1><C2>-0.500000</C2></COORD>
+                     <COORD><C1>0.500000</C1><C2>-0.000000</C2></COORD>
+                  </POLYLINE></BOUNDARY></SURFACE></Geometry>
+               </FontSymbol_Surface>
+            </Geometry>
+         </FontSymbol>
+         <LineStyle_Pattern ili:tid="40">
+            <Name>Crosses</Name>
+            <PLength>43</PLength>
+            <Symbols>
+               <Pattern_Symbol>
+                  <FontSymbRef ili:ref="30"></FontSymbRef>
+                  <ColorRef ili:ref="1"></ColorRef>
+                  <Scale>18</Scale>
+                  <Dist>4</Dist>
+                  <Offset>0</Offset>
+               </Pattern_Symbol>
+            </Symbols>
+         </LineStyle_Pattern>
+         <PolylineSign ili:tid="50">
+            <ili:Name>CrossedLine</ili:Name>
+            <Style ili:ref="40">
+               <PolylineSignLineStyleAssoc>
+                  <Offset>0.0</Offset>
+               </PolylineSignLineStyleAssoc>
+            </Style>
+         </PolylineSign>
+      </StandardSigns>
+   </ili:datasection>
+</ili:transfer>

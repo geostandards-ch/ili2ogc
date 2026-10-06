@@ -29,6 +29,9 @@ class Column:
     check: str | None = None
     """A value-domain CHECK on this column alone, `{col}` standing for its quoted name (filled at render time, so a
     later rename still applies)."""
+    source: tuple[str, ...] = ()
+    """The attribute path this column holds, from its table's class (or BAG element): `("ModInfo", "ValidFrom")` for a
+    flattened STRUCTURE, empty for a technical column or a BAG element's own value - what `import` reads data from."""
 
 
 @dataclass
@@ -79,6 +82,9 @@ class Table:
     has_tid: bool = False
     """Whether rows carry a transferred TID (`t_ili_tid`): a class's objects do, structure elements and
     association links don't."""
+    parent: str | None = None
+    """For a BAG/LIST child table: its parent table, and `source` the attribute path to the BAG from there."""
+    source: tuple[str, ...] = ()
     union_of: list[str] = field(default_factory=list)
     """For an ABSTRACT class: the concrete subclass tables this is a polymorphic VIEW over (`UNION ALL` of
     `columns`), rendered as a VIEW, not a table."""

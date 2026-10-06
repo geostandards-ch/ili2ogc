@@ -1,4 +1,4 @@
-"""`convert-sql --map-views`: one view per GRAPHIC exposing its SLD filter paths as columns."""
+"""`convert-sql --symbology`: one view per GRAPHIC exposing its SLD filter paths as columns."""
 
 import sqlite3
 from pathlib import Path
@@ -66,7 +66,7 @@ def _sql(tmp_path: Path) -> str:
             str(tmp_path / "D.ili"),
             "--repo",
             str(tmp_path),
-            "--map-views",
+            "--symbology",
             str(tmp_path / "S.ili"),
             "--dialect",
             "gpkg",
@@ -142,7 +142,7 @@ def test_graphic_based_on_a_view_gets_a_note_not_a_view(tmp_path: Path, capsys):
             str(tmp_path / "V.ili"),
             "--repo",
             str(tmp_path),
-            "--map-views",
+            "--symbology",
             str(tmp_path / "W.ili"),
             "-o",
             str(out),
@@ -172,7 +172,7 @@ def test_graphic_based_on_a_view_with_several_priorities_orders_its_rows_by_prio
     (tmp_path / "W.ili").write_text(symbology, encoding="utf-8")
     out = tmp_path / "views.sql"
     main(
-        ["convert-sql", str(tmp_path / "V.ili"), "--repo", str(tmp_path), "--map-views", str(tmp_path / "W.ili")]
+        ["convert-sql", str(tmp_path / "V.ili"), "--repo", str(tmp_path), "--symbology", str(tmp_path / "W.ili")]
         + ["--dialect", "gpkg", "-o", str(out)]
     )
     con = sqlite3.connect(":memory:")

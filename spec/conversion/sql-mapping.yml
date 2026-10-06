@@ -114,9 +114,10 @@ View:
         dropped with a per-attribute note (it was not named), not a
         whole-View demotion.
         A last hop naming a LocalisationCH multilingual text (child table
-        <table>_<attr>_localisedtext) becomes a scalar subquery picking the
-        text in the --feature-views LANG, else another language present;
-        without LANG the View is a note. A reference hop is a LEFT JOIN (an
+        <table>_<attr>_localisedtext) becomes one column per language of its
+        Language enumeration (narrowed by its MANDATORY CONSTRAINT): <attr>
+        for the undefined language, <attr>_<lang> for each other, as ili2db's
+        --expandMultilingual. A reference hop is a LEFT JOIN (an
         unset reference leaves the attribute NULL instead of dropping the
         row), shared by every path through it; a hop over a reference split
         per target table (subclass tables) LEFT JOINs each and COALESCEs
@@ -195,8 +196,8 @@ Graphic:
   qualified_name: IlisMeta16.ModelData.Graphic
   sql:
     map_view:
-      rule: "convert-sql --map-views: CREATE VIEW <graphic> AS SELECT t_id, <geometry column>, <one column per WHERE path, AS its SLD PropertyName> FROM <BASED ON table> joined to the tables the paths reach"
-      note: "The DrawingRule conditions' Where expressions supply the paths. A path that can't be resolved makes the GRAPHIC a SQL-VIEW-GRAPHIC note."
+      rule: "convert-sql --symbology: a GRAPHIC BASED ON a class -> CREATE VIEW <graphic> AS SELECT t_id, <geometry column>, <one column per WHERE path, AS its SLD PropertyName> FROM <BASED ON table> joined to the tables the paths reach; BASED ON a VIEW with several Priority values -> CREATE VIEW <graphic> AS SELECT the VIEW's rows ORDER BY the Priority of the first rule each matches"
+      note: "The DrawingRule conditions' Where expressions supply the paths. A path that can't be resolved makes the GRAPHIC a SQL-VIEW-GRAPHIC note; a VIEW-based GRAPHIC with one Priority, a SQL-VIEW-GRAPHIC-ON-VIEW note."
 
 UniqueConstraint:
   qualified_name: IlisMeta16.ModelData.UniqueConstraint
