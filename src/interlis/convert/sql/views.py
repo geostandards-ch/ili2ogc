@@ -159,15 +159,7 @@ class _ViewResolver:
                 cls, prefix = resolved.type_instance, f"{prefix}{hop}_"
                 continue
             if is_last:
-                if col not in self._columns(table):
-                    text = self._localised_text(col, table, cur_alias)
-                    if text is not None:
-                        return text
-                    flattened = self._flattened_struct_column(resolved, col, table)
-                    if flattened is None:
-                        raise _UnsupportedView(f"{hop!r} has no mapped column on table {table!r}")
-                    col = flattened
-                return f'"{cur_alias}"."{col}"'
+                return self._final_column(resolved, hop, col, table, cur_alias)
             target = reference_target_class(resolved) if resolved.type_kind in ("Class", "ReferenceType") else None
             if target is None:
                 raise _UnsupportedView(f"cannot navigate through {hop!r} - not a resolvable reference/role")
@@ -177,18 +169,59 @@ class _ViewResolver:
                     f"join target table {target_table!r} not built - pass its model via --repo or --catalog",
                     "SQL-VIEW-BASE-MISSING",
                 )
-            if col not in self._columns(table):
+            targets = self._reference_columns(table, col)
+            if not targets:
                 raise _UnsupportedView(f"reference {hop!r} has no FK column on table {table!r}")
-            new_alias = self._joined.get((cur_alias, col))
-            if new_alias is None:  # paths sharing a reference hop share its join
-                self._counter += 1
-                new_alias = _truncate_identifier(f"j{self._counter}_{target_table}")
-                self._joined[(cur_alias, col)] = new_alias
-                self.extra_joins.append(
-                    (target_table, new_alias, f'"{cur_alias}"."{col}" = "{new_alias}"."{OID_COLUMN}"'),
-                )
-            cls, table, cur_alias, prefix = target, target_table, new_alias, ""
+            aliases = [(self._join(cur_alias, fk_col, ref_table), ref_table) for fk_col, ref_table in targets]
+            if len(aliases) > 1:
+                # One FK column per target table (base and subclasses): the referenced object is in exactly one.
+                if i != len(refs) - 2:
+                    raise _UnsupportedView(f"a path continuing past {hop!r}, a reference to several tables")
+                last = refs[-1]
+                last_attr = self._members(target).get(last)
+                if last_attr is None:
+                    raise _UnsupportedView(f"{last!r} is not an attribute of {getattr(target, 'Name', None)!r}")
+                last_resolved = resolve_attribute(last_attr)
+                parts = [self._final_column(last_resolved, last, _sql_identifier(last), t, a) for a, t in aliases]
+                return "COALESCE(" + ", ".join(parts) + ")"
+            new_alias, table = aliases[0]
+            cls, cur_alias, prefix = target, new_alias, ""
         raise _UnsupportedView("unreachable")  # pragma: no cover
+
+    def _final_column(self, resolved: ResolvedAttribute, hop: str, col: str, table: str, alias: str) -> str:
+        """The SQL for a path's last attribute on `table`: its column, a multilingual text, or a flattened STRUCTURE."""
+        if col not in self._columns(table):
+            text = self._localised_text(col, table, alias)
+            if text is not None:
+                return text
+            flattened = self._flattened_struct_column(resolved, col, table)
+            if flattened is None:
+                raise _UnsupportedView(f"{hop!r} has no mapped column on table {table!r}")
+            col = flattened
+        return f'"{alias}"."{col}"'
+
+    def _reference_columns(self, table: str, col: str) -> list[tuple[str, str]]:
+        """`(FK column, target table)` for reference `col`: one, or one per target table when it points at a class with
+        subclass tables (`<col>` for a concrete base, `<col>_<table>` for the others).
+        """
+        result = []
+        for fk in self.tables_by_name[table].foreign_keys:
+            if len(fk.columns) != 1 or fk.ref_table not in self.tables_by_name:
+                continue
+            split = _truncate_identifier(_sql_identifier(f"{col}_{fk.ref_table}"))
+            if fk.columns[0] in (col, split):
+                result.append((fk.columns[0], fk.ref_table))
+        return result
+
+    def _join(self, alias: str, fk_col: str, ref_table: str) -> str:
+        """The alias joined on `alias.fk_col` - created once: paths sharing a reference hop share its join."""
+        new_alias = self._joined.get((alias, fk_col))
+        if new_alias is None:
+            self._counter += 1
+            new_alias = _truncate_identifier(f"j{self._counter}_{ref_table}")
+            self._joined[(alias, fk_col)] = new_alias
+            self.extra_joins.append((ref_table, new_alias, f'"{alias}"."{fk_col}" = "{new_alias}"."{OID_COLUMN}"'))
+        return new_alias
 
     def defined_sql(self, factor: MetaInstance) -> str:
         """Return a SQL boolean for `DEFINED(<base-alias> -> role -> role ...)` - an association-navigation existence
@@ -334,6 +367,17 @@ def _view_where_sql(expr: MetaInstance, resolver: _ViewResolver) -> str:
     raise _UnsupportedView(f"WHERE operation {op!r} ({qname}) is not translatable to a SQL view predicate")
 
 
+def _from_clause(base_parts: list[str], resolver: _ViewResolver) -> str:
+    """The bases, then a LEFT JOIN per reference hop: an unset reference leaves its attributes undefined (NULL), as in
+    INTERLIS, instead of dropping the row. Several bases are CROSS JOINed so every ON may name any of them.
+    """
+    if not resolver.extra_joins:
+        return ", ".join(base_parts)
+    return " CROSS JOIN ".join(base_parts) + "".join(
+        f'\nLEFT JOIN "{t}" "{a}" ON {on}' for t, a, on in resolver.extra_joins
+    )
+
+
 def build_views(
     views: list[MetaInstance],
     tables: list[Table],
@@ -426,9 +470,7 @@ def build_views(
                 view, vname, bases, tables_by_name, attr_col, where, extra_joins_present=bool(resolver.extra_joins)
             )
             from_parts = [f'"{table}" "{alias}"' for alias, _cls, table in bases]
-            from_parts += [f'"{table}" "{alias}"' for table, alias, _on in resolver.extra_joins]
-            where += [on for _t, _a, on in resolver.extra_joins]
-            body = "SELECT\n    " + ",\n    ".join(select_items) + "\nFROM " + ", ".join(from_parts)
+            body = "SELECT\n    " + ",\n    ".join(select_items) + "\nFROM " + _from_clause(from_parts, resolver)
             if where:
                 body += "\nWHERE " + "\n  AND ".join(where)
             notes.extend(constraint_notes)
@@ -475,12 +517,7 @@ def _build_union_view(
                     f"union attribute {aname!r}: {len(derivates)} assigned expression(s) for {len(bases)} bases"
                 )
             items.append(f'{resolver.scalar_ref(derivates[branch_index])} AS "{_sql_identifier(aname or "")}"')
-        from_parts = [f'"{table}" "{alias}"']
-        from_parts += [f'"{t}" "{a}"' for t, a, _on in resolver.extra_joins]
-        branch = "SELECT\n    " + ",\n    ".join(items) + "\nFROM " + ", ".join(from_parts)
-        join_conditions = [on for _t, _a, on in resolver.extra_joins]
-        if join_conditions:
-            branch += "\nWHERE " + "\n  AND ".join(join_conditions)
+        branch = "SELECT\n    " + ",\n    ".join(items) + "\nFROM " + _from_clause([f'"{table}" "{alias}"'], resolver)
         branches.append(branch)
     return "\nUNION ALL\n".join(branches)
 
@@ -701,13 +738,10 @@ def _build_aggregation_view(
             "SQL-VIEW-FORMATION-UNSUPPORTED",
         )
     _alias, _cls, table = bases[0]
-    from_parts = [f'"{table}" "{_alias}"']
-    from_parts += [f'"{t}" "{a}"' for t, a, _on in resolver.extra_joins]
     verb = "SELECT" if key_factor is not None or has_aggregate else "SELECT DISTINCT"
-    body = f"{verb}\n    " + ",\n    ".join(select_items) + "\nFROM " + ", ".join(from_parts)
-    join_conditions = [on for _t, _a, on in resolver.extra_joins]
-    if join_conditions:
-        body += "\nWHERE " + "\n  AND ".join(join_conditions)
+    body = (
+        f"{verb}\n    " + ",\n    ".join(select_items) + "\nFROM " + _from_clause([f'"{table}" "{_alias}"'], resolver)
+    )
     if key_factor is not None:
         body += "\nGROUP BY " + ", ".join(group_by)
     return body

@@ -1027,14 +1027,28 @@ def _priority_sort_key(rule: StylingRule) -> tuple[bool, float]:
     return (not isinstance(z_order, (int, float)), z_order if isinstance(z_order, (int, float)) else 0.0)
 
 
+def _add_visualization_passes(styling_rules: list[StylingRule]) -> None:
+    """AND a `viz.pass` per distinct `Priority` (dense rank) into each selector: every feature of a lower Priority is
+    drawn before any of a higher one, across features, which rule order inside one SLD FeatureTypeStyle cannot express.
+
+    Left out when a single Priority is used, or when one is not a literal number (no rank to give it).
+    """
+    priorities = [rule.symbolizer.z_order if rule.symbolizer else None for rule in styling_rules]
+    if not all(isinstance(p, (int, float)) for p in priorities) or len(set(priorities)) < 2:
+        return
+    rank = {p: index for index, p in enumerate(sorted(set(priorities)))}
+    for rule, priority in zip(styling_rules, priorities):
+        pass_eq = {"op": "=", "args": [{"sysId": "viz.pass"}, rank[priority]]}
+        rule.selector = pass_eq if rule.selector is None else {"op": "and", "args": [rule.selector, pass_eq]}
+
+
 def graphic_to_style(graphic: MetaInstance, sign_library: SignLibrary | None = None) -> Style:
     """Build one pycartosym `Style` from a built INTERLIS `GRAPHIC`, one `StylingRule` per `DrawingRule`.
 
     `feature_type` (`Graphic.Base.Name`) is prepended to every rule's
     selector (see `styling_rule_from_drawing_rule`). Rules are sorted by
-    `Priority`, ascending (`_priority_sort_key`) - SLD/SE has no explicit
-    z-order attribute, only document order, so this is where that ordering
-    is actually realized.
+    `Priority`, ascending (`_priority_sort_key`), and each distinct
+    Priority becomes a `viz.pass` - one SLD FeatureTypeStyle per pass.
     """
     feature_type = getattr(getattr(graphic, "Base", None), "Name", None)
     drawing_rules = graphic.DrawingRule if isinstance(graphic.DrawingRule, list) else [graphic.DrawingRule]
@@ -1043,6 +1057,7 @@ def graphic_to_style(graphic: MetaInstance, sign_library: SignLibrary | None = N
         for rule in drawing_rules
     ]
     styling_rules.sort(key=_priority_sort_key)
+    _add_visualization_passes(styling_rules)
     name = getattr(graphic, "Name", None)
     return Style(styling_rules=styling_rules, metadata=Metadata(title=name) if name else None)
 

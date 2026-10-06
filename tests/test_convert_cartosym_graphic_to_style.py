@@ -8,9 +8,11 @@ INTERLIS reference manual's own canonical `GRAPHIC` example, `FGDM4GS`/
 from pathlib import Path
 
 from conftest import build_from_file
+from pycartosym.models.styles import Style, StylingRule
+from pycartosym.models.symbolizers import Symbolizer
 
 from interlis.builder.repository import ModelRepository
-from interlis.convert.cartosym import SignLibrary, graphic_to_style, write_sld
+from interlis.convert.cartosym import SignLibrary, _add_visualization_passes, graphic_to_style, write_sld
 from interlis.metamodel.instance import MetaInstance
 from interlis.xtf.parse import parse_xtf
 
@@ -90,3 +92,29 @@ def test_point_graphics_composite_font_symbol_renders_as_svg():
     assert xml.count("<se:PointSymbolizer>") == 2
     assert xml.count('xlink:href="data:image/svg+xml;base64,') == 2
     assert xml.count("<se:Format>image/svg+xml</se:Format>") == 2
+
+
+def _rule(name: str, priority, color: str) -> StylingRule:
+    symbolizer = Symbolizer.from_dict({"fill": {"color": color}})
+    symbolizer.z_order = priority
+    return StylingRule(name=name, symbolizer=symbolizer, selector={"op": "=", "args": [{"property": "k"}, name]})
+
+
+def test_each_distinct_priority_becomes_a_visualization_pass():
+    """Every feature of a lower Priority is drawn before any of a higher one: one FeatureTypeStyle per Priority."""
+    rules = [_rule("a", 100, "red"), _rule("b", 100, "blue"), _rule("c", 120, "green")]
+    _add_visualization_passes(rules)
+    passes = [r.selector["args"][1]["args"][1] for r in rules]
+    assert passes == [0, 0, 1]
+    xml = write_sld(Style(styling_rules=rules))
+    assert xml.count("<se:FeatureTypeStyle>") == 2
+    assert xml.index("#0000ff") < xml.index("#008000")
+
+
+def test_a_single_priority_or_a_non_literal_one_adds_no_pass():
+    same = [_rule("a", 100, "red"), _rule("b", 100, "blue")]
+    _add_visualization_passes(same)
+    assert all("viz.pass" not in str(r.selector) for r in same)
+    dynamic = [_rule("a", 100, "red"), _rule("b", None, "blue")]
+    _add_visualization_passes(dynamic)
+    assert all("viz.pass" not in str(r.selector) for r in dynamic)

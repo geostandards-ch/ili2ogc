@@ -130,8 +130,7 @@ def test_union_sql_joins_a_branch_attribute_that_navigates_a_reference():
     tables, views = _sql_views(builder)
     (cc,) = views
     assert cc.body is not None
-    assert 'FROM "c1" "c1", "d" "j1_d"' in cc.body
-    assert '"c1"."refd" = "j1_d"."t_id"' in cc.body
+    assert 'FROM "c1" "c1"\nLEFT JOIN "d" "j1_d" ON "c1"."refd" = "j1_d"."t_id"' in cc.body
     con = _run_ddl(tables, views)
     con.execute('INSERT INTO "d" ("t_id", "t_basket", "name") VALUES (1, 1, ?)', ("delta",))
     con.execute('INSERT INTO "c1" ("t_id", "t_basket", "refd") VALUES (1, 1, 1)')
@@ -284,7 +283,7 @@ def test_aggregation_sql_joins_an_attribute_that_navigates_a_reference():
     tables, views = _sql_views(builder)
     (v,) = views
     assert v.body is not None and "GROUP BY" in v.body
-    assert 'FROM "parcel" "parcel", "municipality" "j1_municipality"' in v.body
+    assert 'FROM "parcel" "parcel"\nLEFT JOIN "municipality" "j1_municipality"' in v.body
     con = _run_ddl(tables, views)
     con.execute('INSERT INTO "municipality" ("t_id", "t_basket", "name") VALUES (1, 1, ?)', ("Lausanne",))
     con.execute('INSERT INTO "municipality" ("t_id", "t_basket", "name") VALUES (2, 1, ?)', ("Renens",))
@@ -345,8 +344,10 @@ def test_projection_of_association_sql_resolves_the_embedded_carrier_and_far_rol
     tables, views = _sql_views(builder)
     (v,) = views
     assert v.body is not None
-    assert 'FROM "planungszone" "typpz_planungszone", "typpz" "j1_typpz"' in v.body
-    assert '"typpz_planungszone"."typpz" = "j1_typpz"."t_id"' in v.body
+    assert (
+        'FROM "planungszone" "typpz_planungszone"\n'
+        'LEFT JOIN "typpz" "j1_typpz" ON "typpz_planungszone"."typpz" = "j1_typpz"."t_id"'
+    ) in v.body
     con = _run_ddl(tables, views)
     con.execute('INSERT INTO "typpz" ("t_id", "t_basket", "code") VALUES (1, 1, ?)', ("Z1",))
     con.execute(
