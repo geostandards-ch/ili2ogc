@@ -195,9 +195,9 @@ MultiValue:
 Graphic:
   qualified_name: IlisMeta16.ModelData.Graphic
   sql:
-    map_view:
-      rule: "convert-sql --symbology: a GRAPHIC BASED ON a class -> CREATE VIEW <graphic> AS SELECT t_id, <geometry column>, <one column per WHERE path, AS its SLD PropertyName> FROM <BASED ON table> joined to the tables the paths reach; BASED ON a VIEW with several Priority values -> CREATE VIEW <graphic> AS SELECT the VIEW's rows ORDER BY the Priority of the first rule each matches"
-      note: "The DrawingRule conditions' Where expressions supply the paths. A path that can't be resolved makes the GRAPHIC a SQL-VIEW-GRAPHIC note; a VIEW-based GRAPHIC with one Priority, a SQL-VIEW-GRAPHIC-ON-VIEW note."
+    not_mapped:
+      rule: "no SQL: a GRAPHIC is representation - convert-sld writes it as SLD, drawn from the table or VIEW it is BASED ON"
+      note: "A GRAPHIC BASED ON a class whose WHERE paths go through references needs those attributes as columns: model them as an INTERLIS VIEW and base the GRAPHIC on it."
 
 UniqueConstraint:
   qualified_name: IlisMeta16.ModelData.UniqueConstraint

@@ -159,20 +159,12 @@ concepts:
 
   Graphic:
     qualified_name: IlisMeta16.ModelData.Graphic
-    status: mapped
+    status: not_applicable
     note: >
-      Only with `--symbology SYMBOLOGY.ili`: a GRAPHIC whose `BASED ON`
-      class is converted becomes a `CREATE VIEW <graphic>` exposing `t_id`,
-      the drawing rules' geometry column and one column per attribute path
-      their `WHERE`s test, named like the SLD `PropertyName` (`Kind.Reference.Code`),
-      references and flattened structures joined through to the catalogue
-      table. A map server then evaluates the SLD filters `convert-sld` writes
-      without any hand-written view. The symbology model is built
-      separately, so the base class is matched by qualified name. A path
-      that can't be resolved makes the whole GRAPHIC a `SQL-VIEW-GRAPHIC`
-      note, never a view missing a filtered column. A GRAPHIC `BASED ON` a
-      VIEW whose rules use several `Priority` values gets that VIEW's rows
-      ordered by Priority (for map servers drawing in data order).
+      Representation, not data: no SQL. `convert-sld` writes a GRAPHIC as
+      SLD, drawn by the map server from the table or VIEW it is `BASED ON`;
+      the attributes its `WHERE`s test must be columns there - through
+      references, an INTERLIS VIEW projects them.
 
   ObjectOID:
     qualified_name: IlisMeta16.ModelData.ObjectOID

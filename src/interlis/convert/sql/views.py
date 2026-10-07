@@ -7,10 +7,7 @@ translatable subset.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from interlis.builder.forward_refs import SymbolTable
-from interlis.convert.cql2 import UnsupportedExpressionError, _path_property_name
 from interlis.convert.jsonschema import _is_structure
 from interlis.diagnostic_ids import note as _diag
 from interlis.metamodel.instance import MetaInstance
@@ -27,7 +24,7 @@ from interlis.xtf.schema import (
 )
 
 from .expressions import _SQL_RELATIONAL_OPERATORS, _numeric_sql_literal, _text_sql_literal
-from .identifiers import OID_COLUMN, TID_COLUMN, _dedup_name, _quote, _sql_identifier, _truncate_identifier
+from .identifiers import OID_COLUMN, TID_COLUMN, _quote, _sql_identifier, _truncate_identifier
 from .model import SqlView, Table, UniqueViewTrigger
 from .multilingual import _localised_texts, _text_of
 from .tables import _columns_for_class, _inherited_constraints
@@ -462,15 +459,13 @@ def build_views(
     symbol_table: SymbolTable | None = None,
     class_symbol_tables: dict[int, SymbolTable] | None = None,
     class_table_names: dict[int, str] | None = None,
-    view_names: dict[int, str] | None = None,
 ) -> list[SqlView]:
     """Translate each `View` (`FormationKind` Projection/Join only) into a `CREATE VIEW` body, or a `-- NOTE` when it
     can't be done faithfully.
 
     Becomes `SELECT <attr := path> ... FROM <base tables, comma-joined>
     WHERE <predicates>`. Base classes must be among `tables` (`--catalog`). An attribute naming a multilingual
-    text becomes one column per language (`<attr>`, `<attr>_de`...). `view_names` (optional out-param) maps each
-    View to its SQL view name.
+    text becomes one column per language (`<attr>`, `<attr>_de`...).
     Anything outside the translatable subset demotes the WHOLE view to
     `body=None` with a note (RULE #5), never a half-built `CREATE VIEW`.
     """
@@ -487,8 +482,6 @@ def build_views(
         while vname in used_names:
             vname = _truncate_identifier(f"{vname}_v")
         used_names.add(vname)
-        if view_names is not None:
-            view_names[id(view)] = vname
         try:
             bases, assoc_near_roles = _resolve_view_bases(view, tables_by_name, table_name_by_class_id)
             formation = getattr(view, "FormationKind", None)
@@ -1242,168 +1235,3 @@ def _render_view_unique_triggers_gpkg(views: tuple[SqlView, ...]) -> list[str]:
                     "END;"
                 )
     return statements
-
-
-def _path_factors(expression: object, seen: set[int] | None = None) -> list[MetaInstance]:
-    """Every attribute-path leaf (`PathOrInspFactor`) of an expression tree, in order."""
-    seen = set() if seen is None else seen
-    if not isinstance(expression, MetaInstance) or id(expression) in seen:
-        return []
-    seen.add(id(expression))
-    if expression._qualified_class.endswith("PathOrInspFactor"):
-        return [expression]
-    found: list[MetaInstance] = []
-    for value in vars(expression).values():
-        for item in value if isinstance(value, list) else [value]:
-            found += _path_factors(item, seen)
-    return found
-
-
-def _rooted(factor: MetaInstance, alias: str) -> SimpleNamespace:
-    """`factor`'s path prefixed with the view's base alias - a drawing rule's paths start at the attribute."""
-    return SimpleNamespace(
-        _qualified_class=factor._qualified_class,
-        Inspection=None,
-        PathEls=[SimpleNamespace(Ref=alias), *(getattr(factor, "PathEls", None) or [])],
-    )
-
-
-class _ViewColumns:
-    """Resolves a GRAPHIC rule's `WHERE` against the columns of the VIEW it is based on (one path element each)."""
-
-    def __init__(self, view: MetaInstance) -> None:
-        names = [getattr(a, "Name", None) or "" for a in getattr(view, "ClassAttribute", None) or []]
-        self.columns = {_sql_identifier(n) for n in names}
-
-    def scalar_ref(self, factor: MetaInstance) -> str:
-        if factor._qualified_class.endswith("Constant"):
-            return _view_constant_literal(factor)
-        refs = [getattr(el, "Ref", None) for el in getattr(factor, "PathEls", None) or []]
-        column = _sql_identifier(refs[0]) if len(refs) == 1 and refs[0] else None
-        if column not in self.columns:
-            raise _UnsupportedView(f"{refs!r} is not an attribute of the VIEW")
-        return f'"g"."{column}"'
-
-    def defined_sql(self, factor: MetaInstance) -> str:
-        return f"{self.scalar_ref(factor)} IS NOT NULL"
-
-
-def _priority_ordered_view(graphic: MetaInstance, view: MetaInstance, vname: str, view_sql_name: str | None) -> SqlView:
-    """The VIEW's rows ordered by the `Priority` of the first rule (lowest Priority) each matches.
-
-    A renderer that draws features in data order, as MapServer does (it flattens SLD FeatureTypeStyles into one
-    class list), then stacks them by `Priority`, which the SLD's one-FeatureTypeStyle-per-Priority cannot do there.
-    `ORDER BY` in a view is honoured by PostgreSQL and SQLite on a plain read, not guaranteed by SQL itself.
-    """
-    rules = graphic.DrawingRule if isinstance(graphic.DrawingRule, list) else [graphic.DrawingRule]
-    conditions = [c for rule in rules for c in (rule.Rule if isinstance(rule.Rule, list) else [rule.Rule])]
-    prioritized = []
-    for condition in conditions:
-        assignments = condition.Assignments if isinstance(condition.Assignments, list) else [condition.Assignments]
-        value = next((a.Assignment for a in assignments if a.Param == "Priority"), None)
-        number = getattr(value, "Value", None) if getattr(value, "Type", None) == "Numeric" else None
-        prioritized.append((number, condition))
-    label = f"GRAPHIC {getattr(graphic, 'Name', None)!r} is BASED ON VIEW {getattr(view, 'Name', None)!r}"
-    if view_sql_name is None or len({p for p, _ in prioritized}) < 2 or None in {p for p, _ in prioritized}:
-        message = (
-            f"{label}: no map view - the CREATE VIEW converting that VIEW already exposes the attributes its SLD "
-            "filters test, and its rules share one Priority (nothing to order)"
-        )
-        return SqlView(vname, None, [_diag("SQL-VIEW-GRAPHIC-ON-VIEW", message)])
-    resolver = _ViewColumns(view)
-    try:
-        cases = [
-            f"WHEN {_view_where_sql(c.Where, resolver) if getattr(c, 'Where', None) else '1 = 1'} "
-            f"THEN {_numeric_sql_literal(p)}"
-            for p, c in sorted(prioritized, key=lambda item: float(item[0]))
-        ]
-    except (_UnsupportedView, UnsupportedExpressionError, AttributeError) as exc:
-        return SqlView(vname, None, [_diag("SQL-VIEW-GRAPHIC", f"{label}: {exc}")])
-    priority = _dedup_name("priority", set(resolver.columns))
-    body = (
-        f'SELECT\n    "g".*,\n    CASE {" ".join(cases)} END AS "{priority}"\nFROM "{view_sql_name}" "g"'
-        f'\nORDER BY "{priority}"'
-    )
-    return SqlView(vname, body, [])
-
-
-def build_graphic_views(
-    graphics: list[MetaInstance],
-    tables: list[Table],
-    *,
-    symbol_table: SymbolTable | None = None,
-    class_symbol_tables: dict[int, SymbolTable] | None = None,
-    class_table_names: dict[int, str] | None = None,
-    graphic_symbol_tables: list[SymbolTable] | None = None,
-    class_by_name: dict[str, MetaInstance] | None = None,
-    view_by_name: dict[str, MetaInstance] | None = None,
-    view_names: dict[int, str] | None = None,
-) -> list[SqlView]:
-    """One `CREATE VIEW <graphic>` per `GRAPHIC` whose `BASED ON` class is converted: its `t_id`, the drawing
-    rules' geometry column, and one column per attribute path their `WHERE`s test - named exactly like the SLD's
-    `PropertyName` (`MeasureType.Reference.TypeID`), so a map server evaluates the SLD filters on it as is.
-    The symbology model is built separately, so its `BASED ON` class is matched to the converted one by qualified
-    name (`graphic_symbol_tables`, `class_by_name`).
-
-    A `GRAPHIC` based on a class of another conversion is skipped; one whose paths can't all be resolved becomes a
-    note, never a view missing a filtered column. One based on a converted VIEW (`view_by_name`, `view_names`) needs
-    no such columns - the VIEW's own `CREATE VIEW` has them, by attribute name - but when its rules use several
-    `Priority` values it gets an ordered view (`_priority_ordered_view`); with a single one, a note.
-    """
-    tables_by_name = {t.name: t for t in tables}
-    names = class_table_names or {}
-
-    def symbol_for(cls: MetaInstance) -> SymbolTable | None:
-        return (class_symbol_tables or {}).get(id(cls), symbol_table)
-
-    result: list[SqlView] = []
-    used_names = {t.name for t in tables}
-    for graphic in graphics:
-        base = getattr(graphic, "Base", None)
-        if isinstance(base, MetaInstance):
-            qualified = next((q for t in graphic_symbol_tables or [] if (q := t.qualified_name_of(base))), None)
-            base = (class_by_name or {}).get(qualified or "", base)
-            if base._qualified_class.rsplit(".", 1)[-1] == "View":
-                base = (view_by_name or {}).get(qualified or "", base)
-                vname = _dedup_name(
-                    _truncate_identifier(_sql_identifier(getattr(graphic, "Name", None) or "graphic")), used_names
-                )
-                result.append(_priority_ordered_view(graphic, base, vname, (view_names or {}).get(id(base))))
-                continue
-        table = names.get(id(base)) if isinstance(base, MetaInstance) else None
-        if table is None or table not in tables_by_name:
-            continue
-        vname = _dedup_name(
-            _truncate_identifier(_sql_identifier(getattr(graphic, "Name", None) or "graphic")), used_names
-        )
-        resolver = _ViewResolver([("g", base, table)], tables_by_name, symbol_for, None, names)
-        rules = graphic.DrawingRule if isinstance(graphic.DrawingRule, list) else [graphic.DrawingRule]
-        conditions = [c for rule in rules for c in (rule.Rule if isinstance(rule.Rule, list) else [rule.Rule])]
-        try:
-            geometry = None
-            properties: dict[str, str] = {}
-            for condition in conditions:
-                for factor in _path_factors(getattr(condition, "Where", None)):
-                    prop = _path_property_name(factor.PathEls)
-                    if prop not in properties:  # one join per distinct path, however many rules test it
-                        properties[prop] = resolver.scalar_ref(_rooted(factor, "g"))
-                assignments = (
-                    condition.Assignments if isinstance(condition.Assignments, list) else [condition.Assignments]
-                )
-                for assignment in assignments:
-                    if assignment.Param == "Geometry" and geometry is None:
-                        geometry = _sql_identifier(str(assignment.Assignment.PathEls[0].Ref))
-            if geometry is None or not any(
-                c.name == geometry and c.geometry_type for c in tables_by_name[table].columns
-            ):
-                raise _UnsupportedView(f"the drawing rules' Geometry is not a geometry column of {table!r}")
-        except (_UnsupportedView, UnsupportedExpressionError, AttributeError) as exc:
-            result.append(SqlView(vname, None, [_diag("SQL-VIEW-GRAPHIC", f"GRAPHIC {graphic.Name!r}: {exc}")]))
-            continue
-        items = [f'"g"."{OID_COLUMN}" AS "{OID_COLUMN}"', f'"g"."{geometry}" AS "{geometry}"']
-        items += [f'{ref} AS "{prop}"' for prop, ref in properties.items()]
-        # LEFT JOINs: a row with an unset reference keeps its place for the rules that don't test it.
-        body = "SELECT\n    " + ",\n    ".join(items) + f'\nFROM "{table}" "g"'
-        body += "".join(f'\nLEFT JOIN "{t}" "{a}" ON {on}' for t, a, on in resolver.extra_joins)
-        result.append(SqlView(vname, body, []))
-    return result

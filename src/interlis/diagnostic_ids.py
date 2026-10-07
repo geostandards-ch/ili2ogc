@@ -28,15 +28,6 @@ from __future__ import annotations
 REGISTRY: dict[str, tuple[str, str]] = {
     # -- convert-sql: CREATE TABLE ---------------------------------------
     "SQL-STRUCT-NESTED-DEEP": ("A", "STRUCTURE nested more than two levels deep is not flattened"),
-    "SQL-VIEW-GRAPHIC": (
-        "A",
-        "a GRAPHIC's drawing-rule paths or geometry could not all be mapped to columns - no map view for it",
-    ),
-    "SQL-VIEW-GRAPHIC-ON-VIEW": (
-        "B",
-        "a GRAPHIC BASED ON a VIEW with a single Priority gets no map view: that VIEW's own CREATE VIEW is its "
-        "map table",
-    ),
     "SQL-VIEW-JOIN-ASSOCIATION": (
         "B",
         "JOIN OF without WHERE (a cross product in INTERLIS) joined along the association linking its bases",

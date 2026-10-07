@@ -34,7 +34,6 @@ from interlis.convert.jsonfg import transfer_to_feature_collection
 from interlis.convert.jsonschema import model_to_json_schema
 from interlis.convert.sql import build_tables, build_views, render_gpkg, render_postgresql
 from interlis.convert.sql.ili2db import Ili2dbMeta, model_file
-from interlis.convert.sql.views import build_graphic_views
 from interlis.convert.translation import (
     load_translation,
     rename_feature_collection,
@@ -631,7 +630,6 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
     path, repository, builder = schema.path, schema.repository, schema.builder
     classes, views, class_symbol_tables = schema.classes, schema.views, schema.class_symbol_tables
     class_table_names, tables = schema.class_table_names, schema.tables
-    view_names: dict[int, str] = {}
     sql_views = tuple(
         build_views(
             views,
@@ -639,45 +637,8 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
             symbol_table=builder.symbol_table,
             class_symbol_tables=class_symbol_tables,
             class_table_names=class_table_names,
-            view_names=view_names,
         )
     )
-    class_by_name = {
-        name: cls
-        for cls in classes
-        if (name := class_symbol_tables.get(id(cls), builder.symbol_table).qualified_name_of(cls))
-    }
-    view_by_name = {name: view for view in views if (name := builder.symbol_table.qualified_name_of(view))}
-    for symbology_arg in args.symbology:
-        symbology_path = Path(symbology_arg)
-        symbology_tree, symbology_errors = (
-            parse_file(symbology_path) if symbology_path.exists() else (None, ["missing"])
-        )
-        if symbology_errors:
-            _error(f"--symbology: cannot read {symbology_path}")
-            return ExitCode.INVALID
-        symbology_builder = _open_builder(repository)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            symbology_builder.build(symbology_tree)
-        graphics = [
-            inst
-            for inst in symbology_builder.symbol_table.all_registered()
-            if isinstance(inst, MetaInstance) and inst._qualified_class.rsplit(".", 1)[-1] == "Graphic"
-        ]
-        sql_views += tuple(
-            build_graphic_views(
-                graphics,
-                tables,
-                symbol_table=builder.symbol_table,
-                class_symbol_tables=class_symbol_tables,
-                class_table_names=class_table_names,
-                graphic_symbol_tables=[symbology_builder.symbol_table, *repository.loaded_models().values()],
-                class_by_name=class_by_name,
-                view_by_name=view_by_name,
-                view_names=view_names,
-            )
-        )
     bag.extend(_sql_mod.collect_diagnostics(tables, sql_views, file=str(path)))
     meta = _ili2db_meta(path, repository, classes, builder.symbol_table, class_symbol_tables)
     ddl = render_gpkg(tables, sql_views, meta) if args.dialect == "gpkg" else render_postgresql(tables, sql_views, meta)
@@ -1357,18 +1318,6 @@ def main(argv: list[str] | None = None) -> int:
         "exist in this conversion's own output). Also required to turn a VIEW into a CREATE VIEW: pass the "
         "base model(s) the VIEW's JOIN OF/PROJECTION OF classes come from, else the VIEW is emitted as a "
         "'-- NOTE' comment instead.",
-    )
-    convert_sql_parser.add_argument(
-        "--symbology",
-        action="append",
-        default=[],
-        metavar="SYMBOLOGY.ili",
-        help="A model declaring GRAPHICs (repeatable): also emit the tables a map server draws them from. A "
-        "GRAPHIC BASED ON a VIEW is drawn from that VIEW's own view, whose columns are named like the SLD "
-        "PropertyNames `interlis convert-sld` writes; when its rules use several Priority values it gets a view "
-        "of those rows ordered by Priority (lowest first), for a map server that draws in data order "
-        "(MapServer). A GRAPHIC BASED ON a class gets a view with the drawing rules' geometry and one column per "
-        'attribute path their WHERE clauses test (e.g. "MeasureType.Reference.TypeID").',
     )
     convert_sql_parser.add_argument(
         "--lang",
