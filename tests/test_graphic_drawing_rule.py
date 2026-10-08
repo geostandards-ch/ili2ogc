@@ -196,3 +196,36 @@ END RefSystemModel.
     assert member.Name == "LV95"
     assert member.IsRefSystem is True
     assert member.Class.Name == "MySystem"
+
+
+_ATTRIBUTE_MODEL = """INTERLIS 2.3;
+
+MODEL TestGraphicAttrs (en)
+AT "mailto:test@example.org"
+VERSION "2024-01-01" =
+  TOPIC TestTopic =
+    CLASS MyClass =
+      Status: TEXT*10;
+      Geom: TEXT*10;
+    END MyClass;
+
+    GRAPHIC MyGraphic BASED ON MyClass =
+      Ok: WHERE Status == "x" (Geometry := Geom);
+      Bad: WHERE Statuss == "x" (Geometry := Geomm);
+    END MyGraphic;
+  END TestTopic;
+END TestGraphicAttrs.
+"""
+
+
+def test_graphic_attribute_problems_name_every_unknown_attribute_cited_by_a_rule():
+    from interlis.convert.cartosym import graphic_attribute_problems
+
+    builder = _build(_ATTRIBUTE_MODEL)
+    graphic = builder.symbol_table.resolve("TestGraphicAttrs.TestTopic.MyGraphic")
+    problems = graphic_attribute_problems(graphic, builder.symbol_table)
+    assert len(problems) == 2
+    assert all("'Bad'" in problem and "'MyClass'" in problem for problem in problems)
+    assert {"Statuss", "Geomm"} == {
+        name for problem in problems for name in ("Statuss", "Geomm") if repr(name) in problem
+    }

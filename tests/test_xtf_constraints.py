@@ -59,6 +59,11 @@ MODEL CT AT "http://x" VERSION "1" =
       MANDATORY CONSTRAINT NOT (Kind == #k1 AND Active AND NOT (DEFINED (Dep)));
     END Site;
 
+    CLASS Consumer =
+      Own: TEXT*10;
+      EXISTENCE CONSTRAINT Own REQUIRED IN Owner: Code OR Base: Name;
+    END Consumer;
+
     CLASS Counted =
       Name: TEXT*10;
       SET CONSTRAINT INTERLIS.objectCount(ALL) < 5;
@@ -174,6 +179,20 @@ def test_plausibility_constraint_warns_below_its_percentage(builder):
     assert len(warnings) == 1 and "40.0%" in warnings[0].message
     flags = ["yes"] * 6 + ["no"] * 4
     assert _by_severity(_check(builder, [_obj("Rated", f"r{i}", Flag=f) for i, f in enumerate(flags)]), "warning") == []
+
+
+def test_existence_constraint_requires_the_value_in_one_of_the_classes(builder):
+    owners = [_obj("Owner", "w1", Code="A")]
+    bases = [_obj("Base", "b1", Name="B", Num="20")]
+    consumers = [_obj("Consumer", f"c{i}", Own=own) for i, own in enumerate(["A", "B", "Z"])]
+    errors = _by_severity(_check(builder, owners, bases, consumers), "error")
+    assert [(i.object_tid, "'Z'" in i.message) for i in errors] == [("c2", True)]
+
+
+def test_existence_constraint_is_not_evaluated_without_the_required_objects(builder):
+    issues = _check(builder, [_obj("Consumer", "c0", Own="Z")])
+    assert _by_severity(issues, "error") == []
+    assert any("EXISTENCE CONSTRAINT" in i.message and "not evaluated" in i.message for i in issues)
 
 
 def test_boolean_attributes_read_from_a_transfer_are_booleans(builder):

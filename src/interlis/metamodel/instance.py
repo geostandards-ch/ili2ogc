@@ -43,6 +43,11 @@ class MetaInstance(BaseModel):
     # class-default OID propagation not to override this class's own
     # decision (see InterlisModelBuilder._attach_class_oid).
     _own_oid_clause: bool = PrivateAttr(default=False)
+    # existenceConstraint case only: for each `ExistsIn` class, in order, the
+    # attribute path of the REQUIRED IN clause (None when it is not a plain
+    # `Name->Name` path) - IlisMeta16 itself carries the required classes but
+    # not this path.
+    _required_attribute_paths: "list[list[str] | None]" = PrivateAttr(default_factory=list)
 
     def __repr__(self) -> str:
         name = getattr(self, "Name", None)

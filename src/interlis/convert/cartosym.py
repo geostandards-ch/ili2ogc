@@ -17,6 +17,7 @@ ever be written out.
 
 import base64
 import math
+from collections.abc import Iterator
 from typing import Any
 
 from lxml import etree
@@ -43,11 +44,14 @@ from pycartosym.models.symbolizers import (
 from pycartosym.models.types import Angle, AngleUnit, RGBColor, UnitType, UnitValue
 from pycartosym.models.value_expressions import PropertyRef
 
+from interlis.builder.forward_refs import SymbolTable
+from interlis.builder.repository import ModelRepository
 from interlis.convert.color import lch_to_srgb
 from interlis.convert.cql2 import to_cql2
 from interlis.convert.jsonfg import _read_arc, _read_coord
 from interlis.metamodel.instance import MetaInstance
 from interlis.xtf.parse import RawNode, XtfBasket, XtfObject
+from interlis.xtf.schema import attributes_of, schema_members_of
 from interlis.xtf.validate import _BOUNDARY_TAGS, _extract_reference, _find_child, _geom_tag
 
 _SE_NS = "http://www.opengis.net/se"
@@ -1062,6 +1066,53 @@ def styling_rule_from_drawing_rule(
         selector=selector,
         symbolizer=Symbolizer(**symbolizer_kwargs),
     )
+
+
+def _cited_attributes(node: Any, seen: set[int]) -> Iterator[str]:
+    """Every attribute name (first step of a plain path) cited anywhere in an expression or assignment value."""
+    if isinstance(node, list):
+        for item in node:
+            yield from _cited_attributes(item, seen)
+    elif isinstance(node, MetaInstance) and id(node) not in seen:
+        seen.add(id(node))
+        if node._qualified_class.endswith("PathOrInspFactor"):
+            head = next(iter(node.PathEls or []), None)
+            if head is not None and getattr(head, "Kind", None) in ("ReferenceAttr", "Attribute"):
+                yield head.Ref
+        for value in vars(node).values():
+            yield from _cited_attributes(value, seen)
+
+
+def graphic_attribute_problems(
+    graphic: MetaInstance, symbol_table: SymbolTable, repository: ModelRepository | None = None
+) -> list[str]:
+    """One message per attribute a `GRAPHIC`'s rules cite (in `WHERE` or as an assigned value) that its base lacks.
+
+    A style is bound to a VIEW or class in the model, so an attribute name
+    it cites can be checked against that base before any rendering. The
+    embedded association roles of a class count as attributes, including those
+    of an association declared in an imported model (hence the `repository`).
+    """
+    base = getattr(graphic, "Base", None)
+    if base is None:
+        return []
+    known = set(attributes_of(base))
+    if not base._qualified_class.endswith(".View"):
+        tables = [symbol_table, *(repository.loaded_models().values() if repository is not None else ())]
+        for table in tables:
+            known |= set(schema_members_of(base, table))
+    rules = graphic.DrawingRule if isinstance(graphic.DrawingRule, list) else [graphic.DrawingRule]
+    problems: list[str] = []
+    for rule in rules:
+        for condition in rule.Rule if isinstance(rule.Rule, list) else [rule.Rule]:
+            parts = [getattr(condition, "Where", None), condition.Assignments]
+            for name in dict.fromkeys(_cited_attributes(parts, set())):
+                if name not in known:
+                    problems.append(
+                        f"DrawingRule {getattr(rule, 'Name', None)!r} cites attribute {name!r}, "
+                        f"which {getattr(base, 'Name', None)!r} does not declare"
+                    )
+    return problems
 
 
 def _priority_sort_key(rule: StylingRule) -> tuple[bool, float]:

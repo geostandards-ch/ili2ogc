@@ -9,9 +9,11 @@ its extensions.
 
 A constraint that cannot be computed because a value is undefined counts
 as satisfied (manual, section 3.12); an object with an undefined `UNIQUE`
-key takes no part in the check. `SET` and `EXISTENCE` constraints, and any
-expression outside the evaluator's subset, are reported once per class as
-`info` issues rather than skipped silently.
+key takes no part in the check. `EXISTENCE` constraints are checked against
+the objects of the transfer and of the given catalogues (when none of the
+required class is present, the constraint is reported as not evaluated).
+`SET` constraints, and any expression outside the evaluator's subset, are
+reported once per class as `info` issues rather than skipped silently.
 
 Uniqueness is checked against the objects present in the transfer only: the
 manual notes that such constraints are conceptually global and not always
@@ -271,6 +273,97 @@ def _check_local_unique(constraint: MetaInstance, obj: XtfObject, basket: XtfBas
         seen.add(key)
 
 
+def _attribute_values(obj: XtfObject, names: list[str], by_tid: dict[str, XtfObject]) -> list[Any]:
+    """Every text (or referenced OID) reached from `obj` along `names`; BAG/LIST/structure hops yield each element."""
+    holders = [obj.attributes]
+    for name in names[:-1]:
+        following: list[dict[str, list[RawNode]]] = []
+        for holder in holders:
+            for node in holder.get(name, []):
+                target = _extract_reference(node)
+                if target is not None:
+                    if target in by_tid:
+                        following.append(by_tid[target].attributes)
+                else:
+                    following.extend(_group_by_tag(occurrence.children) for occurrence in node.children)
+        holders = following
+    values: list[Any] = []
+    for holder in holders:
+        for node in holder.get(names[-1], []):
+            target = _extract_reference(node)
+            if target is not None:
+                values.append(target)
+            elif node.text is not None and not node.children:
+                values.append(node.text)
+    return values
+
+
+class _Population:
+    """The objects of the transfer and of the catalogues, indexed by the classes they belong to (built on demand)."""
+
+    def __init__(
+        self,
+        transfer: XtfTransfer,
+        catalogs: list[XtfTransfer] | None,
+        symbol_table: SymbolTable,
+        repository: ModelRepository | None,
+    ) -> None:
+        self._objects = [
+            obj for source in [transfer, *(catalogs or [])] for basket in source.baskets for obj in basket.objects
+        ]
+        self._symbol_table = symbol_table
+        self._repository = repository
+        self._chains: dict[str, set[int]] = {}
+
+    def _chain_ids(self, qualified_class: str) -> set[int]:
+        if qualified_class not in self._chains:
+            cls = resolve_class(qualified_class, symbol_table=self._symbol_table, repository=self._repository)
+            self._chains[qualified_class] = set() if cls is None else {id(level) for level in inheritance_chain(cls)}
+        return self._chains[qualified_class]
+
+    def objects_of(self, cls: MetaInstance) -> list[XtfObject]:
+        return [obj for obj in self._objects if id(cls) in self._chain_ids(obj.qualified_class)]
+
+
+def _check_existence(
+    constraint: MetaInstance,
+    members: list[tuple[XtfBasket, XtfObject]],
+    by_tid: dict[str, XtfObject],
+    population: _Population,
+    report: _Report,
+) -> None:
+    attr_path = [str(el.Ref) for el in constraint.Attr.PathEls]
+    required = list(zip(getattr(constraint, "ExistsIn", None) or [], constraint._required_attribute_paths))
+    first_class = members[0][1].qualified_class
+    label = f"EXISTENCE CONSTRAINT {'->'.join(attr_path)}"
+    if not required or any(path is None for _cls, path in required):
+        report.skip(constraint, first_class, label, "a REQUIRED IN path is not a plain attribute path")
+        return
+    allowed: set[Any] = set()
+    present = 0
+    for cls, path in required:
+        objects = population.objects_of(cls)
+        present += len(objects)
+        for obj in objects:
+            allowed.update(_attribute_values(obj, path, by_tid))
+    if not present:
+        report.skip(constraint, first_class, label, "no object of the required class is in the transfer or catalogues")
+        return
+    for basket, obj in members:
+        for value in _attribute_values(obj, attr_path, by_tid):
+            if value not in allowed:
+                report.issues.append(
+                    ValidationIssue(
+                        "error",
+                        basket.bid,
+                        obj.tid,
+                        obj.qualified_class,
+                        attr_path[0],
+                        f"{label} is violated: {value!r} does not exist in the required attribute",
+                    )
+                )
+
+
 def _plausibility_issue(entry: _Plausibility) -> ValidationIssue | None:
     if not entry.evaluated:
         return None
@@ -301,6 +394,7 @@ def check_transfer_constraints(
     cache: dict[str, list[MetaInstance]] = {}
     unique_members: dict[int, tuple[MetaInstance, list[tuple[XtfBasket, XtfObject]]]] = {}
     plausibility: dict[int, _Plausibility] = {}
+    existence_members: dict[int, tuple[MetaInstance, list[tuple[XtfBasket, XtfObject]]]] = {}
     for basket in transfer.baskets:
         for obj in basket.objects:
             scope = _ObjectScope(obj, by_tid)
@@ -318,15 +412,14 @@ def check_transfer_constraints(
                 elif kind == "SetConstraint":
                     report.skip(constraint, obj.qualified_class, "SET CONSTRAINT", "set functions are not evaluated")
                 elif kind == "ExistenceConstraint":
-                    report.skip(
-                        constraint,
-                        obj.qualified_class,
-                        "EXISTENCE CONSTRAINT",
-                        "the required attribute is not carried by the metamodel",
-                    )
+                    existence_members.setdefault(id(constraint), (constraint, []))[1].append((basket, obj))
     for constraint, members in unique_members.values():
         if id(constraint) not in report.skipped:
             _check_unique(constraint, members, by_tid, report)
+    if existence_members:
+        population = _Population(transfer, catalogs, symbol_table, repository)
+        for constraint, members in existence_members.values():
+            _check_existence(constraint, members, by_tid, population, report)
     report.issues.extend(issue for entry in plausibility.values() if (issue := _plausibility_issue(entry)))
     report.issues.extend(report.not_evaluated.values())
     return report.issues

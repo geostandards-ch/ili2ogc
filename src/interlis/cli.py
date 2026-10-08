@@ -1099,6 +1099,8 @@ def cmd_convert_sld(args: argparse.Namespace) -> int:
     first basket (a real `SIGN BASKET` data section) when given; omitted,
     they're simply left unresolved (the same documented degrade path
     `styling_rule_from_drawing_rule`/`SignLibrary` already use elsewhere).
+    A `GRAPHIC` citing an attribute its base VIEW/class does not declare is
+    refused (exit code 1, the other GRAPHICs are still written).
     A `GRAPHIC` whose every `DrawingRule` ends up with no SLD-representable
     symbolizer content (pycartosym's writer refuses a `se:Rule` with none)
     is skipped with a diagnostic rather than aborting every other GRAPHIC
@@ -1152,12 +1154,21 @@ def cmd_convert_sld(args: argparse.Namespace) -> int:
         return ExitCode.USAGE
 
     rendered: dict[str, str] = {}
+    refused = 0
     for graphic in graphics:
         name = getattr(graphic, "Name", None) or "graphic"
+        problems = _cartosym_mod.graphic_attribute_problems(graphic, builder.symbol_table, repository)
+        for problem in problems:
+            _error(f"GRAPHIC {name!r}: {problem}")
+        if problems:
+            refused += 1
+            continue
         try:
             rendered[name] = _cartosym_mod.write_sld(_cartosym_mod.graphic_to_style(graphic, sign_library))
         except NotImplementedError as exc:
             _warn(f"GRAPHIC {name!r}: {exc} - skipped")
+    if refused and not rendered:
+        return ExitCode.INVALID
     if not rendered:
         _error("no GRAPHIC produced any SLD-representable content")
         return ExitCode.INVALID
@@ -1174,7 +1185,7 @@ def cmd_convert_sld(args: argparse.Namespace) -> int:
     else:
         (text,) = rendered.values()
         print(text)
-    return ExitCode.OK
+    return ExitCode.INVALID if refused else ExitCode.OK
 
 
 def cmd_convert_cql2(args: argparse.Namespace) -> int:

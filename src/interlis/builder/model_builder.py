@@ -9,6 +9,7 @@ VIEW/OID/TRANSLATION OF are mixed in from view_mixin.py/oid_mixin.py/
 translation_mixin.py - this file stays one unit by necessity.
 """
 
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -42,6 +43,12 @@ _ASSOCIATION_ATTRIBUTE_ENTRY = SpecEntry(
     parent=Parent(association="ClassAttr", role="ClassAttribute"),
     attribute_bindings={"Name": {"source": {"field": "Name"}}},
 )
+
+
+def _plain_attribute_path(text: str) -> list[str] | None:
+    """`Name->Name->...` as a list of names; `None` for any other path form (indexes, `THIS`, ...)."""
+    names = text.split("->")
+    return names if all(re.fullmatch(r"[A-Za-z_]\w*", name) for name in names) else None
 
 
 class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _ContextMixin, InterlisParserVisitor):
@@ -394,7 +401,7 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
         elif rule_name == "pathEl":
             self._set_path_el_kind(instance, ctx)
         elif rule_name == "existenceConstraint":
-            self._fix_existence_constraint_attr(instance)
+            self._fix_existence_constraint_attr(instance, ctx)
         elif rule_name == "contextDef":
             self._build_context_domain_pairs(instance, ctx)
         elif rule_name == "metaDataBasketDef":
@@ -1831,15 +1838,19 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
         alias = names[1].getText()
         self.symbol_table.register(self._qualify_name(alias), instance)
 
-    def _fix_existence_constraint_attr(self, instance: MetaInstance) -> None:
-        """Re-wrap `ExistenceConstraint.Attr` as a real `PathOrInspFactor` instance.
+    def _fix_existence_constraint_attr(self, instance: MetaInstance, ctx: ParserRuleContext) -> None:
+        """Re-wrap `ExistenceConstraint.Attr` as a real `PathOrInspFactor` instance, and keep the required paths.
 
         Same class of gap as `_stash_aggregation_key`/`_stash_inspection_path`:
         the declarative `Attr` binding fires and sets `instance.Attr`, but
         only with the raw Container bag - the wrapping into a proper
         instance normally happens in `factor()`'s own `Conditional` branch
         merge, which `existenceConstraint`'s grammar never routes through.
+
+        The attribute paths after `REQUIRED IN` (one per alternative) are not
+        part of IlisMeta16 - kept on the instance, aligned with `ExistsIn`.
         """
+        instance._required_attribute_paths = [_plain_attribute_path(path.getText()) for path in ctx.attributePath()[1:]]
         bag = getattr(instance, "Attr", None)
         if not isinstance(bag, dict):
             return
