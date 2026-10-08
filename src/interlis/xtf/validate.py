@@ -1105,8 +1105,12 @@ def validate_transfer(
     symbol_table: SymbolTable,
     repository: ModelRepository | None = None,
     catalogs: list[XtfTransfer] | None = None,
+    check_constraints: bool = True,
 ) -> list[ValidationIssue]:
     """Validate an XtfTransfer, returning the list of issues found.
+
+    `check_constraints` also evaluates the model's CONSTRAINTs
+    (`xtf/constraints.py`: MANDATORY, plausibility, UNIQUE).
 
     `catalogs` (optional): extra XTF transfers already parsed
     (`parse_xtf`) whose objects should also count as resolvable for
@@ -1129,4 +1133,11 @@ def validate_transfer(
                     schema_cache=schema_cache,
                 )
             )
+    if check_constraints:
+        # Deferred: constraints.py imports convert.jsonfg, which itself imports this module.
+        from interlis.xtf.constraints import check_transfer_constraints
+
+        issues.extend(
+            check_transfer_constraints(transfer, symbol_table=symbol_table, repository=repository, catalogs=catalogs)
+        )
     return issues

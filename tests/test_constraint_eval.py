@@ -102,3 +102,11 @@ def test_evaluate_expression_and_describe_expression_directly():
     assert evaluate_expression(expr, {"KBfrei": False}) is True
     assert evaluate_expression(expr, {"KBfrei": True}) is False
     assert describe_expression(expr) == "KBfrei == #false"
+
+
+def test_boolean_text_values_drive_logical_operators():
+    cls = _class_with_constraint(
+        "MANDATORY CONSTRAINT NOT (KBfrei AND NOT (DEFINED (REPflichtPers)));",
+    )
+    assert check_feature_constraints({"KBfrei": "false"}, cls) == []
+    assert len(check_feature_constraints({"KBfrei": "true"}, cls)) == 1

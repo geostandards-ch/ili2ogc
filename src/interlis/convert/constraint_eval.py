@@ -47,6 +47,10 @@ class UnsupportedExpressionError(Exception):
     """Raised when an Expression node needs context beyond a single Feature's `properties` dict."""
 
 
+class UndefinedValueError(UnsupportedExpressionError):
+    """Raised when an attribute the expression reads has no value: the constraint is not computable (refman 3.12)."""
+
+
 def _try_number(text: str, fallback: Any) -> Any:
     try:
         return int(text) if re.fullmatch(r"[+-]?\d+", text) else float(text)
@@ -174,15 +178,15 @@ def _evaluate_compound(expr: MetaInstance, properties: dict[str, Any]) -> Any:
         right = evaluate_expression(subs[1], properties)
         return _compare(op, left, right)
     if op == "And":
-        return all(evaluate_expression(sub, properties) for sub in subs)
+        return all(_as_bool(evaluate_expression(sub, properties)) for sub in subs)
     if op == "Or":
-        return any(evaluate_expression(sub, properties) for sub in subs)
+        return any(_as_bool(evaluate_expression(sub, properties)) for sub in subs)
     if op == "Implication":
         if len(subs) != 2:
             raise UnsupportedExpressionError("implication needs exactly 2 operands")
-        if not evaluate_expression(subs[0], properties):
+        if not _as_bool(evaluate_expression(subs[0], properties)):
             return True
-        return bool(evaluate_expression(subs[1], properties))
+        return _as_bool(evaluate_expression(subs[1], properties))
     raise UnsupportedExpressionError(
         f"operator {op!r} needs numeric-domain context beyond boolean constraint evaluation",
     )
@@ -191,7 +195,7 @@ def _evaluate_compound(expr: MetaInstance, properties: dict[str, Any]) -> Any:
 def _evaluate_unary(expr: MetaInstance, properties: dict[str, Any]) -> Any:
     op = expr.Operation
     if op == "Not":
-        return not evaluate_expression(expr.SubExpression, properties)
+        return not _as_bool(evaluate_expression(expr.SubExpression, properties))
     if op == "Defined":
         sub = expr.SubExpression
         if sub is None or not sub._qualified_class.endswith("PathOrInspFactor"):
@@ -206,9 +210,7 @@ def _evaluate_path_factor(expr: MetaInstance, properties: dict[str, Any]) -> Any
         raise UnsupportedExpressionError("INSPECTION-based path factors are not supported")
     found, value = _resolve_path(expr.PathEls, properties)
     if not found:
-        raise UnsupportedExpressionError(
-            f"attribute path {_describe_path(expr.PathEls)!r} is not present in the payload"
-        )
+        raise UndefinedValueError(f"attribute path {_describe_path(expr.PathEls)!r} is not present in the payload")
     return value
 
 
@@ -248,7 +250,7 @@ def check_feature_constraints(properties: dict[str, Any], class_instance: MetaIn
         if expr is None:
             continue
         try:
-            satisfied = bool(evaluate_expression(expr, properties))
+            satisfied = _as_bool(evaluate_expression(expr, properties))
         except UnsupportedExpressionError:
             continue
         if satisfied:

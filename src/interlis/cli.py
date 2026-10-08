@@ -707,8 +707,8 @@ def _resolve_schema_model_path(
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate an .xtf transfer file against its schema.
 
-    Checks base types, MANDATORY, structure, and cross-basket TID/REF
-    resolution.
+    Checks base types, MANDATORY, structure, cross-basket TID/REF
+    resolution, and the model's CONSTRAINTs.
     Schema resolution: see `_resolve_schema_model_path`.
     """
     xtf_path = Path(args.xtf)
@@ -764,7 +764,13 @@ def cmd_validate(args: argparse.Namespace) -> int:
         print()
 
     catalogs = [parse_xtf(Path(c)) for c in args.catalog]
-    issues = validate_transfer(transfer, symbol_table=builder.symbol_table, repository=repository, catalogs=catalogs)
+    issues = validate_transfer(
+        transfer,
+        symbol_table=builder.symbol_table,
+        repository=repository,
+        catalogs=catalogs,
+        check_constraints=not args.no_constraints,
+    )
 
     counts: dict[str, int] = {}
     for issue in issues:
@@ -1392,12 +1398,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Additional catalogue .xtf file (repeatable) - its objects also count for TID/REF "
         "resolution (EXTERNAL references not included in the main transfer).",
     )
+    validate_parser.add_argument(
+        "--no-constraints",
+        action="store_true",
+        help="Skip the model's CONSTRAINTs (MANDATORY, plausibility, UNIQUE); by default they are evaluated.",
+    )
     validate_parser.add_argument("-q", "--quiet", action="store_true", help="Only print the final summary.")
     validate_parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
-        help="Also print 'info'-severity issues (unresolved references).",
+        help="Also print 'info'-severity issues (unresolved references, constraints not evaluated).",
     )
     _add_diagnostic_args(validate_parser)
     validate_parser.set_defaults(func=cmd_validate)
