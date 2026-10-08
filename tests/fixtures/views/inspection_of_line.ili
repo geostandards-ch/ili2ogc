@@ -1,0 +1,53 @@
+INTERLIS 2.3;
+
+!! INSPECTION OF a POLYLINE attribute (eCH-0031 SS3.15): `-> Axis` yields one
+!! LineGeometry per line (read as the line itself, next to a PARENT-> field),
+!! `-> Axis -> Segments` one LineSegment per segment - the StartSegment (length
+!! 0) first, then the straight/arc segments - read through `SegmentEndPoint`
+!! (and `ArcPoint`, which only an arc segment defines).
+
+MODEL TestInspectionLine AT "http://www.interlis.ch/ili2c/tests/" VERSION "1" =
+
+  TOPIC Base =
+    DOMAIN
+      !!@CRS=EPSG:2056
+      Coord2 = COORD 2500000.000 .. 2900000.000, 1000000.000 .. 1400000.000;
+      Linie = POLYLINE WITH (STRAIGHTS, ARCS) VERTEX Coord2;
+
+    CLASS Road =
+      Name: TEXT*40;
+      Axis: MANDATORY Linie;
+    END Road;
+
+    VIEW RoadLine
+      INSPECTION OF TestInspectionLine.Base.Road -> Axis;
+      =
+      ATTRIBUTE
+        Line := Road -> Axis;
+        RoadName := PARENT -> Name;
+    END RoadLine;
+
+    VIEW RoadVertex
+      INSPECTION OF TestInspectionLine.Base.Road -> Axis -> Segments;
+      =
+      ATTRIBUTE
+        EndPoint := Road -> SegmentEndPoint;
+    END RoadVertex;
+
+    VIEW RoadArc
+      INSPECTION OF TestInspectionLine.Base.Road -> Axis -> Segments;
+      =
+      ATTRIBUTE
+        EndPoint := Road -> SegmentEndPoint;
+        MiddlePoint := Road -> ArcPoint;
+    END RoadArc;
+
+    VIEW RoadBad
+      INSPECTION OF TestInspectionLine.Base.Road -> Axis -> Segments;
+      =
+      ATTRIBUTE
+        Bearing := Road -> Radius;
+    END RoadBad;
+  END Base;
+
+END TestInspectionLine.

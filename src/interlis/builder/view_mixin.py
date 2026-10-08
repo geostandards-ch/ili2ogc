@@ -82,7 +82,7 @@ class _ViewBuildingMixin(_Base):
 
     @staticmethod
     def _stash_inspection_path(view: MetaInstance, inspection_ctx: ParserRuleContext) -> None:
-        """Record the `-> Name (-> Name)*` chain of an `INSPECTION OF base -> attr` view.
+        """Record the `-> Name (-> Name)*` chain of an `INSPECTION OF base -> attr` view, and whether it is an AREA one.
 
         The spec's `inspection.FormationParameter` binding (a
         `PathOrInspFactor` from the `Name` chain) is not yet materialized
@@ -91,6 +91,7 @@ class _ViewBuildingMixin(_Base):
         can iterate the inspected attribute. `ctx.Name()` returns every
         `Name` token of the rule (`(MINUS GT Name)+`), in order.
         """
+        view._inspection_area = ca.call(inspection_ctx, "AREA") is not None
         names = ca.call(inspection_ctx, "Name")
         if names is None:
             return

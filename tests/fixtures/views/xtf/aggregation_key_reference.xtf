@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS" xmlns="http://www.interlis.ch/xtf/2.4/TestAggregationKeyReference">
+  <ili:headersection sender="test-fixture" version="2.4">
+    <ili:models>
+      <ili:model>TestAggregationKeyReference</ili:model>
+    </ili:models>
+  </ili:headersection>
+  <ili:datasection>
+    <Base ili:bid="b1">
+      <Municipality ili:tid="m1"><Name>Lausanne</Name></Municipality>
+      <Municipality ili:tid="m2"><Name>Renens</Name></Municipality>
+      <Parcel ili:tid="p1"><Municipality ili:ref="m1"/><Zone>A</Zone></Parcel>
+      <Parcel ili:tid="p2"><Municipality ili:ref="m1"/><Zone>B</Zone></Parcel>
+      <Parcel ili:tid="p3"><Municipality ili:ref="m2"/><Zone>A</Zone></Parcel>
+      <Parcel ili:tid="p4"><Municipality ili:ref="m1"/><Zone>C</Zone></Parcel>
+    </Base>
+  </ili:datasection>
+</ili:transfer>

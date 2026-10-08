@@ -94,7 +94,8 @@ class Table:
 class SqlView:
     name: str
     body: str | None
-    """A complete, dialect-portable `SELECT ... FROM ... [WHERE ...]` (comma-join, no dialect-specific syntax), or
+    """A complete, dialect-portable `SELECT ... FROM ... [WHERE ...]` (comma-join, no dialect-specific syntax; a
+    `postgis_only` body is the exception), or
     `None` when the View could not be translated - `notes` then says why (RULE #5).
     """
     notes: list[str] = field(default_factory=list)
@@ -102,6 +103,10 @@ class SqlView:
     """A `CREATE VIEW` carries no constraint of its own - a VIEW-level `UNIQUE` that resolves to plain columns of a
     single base table (no reference-hop `extra_joins`, no geometry column) becomes one of these instead of a
     `-- NOTE`, see `views.py::_view_unique_constraint_ddl`.
+    """
+    postgis_only: str | None = None
+    """Why the body needs PostGIS (set-returning `ST_Dump` over an aggregate): the GeoPackage rendering turns the view
+    into a `-- NOTE` carrying this reason instead of a `CREATE VIEW`.
     """
 
 

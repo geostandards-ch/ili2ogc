@@ -1,0 +1,38 @@
+INTERLIS 2.3;
+
+!! AREA INSPECTION OF an AREA attribute (eCH-0031 SS3.15): every boundary line
+!! of the area partition exactly once, though the shared edge is transferred
+!! with both neighbouring areas. `THISAREA` / `THATAREA` name the one or two
+!! areas bordering an edge (JSON-FG only: SQL cannot derive them).
+
+MODEL TestInspectionArea AT "http://www.interlis.ch/ili2c/tests/" VERSION "1" =
+
+  TOPIC Base =
+    DOMAIN
+      !!@CRS=EPSG:2056
+      Coord2 = COORD 2500000.000 .. 2900000.000, 1000000.000 .. 1400000.000;
+      Gebiet = AREA WITH (STRAIGHTS) VERTEX Coord2 WITHOUT OVERLAPS>0.001;
+
+    CLASS Parcel =
+      Name: TEXT*40;
+      Geometrie: MANDATORY Gebiet;
+    END Parcel;
+
+    VIEW ParcelEdge
+      AREA INSPECTION OF TestInspectionArea.Base.Parcel -> Geometrie;
+      =
+      ATTRIBUTE
+        Line := Parcel -> Geometry;
+    END ParcelEdge;
+
+    VIEW ParcelEdgeNeighbours
+      AREA INSPECTION OF TestInspectionArea.Base.Parcel -> Geometrie;
+      =
+      ATTRIBUTE
+        Line := Parcel -> Geometry;
+        Left := THISAREA -> Name;
+        Right := THATAREA -> Name;
+    END ParcelEdgeNeighbours;
+  END Base;
+
+END TestInspectionArea.

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS" xmlns="http://www.interlis.ch/xtf/2.4/TestInspectionArea">
+  <ili:headersection sender="test-fixture" version="2.4">
+    <ili:models>
+      <ili:model>TestInspectionArea</ili:model>
+    </ili:models>
+  </ili:headersection>
+  <ili:datasection>
+    <Base ili:bid="b1">
+      <Parcel ili:tid="a"><Name>Parcel A</Name><Geometrie><AREA><BOUNDARY><POLYLINE><COORD><C1>2600100</C1><C2>1200000</C2></COORD><COORD><C1>2600100</C1><C2>1200100</C2></COORD></POLYLINE><POLYLINE><COORD><C1>2600100</C1><C2>1200100</C2></COORD><COORD><C1>2600000</C1><C2>1200100</C2></COORD><COORD><C1>2600000</C1><C2>1200000</C2></COORD><COORD><C1>2600100</C1><C2>1200000</C2></COORD></POLYLINE></BOUNDARY></AREA></Geometrie></Parcel>
+      <Parcel ili:tid="b"><Name>Parcel B</Name><Geometrie><AREA><BOUNDARY><POLYLINE><COORD><C1>2600100</C1><C2>1200100</C2></COORD><COORD><C1>2600100</C1><C2>1200000</C2></COORD></POLYLINE><POLYLINE><COORD><C1>2600100</C1><C2>1200000</C2></COORD><COORD><C1>2600200</C1><C2>1200000</C2></COORD><COORD><C1>2600200</C1><C2>1200100</C2></COORD><COORD><C1>2600100</C1><C2>1200100</C2></COORD></POLYLINE></BOUNDARY></AREA></Geometrie></Parcel>
+    </Base>
+  </ili:datasection>
+</ili:transfer>

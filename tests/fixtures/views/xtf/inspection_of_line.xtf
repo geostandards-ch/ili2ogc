@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS" xmlns="http://www.interlis.ch/xtf/2.4/TestInspectionLine">
+  <ili:headersection sender="test-fixture" version="2.4">
+    <ili:models>
+      <ili:model>TestInspectionLine</ili:model>
+    </ili:models>
+  </ili:headersection>
+  <ili:datasection>
+    <Base ili:bid="b1">
+      <Road ili:tid="r1"><Name>Road 1</Name><Axis><POLYLINE><COORD><C1>2600000</C1><C2>1200000</C2></COORD><COORD><C1>2600100</C1><C2>1200000</C2></COORD><COORD><C1>2600100</C1><C2>1200100</C2></COORD><COORD><C1>2600200</C1><C2>1200100</C2></COORD></POLYLINE></Axis></Road>
+      <Road ili:tid="r2"><Name>Road 2</Name><Axis><POLYLINE><COORD><C1>2601000</C1><C2>1200000</C2></COORD><ARC><C1>2601100</C1><C2>1200100</C2><A1>2601050</A1><A2>1200070</A2></ARC><COORD><C1>2601200</C1><C2>1200100</C2></COORD></POLYLINE></Axis></Road>
+    </Base>
+  </ili:datasection>
+</ili:transfer>

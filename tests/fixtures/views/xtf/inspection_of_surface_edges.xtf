@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS" xmlns="http://www.interlis.ch/xtf/2.4/TestInspectionSurfaceEdges">
+  <ili:headersection sender="test-fixture" version="2.4">
+    <ili:models>
+      <ili:model>TestInspectionSurfaceEdges</ili:model>
+    </ili:models>
+  </ili:headersection>
+  <ili:datasection>
+    <Base ili:bid="b1">
+      <Zone ili:tid="z1"><Name>Zone A</Name><Geometrie><SURFACE><BOUNDARY><POLYLINE><COORD><C1>2600000</C1><C2>1200000</C2></COORD><COORD><C1>2600100</C1><C2>1200000</C2></COORD><COORD><C1>2600100</C1><C2>1200100</C2></COORD><COORD><C1>2600000</C1><C2>1200100</C2></COORD><COORD><C1>2600000</C1><C2>1200000</C2></COORD></POLYLINE></BOUNDARY><BOUNDARY><POLYLINE><COORD><C1>2600020</C1><C2>1200020</C2></COORD><COORD><C1>2600020</C1><C2>1200060</C2></COORD><COORD><C1>2600060</C1><C2>1200060</C2></COORD><COORD><C1>2600060</C1><C2>1200020</C2></COORD><COORD><C1>2600020</C1><C2>1200020</C2></COORD></POLYLINE></BOUNDARY></SURFACE></Geometrie></Zone>
+      <Zone ili:tid="z2"><Name>Zone B</Name><Geometrie><SURFACE><BOUNDARY><POLYLINE><COORD><C1>2601000</C1><C2>1200000</C2></COORD><COORD><C1>2601100</C1><C2>1200000</C2></COORD><COORD><C1>2601100</C1><C2>1200100</C2></COORD><COORD><C1>2601000</C1><C2>1200000</C2></COORD></POLYLINE></BOUNDARY></SURFACE></Geometrie></Zone>
+    </Base>
+  </ili:datasection>
+</ili:transfer>

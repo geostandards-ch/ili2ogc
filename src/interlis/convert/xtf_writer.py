@@ -160,8 +160,8 @@ def write_view_basket(
     a DIFFERENT topic).
 
     Every `FormationKind` is supported (`evaluate_view_objects` - only an
-    `INSPECTION` of a single-hop SURFACE/AREA geometry raises `ValueError`
-    there, no XTF-transferable shape at all).
+    `INSPECTION` of a SURFACE/AREA/POLYLINE geometry raises `ValueError`
+    there, its derived geometry values have no XTF-transferable shape).
 
     Object/basket tags: `evaluate_view_objects`' returned `XtfObject`s keep
     whichever `qualified_class` their SOURCE object(s) happened to carry

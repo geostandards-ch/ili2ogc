@@ -1,0 +1,34 @@
+INTERLIS 2.3;
+
+!! INSPECTION OF an indirect path (-> Attr2 -> Attr3) with a `PARENT->` view
+!! attribute: the parent of an Attr3 element is the Attr2 element (type A)
+!! that holds it, not the owning object B (eCH-0031 SS3.13: "das Ober-
+!! Strukturelement oder Ober-Objekt des aktuellen Strukturelementes"). The SQL
+!! translation joins the intermediate child table `b_attr2`.
+
+MODEL TestInspectionNestedParent AT "http://www.interlis.ch/ili2c/tests/" VERSION "1" =
+
+  TOPIC Base =
+    STRUCTURE C =
+      Attr4: TEXT*20;
+    END C;
+
+    STRUCTURE A =
+      Attr1: TEXT*20;
+      Attr3: BAG OF C;
+    END A;
+
+    CLASS B =
+      Attr2: BAG OF A;
+    END B;
+
+    VIEW VB
+      INSPECTION OF TestInspectionNestedParent.Base.B -> Attr2 -> Attr3;
+      =
+      ATTRIBUTE
+        Attr4: TEXT*20 := B -> Attr4;
+        ParentLabel := PARENT -> Attr1;
+    END VB;
+  END Base;
+
+END TestInspectionNestedParent.

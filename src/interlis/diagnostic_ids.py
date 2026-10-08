@@ -103,7 +103,8 @@ REGISTRY: dict[str, tuple[str, str]] = {
     ),
     "SQL-VIEW-FORMATION-UNSUPPORTED": (
         "A",
-        "a UNION/AGGREGATION/INSPECTION VIEW is not translated to CREATE VIEW (only PROJECTION/JOIN are)",
+        "an AGGREGATION/INSPECTION VIEW member cannot be expressed in SQL (user FUNCTION, ArcPoint, THISAREA/THATAREA, "
+        "a path deeper than the emitted child tables, a PostGIS-only AREA INSPECTION in a GeoPackage)",
     ),
     "SQL-VIEW-JOIN-UNLINKED": (
         "B",
@@ -128,7 +129,8 @@ REGISTRY: dict[str, tuple[str, str]] = {
     "JSONFG-VIEW-INSPECTION-GAP": ("A", "an INSPECTION VIEW's '-> attribute' path was not built by the model builder"),
     "JSONFG-VIEW-FORMATION-UNSUPPORTED": (
         "B",
-        "an AGGREGATION VIEW column is a user FUNCTION over the implicit AGGREGATES bag - needs a function engine",
+        "an AGGREGATION column is a user FUNCTION over the implicit AGGREGATES bag (declared without a body - needs an "
+        "external function engine), or an INSPECTION attribute reads a member the element type does not offer",
     ),
     # -- builder ----------------------------------------------------------
     "BUILD-TYPE-UNRESOLVED": (

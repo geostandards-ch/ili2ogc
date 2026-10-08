@@ -1,0 +1,31 @@
+INTERLIS 2.3;
+
+!! EQUAL(key) AGGREGATION OF with a WHERE selection and a plain attribute
+!! that is not the key: the base objects are filtered first, then grouped
+!! on the key AND on every plain attribute (SQL GROUP BY / JSON-FG groups
+!! agree), with the group size in a standard objectCount(AGGREGATES) column.
+
+MODEL TestAggregationWhere AT "http://www.interlis.ch/ili2c/tests/" VERSION "1" =
+
+  TOPIC Base =
+    CLASS Parcel =
+      Municipality: TEXT*40;
+      Zone: TEXT*20;
+    END Parcel;
+  END Base;
+
+  TOPIC Aggregation =
+    DEPENDS ON TestAggregationWhere.Base;
+
+    VIEW ZoneStats
+      AGGREGATION OF TestAggregationWhere.Base.Parcel EQUAL(Parcel -> Municipality);
+      WHERE Parcel -> Zone != "industrial";
+      =
+      ATTRIBUTE
+        Municipality: TEXT*40 := Parcel -> Municipality;
+        Zone := Parcel -> Zone;
+        ParcelCount := INTERLIS.objectCount(AGGREGATES);
+    END ZoneStats;
+  END Aggregation;
+
+END TestAggregationWhere.

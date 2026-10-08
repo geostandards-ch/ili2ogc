@@ -416,10 +416,13 @@ _BOUNDARY_TAGS = frozenset({"BOUNDARY", "EXTERIOR", "INTERIOR"})
 def _validate_boundary_node(node: RawNode, axes: list[MetaInstance], ctx: str) -> list[str]:
     if _geom_tag(node) not in _BOUNDARY_TAGS:
         return [f"{ctx}: expected BOUNDARY geometry, found tag {node.tag!r}"]
-    polyline = _find_child(node, "POLYLINE")
-    if polyline is None:
+    polylines = [c for c in node.children if _geom_tag(c) == "POLYLINE"]
+    if not polylines:
         return [f"{ctx}: BOUNDARY without POLYLINE"]
-    return _validate_polyline_node(polyline, axes, f"{ctx}/POLYLINE")
+    problems: list[str] = []
+    for i, polyline in enumerate(polylines):
+        problems.extend(_validate_polyline_node(polyline, axes, f"{ctx}/POLYLINE" + (f"[{i}]" if i else "")))
+    return problems
 
 
 # SURFACE and AREA share one wire encoding (see _LINE_KIND_TAGS) - both

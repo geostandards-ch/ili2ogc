@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS" xmlns="http://www.interlis.ch/xtf/2.4/TestInspectionDeep">
+  <ili:headersection sender="test-fixture" version="2.4">
+    <ili:models>
+      <ili:model>TestInspectionDeep</ili:model>
+    </ili:models>
+  </ili:headersection>
+  <ili:datasection>
+    <Base ili:bid="b1">
+      <B ili:tid="b1o1">
+        <Attr2>
+          <A>
+            <Attr1>first</Attr1>
+            <Attr3>
+              <C>
+                <Attr4>alpha</Attr4>
+                <Attr6><D><Attr5>one</Attr5></D><D><Attr5>two</Attr5></D></Attr6>
+              </C>
+              <C>
+                <Attr4>beta</Attr4>
+                <Attr6><D><Attr5>three</Attr5></D></Attr6>
+              </C>
+            </Attr3>
+          </A>
+        </Attr2>
+      </B>
+    </Base>
+  </ili:datasection>
+</ili:transfer>

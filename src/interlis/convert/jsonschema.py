@@ -15,6 +15,12 @@ from typing import Any
 import jsonschema
 
 from interlis.builder.forward_refs import SymbolTable
+from interlis.convert.view_formation import (
+    SURFACE_BOUNDARY,
+    geometry_inspection,
+    inspection_reading,
+    is_standard_count_call,
+)
 from interlis.metamodel.instance import MetaInstance
 from interlis.xtf.schema import (
     ResolvedAttribute,
@@ -571,6 +577,72 @@ def _assign_keys(classes_by_id: dict[int, MetaInstance]) -> dict[int, str]:
     return keys
 
 
+_LINE_GEOMETRY_TYPES = ["LineString", "CircularString", "CompoundCurve"]
+_BOUNDARY_GEOMETRY_TYPES = ["LineString", "MultiLineString", "MultiCurve"]
+
+
+def _geometry_value_schema(types: list[str]) -> dict[str, Any]:
+    """A GeoJSON/JSON-FG geometry object of one of `types`, as `convert-jsonfg` writes a derived geometry value."""
+    return {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+            "type": {"enum": types},
+            "coordinates": {"type": "array"},
+            "geometries": {"type": "array"},
+        },
+    }
+
+
+def _geometry_inspection_schemas(
+    view: MetaInstance, ref_keys: dict[int, str], symbol_table: SymbolTable | None
+) -> dict[str, dict[str, Any]]:
+    """Property schemas of an `INSPECTION OF` a SURFACE/AREA/POLYLINE view, by view attribute name.
+
+    The values are derived, not the inspected attribute's own type: a
+    boundary/edge/line is a geometry object, a segment end point a `Point`,
+    and a `PARENT`/`THISAREA`/`THATAREA` read keeps the owning attribute's
+    schema.
+    """
+    bases = [b for b in getattr(view, "RenamedBaseView", None) or [] if isinstance(b.BaseView, MetaInstance)]
+    if getattr(view, "FormationKind", None) != "Inspection" or len(bases) != 1:
+        return {}
+    base_view = bases[0].BaseView
+    insp = geometry_inspection(view, base_view, symbol_table)
+    if insp is None or insp.problem is not None:
+        return {}
+    members = schema_members_of(base_view, symbol_table) if symbol_table is not None else attributes_of(base_view)
+    geometry_type = resolve_attribute(members[insp.attr]).type_instance
+    alias = getattr(bases[0], "Name", None) or getattr(base_view, "Name", None) or ""
+    schemas: dict[str, dict[str, Any]] = {}
+    for attr in getattr(view, "ClassAttribute", None) or []:
+        derivates = getattr(attr, "Derivates", None) or []
+        reading, _why = inspection_reading(derivates[0] if derivates else None, insp, alias)
+        if reading is None or not getattr(attr, "Name", None):
+            continue
+        if reading.what == "geometry":
+            types = _BOUNDARY_GEOMETRY_TYPES if insp.kind == SURFACE_BOUNDARY else _LINE_GEOMETRY_TYPES
+            schemas[attr.Name] = _geometry_value_schema(types)
+        elif reading.what in ("endpoint", "arcpoint"):
+            schemas[attr.Name] = {
+                "type": "object",
+                "required": ["type", "coordinates"],
+                "properties": {
+                    "type": {"const": "Point"},
+                    "coordinates": _position_schema(line_coord_type(geometry_type)),
+                },
+            }
+        elif reading.field in members:
+            schemas[attr.Name] = _attribute_schema(resolve_attribute(members[reading.field]), ref_keys, symbol_table)
+    return schemas
+
+
+def _is_untyped_count_column(attr: MetaInstance) -> bool:
+    """True for an aggregation-view attribute `Name := INTERLIS.objectCount(AGGREGATES)` declared without a type."""
+    derivates = getattr(attr, "Derivates", None) or []
+    return bool(derivates) and is_standard_count_call(derivates[0])
+
+
 def class_to_json_schema(
     class_instance: MetaInstance,
     ref_keys: dict[int, str] | None = None,
@@ -625,9 +697,15 @@ def class_to_json_schema(
     members = (
         schema_members_of(class_instance, symbol_table) if symbol_table is not None else attributes_of(class_instance)
     )
+    derived = _geometry_inspection_schemas(class_instance, ref_keys, symbol_table)
     for name, attr in members.items():
         resolved = resolve_attribute(attr)
-        properties[name] = _attribute_schema(resolved, ref_keys, symbol_table)
+        if name in derived:
+            properties[name] = derived[name]
+        elif resolved.type_kind is None and _is_untyped_count_column(attr):
+            properties[name] = {"type": "integer", "minimum": 0}
+        else:
+            properties[name] = _attribute_schema(resolved, ref_keys, symbol_table)
         if resolved.mandatory:
             required.append(name)
     schema: dict[str, Any] = {"type": "object", "properties": properties}

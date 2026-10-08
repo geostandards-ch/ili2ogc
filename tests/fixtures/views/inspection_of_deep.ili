@@ -1,0 +1,37 @@
+INTERLIS 2.3;
+
+!! INSPECTION OF a path three structure levels deep (-> Attr2 -> Attr3 ->
+!! Attr6). JSON-FG walks any depth; SQL translates it only as far as
+!! `build_tables` emits child tables (two nested levels), and otherwise
+!! reports the missing table instead of inventing one.
+
+MODEL TestInspectionDeep AT "http://www.interlis.ch/ili2c/tests/" VERSION "1" =
+
+  TOPIC Base =
+    STRUCTURE D =
+      Attr5: TEXT*20;
+    END D;
+
+    STRUCTURE C =
+      Attr4: TEXT*20;
+      Attr6: BAG OF D;
+    END C;
+
+    STRUCTURE A =
+      Attr1: TEXT*20;
+      Attr3: BAG OF C;
+    END A;
+
+    CLASS B =
+      Attr2: BAG OF A;
+    END B;
+
+    VIEW VB
+      INSPECTION OF TestInspectionDeep.Base.B -> Attr2 -> Attr3 -> Attr6;
+      =
+      ATTRIBUTE
+        Attr5: TEXT*20 := B -> Attr5;
+    END VB;
+  END Base;
+
+END TestInspectionDeep.

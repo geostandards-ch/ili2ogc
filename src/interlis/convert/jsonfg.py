@@ -54,7 +54,20 @@ from interlis.convert.constraint_eval import (
     evaluate_expression,
 )
 from interlis.convert.jsonschema import _is_integer_range
+from interlis.convert.view_formation import (
+    LINE_GEOMETRY,
+    LINE_SEGMENT,
+    SURFACE_BOUNDARY,
+    SURFACE_EDGE,
+    GeometryInspection,
+    InspectionReading,
+    aggregation_column_problem,
+    geometry_inspection,
+    inspection_reading,
+    is_standard_count_call,
+)
 from interlis.metamodel.instance import MetaInstance
+from interlis.runtime.parse import _unquote_interlis_string
 from interlis.xtf.parse import RawNode, XtfObject, XtfTransfer
 from interlis.xtf.schema import (
     ResolvedAttribute,
@@ -74,7 +87,6 @@ from interlis.xtf.validate import (
     _SURFACE_TAGS,
     _axis_components,
     _extract_reference,
-    _find_child,
     _geom_tag,
     _group_by_tag,
 )
@@ -571,10 +583,19 @@ def _read_polyline(node: RawNode) -> list[list[float]] | dict[str, Any] | None:
 
 
 def _read_boundary(node: RawNode) -> list[list[float]] | dict[str, Any] | None:
+    """Read one BOUNDARY: its consecutive POLYLINE pieces (Randlinien) joined into a single closed line."""
     if _geom_tag(node) not in _BOUNDARY_TAGS:
         return None
-    polyline = _find_child(node, "POLYLINE")
-    return None if polyline is None else _read_polyline(polyline)
+    pieces: list[dict[str, Any]] = []
+    for polyline in (c for c in node.children if _geom_tag(c) == "POLYLINE"):
+        value = _read_polyline(polyline)
+        if value is None:
+            return None
+        pieces.append(_as_line(value))
+    if not pieces:
+        return None
+    joined = _join_pieces(pieces)
+    return joined["coordinates"] if joined["type"] == "LineString" else joined
 
 
 def _read_surface(node: RawNode) -> list[list[list[float]]] | dict[str, Any] | None:
@@ -1407,8 +1428,9 @@ def _object_to_feature(
 #   PROJECTION OF   one base           re-tag each matching object
 #   JOIN OF         N bases            cartesian product (`_join_combinations`)
 #   UNION OF        N bases            concatenate every base's objects
-#   AGGREGATION OF  one base, ALL/EQUAL  group + one representative per group
-#   INSPECTION OF   one base -> attr   one Feature per element of the attr
+#   AGGREGATION OF  one base, ALL/EQUAL  one Feature per group (counts computed)
+#   INSPECTION OF   one base -> attr   one Feature per element of the attr (a
+#                                      geometry attr: boundary/edge/segment)
 #
 # A `WHERE` clause narrows a JOIN/PROJECTION per combination. It is
 # evaluated by `convert/constraint_eval.evaluate_expression` over a
@@ -1532,9 +1554,9 @@ def unsupported_view_reason(view: MetaInstance) -> str | None:
     every VIEW it skips instead of a silent omission. The remaining
     reasons are a genuinely unavailable base model (RULE #9 - provide it
     via `--repo`), a `WHERE` construct outside the CONSTRAINT evaluator's
-    scope (arithmetic / function call), and an AGGREGATION whose columns
-    are user-FUNCTION results over the implicit `AGGREGATES` bag (needs a
-    function engine - out of scope by design).
+    scope (arithmetic / function call), and an AGGREGATION column that is
+    a user-FUNCTION result over the implicit `AGGREGATES` bag (an external
+    function the model only declares - no converter can run it).
     """
     kind = getattr(view, "FormationKind", None)
     if kind not in ("Projection", "Join", "Union", "Aggregation", "Inspection"):
@@ -1548,17 +1570,37 @@ def unsupported_view_reason(view: MetaInstance) -> str | None:
         return "base model not resolvable - pass it via --repo"
     if kind == "Inspection" and not _inspection_path(view):
         return "INSPECTION path (the '-> attribute' chain) was not built - InterlisModelBuilder gap"
+    if kind == "Inspection" and (problem := _geometry_inspection_problem(view, bases[0])) is not None:
+        return problem
     if kind == "Aggregation":
-        for attr in getattr(view, "ClassAttribute", None) or []:
-            for factor in getattr(attr, "Derivates", None) or []:
-                if not factor._qualified_class.endswith(("PathOrInspFactor", "Constant")):
-                    return (
-                        f"AGGREGATION attribute {getattr(attr, 'Name', None)!r} is a FUNCTION over the implicit "
-                        "AGGREGATES bag - needs a function engine (out of scope)"
-                    )
+        columns = list(getattr(view, "ClassAttribute", None) or [])
+        for attr in columns:
+            if (problem := aggregation_column_problem(attr)) is not None:
+                return problem
+        if getattr(view, "_aggregation_key", None) is None and _aggregation_mixes_count_and_plain(columns):
+            return (
+                "AGGREGATION ALL combines a count of AGGREGATES with a plain attribute - "
+                "no EQUAL(...) grouping key makes that combination well-defined"
+            )
     where = getattr(view, "Where", None)
     if where is not None and (reason := _view_where_unsupported(where)) is not None:
         return f"WHERE clause: {reason}"
+    return None
+
+
+def _geometry_inspection_problem(view: MetaInstance, base: MetaInstance) -> str | None:
+    """Why an `INSPECTION` of a geometry attribute cannot be evaluated, or `None` (also for a structure path)."""
+    insp = geometry_inspection(view, base.BaseView, None)
+    if insp is None:
+        return None
+    if insp.problem is not None:
+        return f"INSPECTION {insp.problem}"
+    alias = _view_alias(base) or ""
+    for attr in getattr(view, "ClassAttribute", None) or []:
+        derivates = getattr(attr, "Derivates", None) or []
+        _reading, why = inspection_reading(derivates[0] if derivates else None, insp, alias)
+        if why is not None:
+            return f"INSPECTION attribute {getattr(attr, 'Name', None)!r} {why}"
     return None
 
 
@@ -1741,7 +1783,7 @@ def _view_combos(
     *,
     symbol_table: SymbolTable,
     repository: ModelRepository | None = None,
-) -> tuple[list[MetaInstance], list[list[XtfObject | None]]]:
+) -> tuple[list[MetaInstance], list[list[XtfObject | None]], dict[str, XtfObject]]:
     """Shared PROJECTION/AGGREGATION/JOIN setup: resolve bases, their matching objects, and WHERE-filtered combos.
 
     One combo per kept result row - a 1-element list for PROJECTION/
@@ -1777,29 +1819,114 @@ def _view_combos(
         combos: list[list[XtfObject | None]] = [[obj] for obj in objects_by_base[0] if _passes_where([obj])]
     else:  # Join
         combos = [combo for combo in _join_combinations(bases, objects_by_base) if _passes_where(combo)]
-    return bases, combos
+    return bases, combos, by_tid
 
 
-def _dedup_objects(objects: list[XtfObject]) -> list[XtfObject]:
-    """Keep one `XtfObject` per distinct set of projected attributes - AGGREGATION's `ALL` reading.
+def _raw_node_key(node: RawNode) -> tuple[Any, ...]:
+    """Structural identity of a `RawNode` subtree (tag, text, attributes, children), never Python identity."""
+    return (node.tag, node.text, tuple(sorted(node.attrib.items())), tuple(_raw_node_key(c) for c in node.children))
 
-    Mirrors `_dedup_features`, one step earlier (before JSON-FG's
-    place/properties split) - so `evaluate_view_objects`'s AGGREGATION
-    output collapses on the same rows `evaluate_view`'s does, just
-    `XtfObject`-shaped. Compares `RawNode` structurally (tag/text/attrib/
-    children, recursively) rather than by Python identity.
+
+def _count_column_names(view: MetaInstance) -> list[str]:
+    return [
+        a.Name
+        for a in getattr(view, "ClassAttribute", None) or []
+        if getattr(a, "Derivates", None) and is_standard_count_call(a.Derivates[0])
+    ]
+
+
+def _aggregation_mixes_count_and_plain(columns: list[MetaInstance]) -> bool:
+    counts = [bool(a.Derivates) and is_standard_count_call(a.Derivates[0]) for a in columns if a.Derivates]
+    return any(counts) and not all(counts)
+
+
+def _factor_nodes(factor: MetaInstance, alias: str, obj: XtfObject, by_tid: dict[str, XtfObject]) -> list[RawNode]:
+    """Evaluate a view attribute path (`Alias -> a (-> b)*`) on `obj` into the wire nodes it denotes.
+
+    Every hop but the last must be a reference; an unresolved hop yields no
+    nodes (the SQL translation's LEFT JOIN yields NULL there).
     """
+    refs = [getattr(el, "Ref", None) for el in (getattr(factor, "PathEls", None) or [])]
+    if len(refs) > 1 and refs[0] and refs[0].lower() == alias.lower():
+        refs = refs[1:]
+    current: XtfObject | None = obj
+    for i, name in enumerate(refs):
+        if name is None or current is None:
+            return []
+        nodes = current.attributes.get(name) or []
+        if i == len(refs) - 1:
+            return list(nodes)
+        target = _extract_reference(nodes[0]) if nodes else None
+        current = by_tid.get(target) if target else None
+    return []
 
-    def _raw_node_key(node: RawNode) -> tuple[Any, ...]:
-        return (node.tag, node.text, tuple(sorted(node.attrib.items())), tuple(_raw_node_key(c) for c in node.children))
 
-    seen: set[tuple[Any, ...]] = set()
+def _constant_nodes(factor: MetaInstance, name: str) -> list[RawNode]:
+    value = getattr(factor, "Value", None)
+    if value is None:
+        return []
+    text = _unquote_interlis_string(value) if getattr(factor, "Type", None) == "Text" else str(value)
+    return [RawNode(name, text, {}, [])]
+
+
+def _aggregation_objects(
+    view: MetaInstance,
+    bases: list[MetaInstance],
+    combos: list[list[XtfObject | None]],
+    by_tid: dict[str, XtfObject],
+) -> list[XtfObject]:
+    """Evaluate `AGGREGATION OF base (ALL | EQUAL(key))` into one `XtfObject` per group.
+
+    Mirrors the SQL translation exactly: `EQUAL(key)` groups on the key and
+    on every plain attribute (`GROUP BY`); `ALL` without a count keeps the
+    distinct rows (`SELECT DISTINCT`); `ALL` with a count column is a single
+    group, present even when no base object survives (an ungrouped
+    `COUNT(*)` always returns a row). `INTERLIS.objectCount/elementCount
+    (AGGREGATES)` columns hold the group size. A group stands for several
+    base objects, so its row has no TID - except a plain `ALL` row, which
+    keeps its first member's TID.
+    """
+    alias = _view_alias(bases[0]) or ""
+    key_factor = getattr(view, "_aggregation_key", None)
+    plain: list[tuple[str, MetaInstance]] = []
+    counts: list[str] = []
+    for attr in getattr(view, "ClassAttribute", None) or []:
+        name, derivates = getattr(attr, "Name", None), getattr(attr, "Derivates", None) or []
+        if not name or not derivates:
+            continue
+        if is_standard_count_call(derivates[0]):
+            counts.append(name)
+        else:
+            plain.append((name, derivates[0]))
+    groups: dict[tuple[Any, ...], tuple[XtfObject, dict[str, list[RawNode]], int]] = {}
+    for obj in (combo[0] for combo in combos if combo[0] is not None):
+        values: dict[str, list[RawNode]] = {}
+        for name, factor in plain:
+            values[name] = (
+                _constant_nodes(factor, name)
+                if factor._qualified_class.endswith("Constant")
+                else _factor_nodes(factor, alias, obj, by_tid)
+            )
+        key = (
+            (
+                None
+                if key_factor is None
+                else tuple(_raw_node_key(n) for n in _factor_nodes(key_factor, alias, obj, by_tid))
+            ),
+            tuple(tuple(_raw_node_key(n) for n in values[name]) for name, _f in plain),
+        )
+        first, first_values, size = groups.get(key, (obj, values, 0))
+        groups[key] = (first, first_values, size + 1)
+    if counts and key_factor is None and not groups:
+        groups[(None, ())] = (XtfObject(None, "", {}), {}, 0)
+    view_name = getattr(view, "Name", None) or "View"
+    grouped = key_factor is not None or bool(counts)
     out: list[XtfObject] = []
-    for obj in objects:
-        key = tuple(sorted((name, tuple(_raw_node_key(n) for n in nodes)) for name, nodes in obj.attributes.items()))
-        if key not in seen:
-            seen.add(key)
-            out.append(obj)
+    for first, values, size in groups.values():
+        attributes = {name: nodes for name, nodes in values.items() if nodes}
+        for name in counts:
+            attributes[name] = [RawNode(name, str(size), {}, [])]
+        out.append(XtfObject(None if grouped else first.tid, view_name, attributes))
     return out
 
 
@@ -1826,11 +1953,11 @@ def evaluate_view_objects(
     UNION returns each base's own objects, re-keyed under the union's
     per-base attribute assignment (`_union_projected_object`). INSPECTION
     returns one `XtfObject` per inspected element (`_inspection_elements`)
-    - EXCEPT the single-hop SURFACE/AREA geometry case
-    (`_single_hop_surface_attr`), which raises `ValueError`: it has no
-    element TYPE at all (a decomposed boundary ring list, a JSON-FG-only
-    shape - see `_evaluate_geometry_inspection`), so there is nothing an
-    XTF writer could serialize as a named attribute.
+    - EXCEPT an inspection of a SURFACE/AREA/POLYLINE attribute
+    (`geometry_inspection`), which raises `ValueError`: its elements are
+    derived geometry values with no element TYPE (see
+    `_evaluate_geometry_inspection`), nothing an XTF writer could
+    serialize as a named attribute.
 
     Raises `ValueError` if `unsupported_view_reason(view)` isn't `None`,
     same precondition as `evaluate_view`.
@@ -1852,12 +1979,14 @@ def evaluate_view_objects(
         if kind == "Inspection":
             path = _inspection_path(view)
             base_view = bases[0].BaseView
-            if _single_hop_surface_attr(base_view, path, symbol_table) is not None:
+            if geometry_inspection(view, base_view, symbol_table) is not None:
                 raise ValueError(
-                    f"evaluate_view_objects: INSPECTION {view_name!r} of a single-hop SURFACE/AREA geometry "
-                    "has no XTF-transferable shape (a decomposed boundary ring list, JSON-FG-only)"
+                    f"evaluate_view_objects: INSPECTION {view_name!r} of a SURFACE/AREA/POLYLINE attribute "
+                    "has no XTF-transferable shape (derived geometry values, JSON-FG-only)"
                 )
-            elements, _element_type = _inspection_elements(view, base_view, objects_by_base[0], path, symbol_table)
+            elements, _element_type, _parents = _inspection_elements(
+                view, base_view, objects_by_base[0], path, symbol_table
+            )
             return elements
         n_bases = len(bases)
         return [
@@ -1866,12 +1995,12 @@ def evaluate_view_objects(
             for obj in objs
         ]
 
-    _bases, combos = _view_combos(view, transfer, symbol_table=symbol_table, repository=repository)
+    bases, combos, by_tid = _view_combos(view, transfer, symbol_table=symbol_table, repository=repository)
+    if kind == "Aggregation":
+        return _aggregation_objects(view, bases, combos, by_tid)
     if kind == "Join":
-        objects = [_project_object_under_view_names(view, _merge_join_combo(combo, view_name)) for combo in combos]
-    else:
-        objects = [_project_object_under_view_names(view, combo[0]) for combo in combos if combo[0] is not None]
-    return _dedup_objects(objects) if kind == "Aggregation" else objects
+        return [_project_object_under_view_names(view, _merge_join_combo(combo, view_name)) for combo in combos]
+    return [_project_object_under_view_names(view, combo[0]) for combo in combos if combo[0] is not None]
 
 
 def evaluate_view(
@@ -1898,10 +2027,9 @@ def evaluate_view(
     - `UNION OF` (N bases): every base's matching objects, concatenated,
       each re-tagged with `view` (compatible base viewables - the union of
       their extensions).
-    - `AGGREGATION OF` (1 base): one representative Feature per group of
-      base objects equal on the result attributes (the conservative `ALL`
-      reading - `EQUAL (key)` grouping needs `View.FormationParameter`,
-      still a builder gap, and collapses to this when unavailable).
+    - `AGGREGATION OF` (1 base): one Feature per group (`_aggregation_objects`):
+      `EQUAL(key)` groups on the key, `ALL` keeps the distinct rows;
+      `INTERLIS.objectCount/elementCount(AGGREGATES)` columns count the group.
     - `INSPECTION OF base -> attr` (1 base): one Feature per element of the
       inspected `BAG`/`LIST`/reference attribute on each base object.
 
@@ -1927,6 +2055,7 @@ def evaluate_view(
             return _evaluate_inspection(
                 view,
                 bases[0].BaseView,
+                _view_alias(bases[0]) or "",
                 objects_by_base[0],
                 _inspection_path(view),
                 standalone,
@@ -1946,10 +2075,22 @@ def evaluate_view(
             for obj in objs
         ]
 
-    bases, combos = _view_combos(view, transfer, symbol_table=symbol_table, repository=repository)
+    bases, combos, by_tid = _view_combos(view, transfer, symbol_table=symbol_table, repository=repository)
 
-    if kind in ("Projection", "Aggregation"):
-        kept = [
+    if kind == "Aggregation":
+        count_columns = _count_column_names(view)
+        aggregated = []
+        for group in _aggregation_objects(view, bases, combos, by_tid):
+            feature = object_to_feature(
+                group, view, standalone=standalone, symbol_table=symbol_table, repository=repository
+            )
+            for name in count_columns:  # a count has no declared type unless the model gave one
+                feature["properties"][name] = int(group.attributes[name][0].text)
+            aggregated.append(feature)
+        return aggregated
+
+    if kind == "Projection":
+        return [
             object_to_feature(
                 _project_object_under_view_names(view, combo[0]),
                 view,
@@ -1960,7 +2101,6 @@ def evaluate_view(
             for combo in combos
             if combo[0] is not None
         ]
-        return _dedup_features(kept) if kind == "Aggregation" else kept
 
     features = []
     for combo in combos:
@@ -1976,23 +2116,6 @@ def evaluate_view(
             feature["x-join-members"] = members
         features.append(feature)
     return features
-
-
-def _dedup_features(features: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep one Feature per distinct `properties`/`place` - AGGREGATION's `ALL` reading."""
-    seen: set[str] = set()
-    out: list[dict[str, Any]] = []
-    for feature in features:
-        key = json.dumps(
-            {"properties": feature.get("properties"), "place": feature.get("place")},
-            sort_keys=True,
-            ensure_ascii=False,
-            default=str,
-        )
-        if key not in seen:
-            seen.add(key)
-            out.append(feature)
-    return out
 
 
 def _inspection_target(
@@ -2034,95 +2157,205 @@ def _inspection_target(
     return (current if ok else None), (is_multi if ok else False), hop_is_multi
 
 
-def _surface_boundary_geometry(attr_node: RawNode) -> dict[str, Any] | None:
-    """Decompose a SURFACE/AREA attribute occurrence into its boundary, as GeoJSON `LineString` (1 ring) /
-    `MultiLineString` (2+ rings, e.g. a polygon with holes).
+def _as_line(value: list[list[float]] | dict[str, Any]) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {"type": "LineString", "coordinates": value}
 
-    The eCH-0031 SS3.15 geometric `INSPECTION` decomposition
-    (conceptually `SurfaceBoundary`/`SurfaceEdge`), read as plain geometry
-    rather than the full nested `Lines`/`SurfaceEdge` structure - same
-    scope decision as `convert/sql.py`'s `_build_geometry_inspection_view`
-    (see its own docstring). An arc-containing ring (`_read_surface`'s
-    `CurvePolygon` shape) is out of scope - no real corpus evidence
-    combines the two - and returns `None` (the caller drops the
-    attribute, RULE #5).
+
+def _join_pieces(pieces: list[dict[str, Any]]) -> dict[str, Any]:
+    """Concatenate the consecutive POLYLINE pieces of one boundary into a single line.
+
+    eCH-0031 SS3.15 builds the `SurfaceEdge`s of a boundary so that their
+    number is minimal: consecutive polylines are merged into one.
     """
-    child = attr_node.children[0] if attr_node.children else None
-    if child is None:
-        return None
-    rings = _read_surface(child)
-    if not isinstance(rings, list) or not rings or any(isinstance(r, dict) for r in rings):
-        return None
-    if len(rings) == 1:
-        return {"type": "LineString", "coordinates": rings[0]}
-    return {"type": "MultiLineString", "coordinates": rings}
+    if len(pieces) == 1:
+        return pieces[0]
+    if all(p["type"] == "LineString" for p in pieces):
+        coords = list(pieces[0]["coordinates"])
+        for piece in pieces[1:]:
+            tail = piece["coordinates"]
+            coords.extend(tail[1:] if tail and tail[0] == coords[-1] else tail)
+        return {"type": "LineString", "coordinates": coords}
+    parts: list[dict[str, Any]] = []
+    for piece in pieces:
+        parts.extend(piece["geometries"] if piece["type"] == "CompoundCurve" else [piece])
+    return {"type": "CompoundCurve", "geometries": parts}
 
 
-def _single_hop_surface_attr(base_view: MetaInstance, path: list[str], symbol_table: SymbolTable | None) -> str | None:
-    """Return `path[0]` when it names a single-valued SURFACE/AREA attribute directly on `base_view`, else `None`.
+def _surface_boundaries(attr_node: RawNode) -> list[list[dict[str, Any]]] | None:
+    """Each BOUNDARY of a SURFACE/AREA attribute value as its POLYLINE pieces (line geometries), or `None`."""
+    surface = attr_node.children[0] if attr_node.children else None
+    if surface is None or _geom_tag(surface) not in _SURFACE_TAGS:
+        return None
+    boundaries: list[list[dict[str, Any]]] = []
+    for boundary in (c for c in surface.children if _geom_tag(c) in _BOUNDARY_TAGS):
+        pieces: list[dict[str, Any]] = []
+        for polyline in (c for c in boundary.children if _geom_tag(c) == "POLYLINE"):
+            value = _read_polyline(polyline)
+            if value is None:
+                return None
+            pieces.append(_as_line(value))
+        if not pieces:
+            return None
+        boundaries.append(pieces)
+    return boundaries or None
 
-    The shape `_evaluate_inspection` special-cases into boundary
-    decomposition (`_evaluate_geometry_inspection`) instead of trying to
-    resolve an element type - `_inspection_target` fails for a geometry
-    leaf (not `Kind in (Class, Structure)`), which previously left this
-    silently producing wrong (empty/garbage) Features rather than a
-    diagnostic (confirmed: `unsupported_view_reason` never rejected this
-    shape either - it only checks the path was built at all).
-    """
-    if len(path) != 1:
+
+def _boundary_geometry(edges: list[dict[str, Any]]) -> dict[str, Any]:
+    """The boundary of one surface: its edge lines as `LineString` (one), `MultiLineString` or `MultiCurve`."""
+    if len(edges) == 1:
+        return edges[0]
+    if all(edge["type"] == "LineString" for edge in edges):
+        return {"type": "MultiLineString", "coordinates": [edge["coordinates"] for edge in edges]}
+    return {"type": "MultiCurve", "geometries": edges}
+
+
+def _line_segments(polyline: RawNode) -> list[tuple[list[float], list[float] | None]] | None:
+    """`(end point, arc point)` of every segment of a POLYLINE; the first is the `StartSegment` (length 0)."""
+    if _geom_tag(polyline) != "POLYLINE" or not polyline.children or _geom_tag(polyline.children[0]) != "COORD":
         return None
-    members = schema_members_of(base_view, symbol_table) if symbol_table is not None else attributes_of(base_view)
-    attr = members.get(path[0])
-    if attr is None:
-        return None
-    resolved = resolve_attribute(attr)
-    if resolved.type_kind != "LineType" or getattr(resolved.type_instance, "Kind", None) not in ("Surface", "Area"):
-        return None
-    return path[0]
+    segments: list[tuple[list[float], list[float] | None]] = []
+    for node in polyline.children:
+        tag = _geom_tag(node)
+        if tag == "COORD":
+            end = _read_coord(node)
+            if end is None:
+                return None
+            segments.append((end, None))
+        elif tag == "ARC":
+            arc = _read_arc(node)
+            if arc is None:
+                return None
+            segments.append((arc[1], arc[0]))
+        else:
+            return None
+    return segments
+
+
+def _reverse_line(edge: dict[str, Any]) -> dict[str, Any]:
+    """The same line traversed backwards (a circular string keeps its mid points, a compound reverses its parts)."""
+    if edge["type"] == "CompoundCurve":
+        return {"type": "CompoundCurve", "geometries": [_reverse_line(g) for g in reversed(edge["geometries"])]}
+    return {"type": edge["type"], "coordinates": edge["coordinates"][::-1]}
+
+
+def _edge_key(edge: dict[str, Any]) -> str:
+    """Identity of an edge line for `AREA INSPECTION`: a line equals its reversal (eCH-0031 SS4.3.11.15)."""
+    forward, backward = (json.dumps(e, sort_keys=True) for e in (edge, _reverse_line(edge)))
+    return min(forward, backward)
+
+
+@dataclass
+class _GeometryElement:
+    """One `SurfaceBoundary` / `SurfaceEdge` / `LineGeometry` / `LineSegment` produced by a geometry INSPECTION."""
+
+    tid: str | None
+    owners: list[XtfObject]
+    geometry: dict[str, Any] | None = None
+    end_point: list[float] | None = None
+    arc_point: list[float] | None = None
+
+
+def _geometry_elements(
+    insp: GeometryInspection, base_objects: list[XtfObject], base_attr: MetaInstance
+) -> list[_GeometryElement]:
+    """Decompose the inspected geometry attribute of every base object into the elements INSPECTION yields."""
+    elements: list[_GeometryElement] = []
+    unique_edges: dict[str, _GeometryElement] = {}
+    for obj in base_objects:
+        nodes = obj.attributes.get(insp.attr)
+        if not nodes:
+            continue
+        stem = f"{obj.tid}_{insp.attr}" if obj.tid else None
+        if insp.kind in (LINE_GEOMETRY, LINE_SEGMENT):
+            polyline = nodes[0].children[0] if nodes[0].children else None
+            value = _read_polyline(polyline) if polyline is not None else None
+            segments = _line_segments(polyline) if polyline is not None and insp.kind == LINE_SEGMENT else None
+            if value is None or (insp.kind == LINE_SEGMENT and segments is None):
+                _record("JSONFG-GEOMETRY-UNREADABLE", base_attr, "line value could not be read for INSPECTION")
+                continue
+            if insp.kind == LINE_GEOMETRY:
+                elements.append(_GeometryElement(obj.tid, [obj], geometry=_as_line(value)))
+            else:
+                for i, (end, arc) in enumerate(segments or []):
+                    elements.append(_GeometryElement(f"{stem}_{i}" if stem else None, [obj], None, end, arc))
+            continue
+        boundaries = _surface_boundaries(nodes[0])
+        if boundaries is None:
+            _record("JSONFG-GEOMETRY-UNREADABLE", base_attr, "surface value could not be read for INSPECTION")
+            continue
+        if insp.kind == SURFACE_BOUNDARY:
+            edges = [_join_pieces(pieces) for pieces in boundaries]
+            elements.append(_GeometryElement(obj.tid, [obj], geometry=_boundary_geometry(edges)))
+        elif insp.kind == SURFACE_EDGE:
+            for i, pieces in enumerate(boundaries):
+                elements.append(_GeometryElement(f"{stem}_{i}" if stem else None, [obj], _join_pieces(pieces)))
+        else:  # AREA_EDGE: every transferred boundary line once, whichever area(s) it borders
+            for piece in (p for pieces in boundaries for p in pieces):
+                known = unique_edges.setdefault(_edge_key(piece), _GeometryElement(None, [], piece))
+                if known.owners == [] or known.owners[-1] is not obj:
+                    known.owners.append(obj)
+                if known not in elements:
+                    elements.append(known)
+    return elements
+
+
+def _point(position: list[float] | None) -> dict[str, Any] | None:
+    return None if position is None else {"type": "Point", "coordinates": position}
 
 
 def _evaluate_geometry_inspection(
     view: MetaInstance,
+    insp: GeometryInspection,
+    base_view: MetaInstance,
+    base_alias: str,
     base_objects: list[XtfObject],
-    geom_attr_name: str,
     standalone: bool,
     symbol_table: SymbolTable,
     repository: ModelRepository | None = None,
 ) -> list[dict[str, Any]]:
-    """One Feature per base object for a single-hop SURFACE/AREA geometry `INSPECTION`.
+    """One Feature per element of an `INSPECTION OF` a SURFACE/AREA/POLYLINE attribute (eCH-0031 SS3.15).
 
-    Builds the envelope via `object_to_feature(base_obj, view, ...)` (the
-    same call `PROJECTION`/`JOIN` use, id/featureType/conformsTo all
-    correct) then overwrites each `properties[attr]` that reads the
-    inspected geometry attribute back (`out := <base> -> <attr>`, the
-    ONLY translatable shape here - mirrors
-    `convert/sql.py:_build_geometry_inspection_view`) with the decomposed
-    boundary (`_surface_boundary_geometry`) as a plain GeoJSON geometry
-    VALUE, same convention as a nested CoordType/LineType attribute
-    elsewhere in this module - never auto-promoted to `place` (this is a
-    DERIVED value, not the object's own designated geometry).
-    `object_to_feature` itself cannot populate it: `obj.attributes` is
-    keyed by the BASE object's own attribute name (`geom_attr_name`), not
-    necessarily the view attribute's (possibly renamed) own name.
+    Each view attribute is a derived value (a GeoJSON geometry, or a typed
+    attribute of the owning object read through `PARENT`/`THISAREA`/
+    `THATAREA`), set in `properties` and never promoted to `place`: it is
+    not the object's own designated geometry. Mirrors the SQL translation
+    (`views.py`); `view_formation.inspection_reading` fixes what is readable.
     """
-    out_names = []
+    members = schema_members_of(base_view, symbol_table)
+    resolved_members = {name: resolve_attribute(attr) for name, attr in members.items()}
+    readings: list[tuple[str, InspectionReading]] = []
     for attr in getattr(view, "ClassAttribute", None) or []:
         derivates = getattr(attr, "Derivates", None) or []
-        if len(derivates) != 1:
-            continue
-        refs = [getattr(el, "Ref", None) for el in (getattr(derivates[0], "PathEls", None) or [])]
-        if len(refs) == 2 and refs[1] == geom_attr_name:
-            out_names.append(getattr(attr, "Name", None) or "")
+        reading, _why = inspection_reading(derivates[0] if derivates else None, insp, base_alias)
+        if reading is not None and getattr(attr, "Name", None):
+            readings.append((attr.Name, reading))
+    view_name = getattr(view, "Name", None) or "View"
     features: list[dict[str, Any]] = []
-    for base_obj in base_objects:
+    for element in _geometry_elements(insp, base_objects, members[insp.attr]):
         feature = object_to_feature(
-            base_obj, view, standalone=standalone, symbol_table=symbol_table, repository=repository
+            XtfObject(element.tid, view_name, {}),
+            view,
+            standalone=standalone,
+            symbol_table=symbol_table,
+            repository=repository,
         )
-        nodes = base_obj.attributes.get(geom_attr_name) or []
-        boundary = _surface_boundary_geometry(nodes[0]) if nodes else None
-        if boundary is not None:
-            for out_name in out_names:
-                feature["properties"][out_name] = boundary
+        for out_name, reading in readings:
+            value: Any = None
+            if reading.what == "geometry":
+                value = element.geometry
+            elif reading.what == "endpoint":
+                value = _point(element.end_point)
+            elif reading.what == "arcpoint":
+                value = _point(element.arc_point)
+            else:
+                owner_index = 1 if reading.what == "thatarea" else 0
+                resolved = resolved_members.get(reading.field or "")
+                owner = element.owners[owner_index] if owner_index < len(element.owners) else None
+                nodes = owner.attributes.get(reading.field or "") if owner is not None else None
+                if resolved is not None and nodes:
+                    value = _attribute_value(resolved, nodes, symbol_table=symbol_table)
+            if value is not None:
+                feature["properties"][out_name] = value
         features.append(feature)
     return features
 
@@ -2130,6 +2363,7 @@ def _evaluate_geometry_inspection(
 def _evaluate_inspection(
     view: MetaInstance,
     base_view: MetaInstance,
+    base_alias: str,
     base_objects: list[XtfObject],
     path: list[str],
     standalone: bool,
@@ -2144,22 +2378,31 @@ def _evaluate_inspection(
     transfers its occurrences as DIRECT CHILDREN of one wrapper element
     (the same wire convention `_multi_value` relies on) - those children
     are the elements; a single reference/structure attribute is itself the
-    element. An INDIRECT path (`-> a -> b`) needs this unwrapping at EVERY
-    multi-value hop, not just the last one: `hop_is_multi[k-1]` (from
-    `_inspection_target`) says whether hop `path[k-1]`'s own wrapper must
-    be expanded into its occurrences before searching THEM for `path[k]`'s
-    tag - a plain (non-multi) intermediate structure attribute is its own
-    element, so its children are searched directly instead. A single-hop
-    SURFACE/AREA geometry attribute is a DIFFERENT shape entirely
-    (`_single_hop_surface_attr`) - no element type to resolve at all,
-    delegated to `_evaluate_geometry_inspection`.
+    element. An INDIRECT path (`-> a -> b`) unwraps every multi-value hop
+    (`hop_is_multi`), not just the last one. A path ending on a
+    SURFACE/AREA/POLYLINE attribute has no element type at all and is
+    decomposed by `_evaluate_geometry_inspection`.
     """
-    geom_attr = _single_hop_surface_attr(base_view, path, symbol_table)
-    if geom_attr is not None:
-        return _evaluate_geometry_inspection(view, base_objects, geom_attr, standalone, symbol_table, repository)
-    elements, element_type = _inspection_elements(view, base_view, base_objects, path, symbol_table)
+    insp = geometry_inspection(view, base_view, symbol_table)
+    if insp is not None:
+        return _evaluate_geometry_inspection(
+            view, insp, base_view, base_alias, base_objects, standalone, symbol_table, repository
+        )
+    elements, element_type, parents = _inspection_elements(view, base_view, base_objects, path, symbol_table)
+    parent_type = base_view if len(path) == 1 else _inspection_target(base_view, path[:-1], symbol_table)[0]
+    parent_members = (
+        {name: resolve_attribute(a) for name, a in schema_members_of(parent_type, symbol_table).items()}
+        if parent_type is not None
+        else {}
+    )
+    parent_readings: list[tuple[str, str]] = []
+    for attr in getattr(view, "ClassAttribute", None) or []:
+        derivates = getattr(attr, "Derivates", None) or []
+        els = getattr(derivates[0], "PathEls", None) or [] if derivates else []
+        if len(els) == 2 and getattr(els[0], "Kind", None) == "Parent" and getattr(els[1], "Ref", None):
+            parent_readings.append((attr.Name, els[1].Ref))
     features: list[dict[str, Any]] = []
-    for element in elements:
+    for element, parent in zip(elements, parents):
         feature = object_to_feature(
             element,
             element_type if element_type is not None else view,
@@ -2168,6 +2411,10 @@ def _evaluate_inspection(
             repository=repository,
         )
         feature["featureType"] = getattr(view, "Name", None) or feature["featureType"]
+        for out_name, field in parent_readings:
+            resolved, nodes = parent_members.get(field), parent.get(field)
+            if resolved is not None and nodes:
+                feature["properties"][out_name] = _attribute_value(resolved, nodes, symbol_table=symbol_table)
         features.append(feature)
     return features
 
@@ -2178,30 +2425,37 @@ def _inspection_elements(
     base_objects: list[XtfObject],
     path: list[str],
     symbol_table: SymbolTable,
-) -> tuple[list[XtfObject], MetaInstance | None]:
-    """Every element of `INSPECTION OF base -> path` as a synthetic `XtfObject`, plus its resolved element type.
+) -> tuple[list[XtfObject], MetaInstance | None, list[dict[str, list[RawNode]]]]:
+    """Every element of `INSPECTION OF base -> path` as a synthetic `XtfObject`, its resolved element type and the
+    attributes of each element's immediate parent (the owning object, or the enclosing structure element).
 
     Extracted from `_evaluate_inspection`'s own construction loop - shared
     with `evaluate_view_objects`'s INSPECTION branch (`convert/xtf_writer.py`'s
     write-xtf path), which needs the raw `XtfObject`s rather than
     `object_to_feature`'s JSON-FG output. See `_evaluate_inspection`'s
     docstring for the wire-unwrapping rule at each multi-value hop. Does
-    NOT cover the single-hop SURFACE/AREA geometry case
-    (`_single_hop_surface_attr`) - that one has no element TYPE to resolve
-    at all (a decomposed boundary ring list, JSON-FG-only shape, see
-    `_evaluate_geometry_inspection`) - callers check `_single_hop_surface_attr`
-    themselves first, same as `_evaluate_inspection` does.
+    NOT cover a geometry inspection (`geometry_inspection`): it has no
+    element TYPE to resolve (see `_evaluate_geometry_inspection`).
     """
     element_type, is_multi, hop_is_multi = _inspection_target(base_view, path, symbol_table)
     elements: list[XtfObject] = []
+    parents: list[dict[str, list[RawNode]]] = []
     for base_obj in base_objects:
         nodes: list[RawNode] = list(base_obj.attributes.get(path[0], []))
+        owners = [base_obj.attributes] * len(nodes)
         for hop, previous_was_multi in zip(path[1:], hop_is_multi[:-1]):
-            if previous_was_multi:
-                nodes = [c for node in nodes for c in node.children]
-            nodes = [gc for node in nodes for gc in node.children if gc.tag == hop]
-        occurrences = [c for node in nodes for c in node.children] if is_multi else nodes
-        for i, node in enumerate(occurrences):
+            holders = [c for node in nodes for c in node.children] if previous_was_multi else nodes
+            nodes, owners = [], []
+            for holder in holders:
+                holder_attrs = _group_by_tag(holder.children)
+                for gc in holder.children:
+                    if gc.tag == hop:
+                        nodes.append(gc)
+                        owners.append(holder_attrs)
+        occurrences = [
+            (c, owner) for node, owner in zip(nodes, owners) for c in (node.children if is_multi else [node])
+        ]
+        for i, (node, owner) in enumerate(occurrences):
             element_attrs: dict[str, list[RawNode]] = {}
             for child in node.children:
                 element_attrs.setdefault(child.tag, []).append(child)
@@ -2209,7 +2463,8 @@ def _inspection_elements(
             elements.append(
                 XtfObject(tid=tid, qualified_class=getattr(view, "Name", None) or "View", attributes=element_attrs)
             )
-    return elements, element_type
+            parents.append(owner)
+    return elements, element_type, parents
 
 
 def _join_members(bases: list[MetaInstance], combo: list[XtfObject | None]) -> list[dict[str, Any]]:
@@ -2424,7 +2679,7 @@ def view_skip_diagnostic(view: MetaInstance, *, file: str | None = None):
         rule, sev, hlp = "JSONFG-VIEW-WHERE-UNSUPPORTED", "note", None
     elif "INSPECTION path" in reason:
         rule, sev, hlp = "JSONFG-VIEW-INSPECTION-GAP", "note", None
-    elif "function engine" in reason:
+    elif reason.startswith(("AGGREGATION", "INSPECTION ")):
         rule, sev, hlp = "JSONFG-VIEW-FORMATION-UNSUPPORTED", "note", None
     else:
         rule, sev, hlp = "JSONFG-VIEW-BASE-MISSING", "warning", "pass the base model's directory to --repo"

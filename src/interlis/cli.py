@@ -215,9 +215,10 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 
 # All five `View` formation laws are translated by every converter,
-# except the parts that stay a `-- NOTE` (an AGGREGATION whose columns
-# are user-FUNCTION results over the implicit AGGREGATES bag, a geometry
-# INSPECTION).
+# except the parts that stay a `-- NOTE` (an AGGREGATION column that is a
+# user-FUNCTION result over the implicit AGGREGATES bag, an INSPECTION
+# member the target cannot express, a PostGIS-only AREA INSPECTION in a
+# GeoPackage).
 _SUPPORTED_VIEW_FORMATION_KINDS = ("Projection", "Join", "Union", "Aggregation", "Inspection")
 _SQL_VIEW_FORMATION_KINDS = _SUPPORTED_VIEW_FORMATION_KINDS
 
@@ -599,7 +600,8 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
     emits for the inspected `BAG`/`LIST OF` attribute, Aggregation as
     `SELECT ... GROUP BY <key>`. A branch that can't be translated
     faithfully (an AGGREGATION column that is a user-FUNCTION call over the
-    implicit `AGGREGATES` bag, a geometry INSPECTION) demotes that whole
+    implicit `AGGREGATES` bag, an INSPECTION member such as `ArcPoint`)
+    demotes that whole
     View to a `-- NOTE`. A View's
     base classes live in an IMPORTED model, so pass that model via
     `--catalog` too - a View whose base table isn't in this conversion, or
@@ -639,7 +641,7 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
             class_table_names=class_table_names,
         )
     )
-    bag.extend(_sql_mod.collect_diagnostics(tables, sql_views, file=str(path)))
+    bag.extend(_sql_mod.collect_diagnostics(tables, sql_views, file=str(path), dialect=args.dialect))
     meta = _ili2db_meta(path, repository, classes, builder.symbol_table, class_symbol_tables)
     ddl = render_gpkg(tables, sql_views, meta) if args.dialect == "gpkg" else render_postgresql(tables, sql_views, meta)
     if args.lang:
@@ -999,9 +1001,8 @@ def cmd_write_xtf(args: argparse.Namespace) -> int:
     VIEW when the model declares more than one; with exactly one VIEW in
     the model, it's used automatically. Every `FormationKind` is
     supported (`evaluate_view_objects`) EXCEPT an `INSPECTION` of a
-    single-hop SURFACE/AREA geometry, which has no XTF-transferable shape
-    at all (a decomposed boundary ring list, JSON-FG-only - a clear
-    `ValueError`, never attempted). A VIEW declared in a plain `TOPIC`
+    SURFACE/AREA/POLYLINE geometry, which has no XTF-transferable shape
+    (derived geometry values, JSON-FG-only - a clear `ValueError`). A VIEW declared in a plain `TOPIC`
     rather than a `VIEW TOPIC` is refused outright (refman: it would
     never actually be transferred by a compliant tool - `ili2c` compiles
     it silently absent from the generated schema).

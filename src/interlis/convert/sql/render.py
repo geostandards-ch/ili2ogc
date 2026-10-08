@@ -25,6 +25,7 @@ from .views import (
     _render_view_unique_triggers_gpkg,
     _render_view_unique_triggers_postgresql,
     _render_views,
+    gpkg_views,
 )
 
 
@@ -215,6 +216,7 @@ def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = (), meta: Ili2
                     f"-- spatial index: ogrinfo <file>.gpkg -sql \"SELECT CreateSpatialIndex('{table.name}', "
                     f"'{column.name}')\""
                 )
+    views = gpkg_views(views)
     statements += _render_views(views)
     statements += _render_view_unique_triggers_gpkg(views)
     statements += meta_rows(tables, meta or Ili2dbMeta(), gpkg=True)
@@ -295,13 +297,16 @@ def _gpkg_srs_rows(srids: set[int]) -> list[str]:
 _NOTE_RULE_RE = re.compile(r"^\[([A-Z0-9-]+)\]\s*(.*)$", re.DOTALL)
 
 
-def collect_diagnostics(tables: list[Table], views: tuple[SqlView, ...] = (), *, file: str | None = None):
+def collect_diagnostics(
+    tables: list[Table], views: tuple[SqlView, ...] = (), *, file: str | None = None, dialect: str = "postgresql"
+):
     """Turn every `Table`/`SqlView` `-- NOTE` back into a `Diagnostic` - the same objects, a third rendering.
 
     Each note is already `[RULE-ID] message` (`diagnostic_ids.note`), so
     the id, the class (A/B/C -> note/warning) and the message come straight
     back out. The `.sql` keeps its self-describing `-- NOTE` lines; this is
-    what feeds `--output-format sarif` and the exit code.
+    what feeds `--output-format sarif` and the exit code. `dialect="gpkg"`
+    also reports the views GeoPackage cannot carry (`gpkg_views`).
     """
     from interlis.diagnostic_ids import REGISTRY
     from interlis.diagnostics import Diagnostic, Location, severity_for_class
@@ -334,7 +339,7 @@ def collect_diagnostics(tables: list[Table], views: tuple[SqlView, ...] = (), *,
     for table in tables:
         for note in table.notes:
             _emit(table.name, note)
-    for view in views:
+    for view in gpkg_views(views) if dialect == "gpkg" else views:
         for note in view.notes:
             _emit(f"view {view.name}", note)
     return out

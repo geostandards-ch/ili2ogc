@@ -9,6 +9,17 @@ from __future__ import annotations
 
 from interlis.builder.forward_refs import SymbolTable
 from interlis.convert.jsonschema import _is_structure
+from interlis.convert.view_formation import (
+    AREA_EDGE,
+    LINE_GEOMETRY,
+    LINE_SEGMENT,
+    SURFACE_BOUNDARY,
+    SURFACE_EDGE,
+    GeometryInspection,
+    geometry_inspection,
+    inspection_reading,
+    is_standard_count_call,
+)
 from interlis.diagnostic_ids import note as _diag
 from interlis.metamodel.instance import MetaInstance
 from interlis.xtf.schema import (
@@ -490,8 +501,8 @@ def build_views(
                 result.append(SqlView(vname, body, _view_constraint_notes(view)))
                 continue
             if formation == "Inspection":
-                body = _build_inspection_view(view, bases, tables_by_name, symbol_for)
-                result.append(SqlView(vname, body, _view_constraint_notes(view)))
+                body, postgis_only = _build_inspection_view(view, bases, tables_by_name, symbol_for)
+                result.append(SqlView(vname, body, _view_constraint_notes(view), postgis_only=postgis_only))
                 continue
             if formation == "Aggregation":
                 body = _build_aggregation_view(view, bases, tables_by_name, symbol_for, assoc_near_roles)
@@ -603,16 +614,17 @@ def _build_inspection_view(
     bases: list[tuple[str, MetaInstance, str]],
     tables_by_name: dict[str, Table],
     symbol_for,
-) -> str:
-    """Return a `SELECT ... FROM "<parent>_<attr>[_<sub-attr>]"` body for a `FormationKind=Inspection` view.
+) -> tuple[str, str | None]:
+    """Return `(body, postgis_only reason)` for a `FormationKind=Inspection` view.
 
-    `INSPECTION OF <base> -> attr` yields every element of the inspected
-    `BAG`/`LIST OF`; `build_tables` already emits that extent as the
-    child table `<base_table>_<attr>`, so this is a projection over it
-    (`out := PARENT -> field` joins back on the child's own `_fk` column,
-    single-hop only). A SURFACE/AREA geometry inspection has no child
-    table but IS translated (`_build_geometry_inspection_view`); a
-    LINE/POLYLINE geometry or a deeper path demotes.
+    `INSPECTION OF <base> -> attr (-> attr)*` yields every element of the
+    inspected `BAG`/`LIST OF`; `build_tables` already emits that extent as
+    the child table chain `<base>_<attr>[_<attr>]`, so the view is a
+    projection over the last one. `out := PARENT -> field` joins back to
+    the immediate parent table (the base for a single hop, the previous
+    element table beyond) on the child's `<parent>_fk` column. A path
+    ending on a SURFACE/AREA/POLYLINE attribute has no child table and is
+    decomposed in SQL by `_build_geometry_inspection_view`.
     """
     if len(bases) != 1:
         raise _UnsupportedView("an inspection view has exactly one base", "SQL-VIEW-FORMATION-UNSUPPORTED")
@@ -623,26 +635,24 @@ def _build_inspection_view(
             "INSPECTION path (the '-> attribute' chain) was not built - InterlisModelBuilder gap",
             "SQL-VIEW-FORMATION-UNSUPPORTED",
         )
-    child_table = base_table
+    insp = geometry_inspection(view, base_cls, symbol_for(base_cls))
+    if insp is not None:
+        return _build_geometry_inspection_view(view, insp, base_alias, base_table, tables_by_name)
+    chain = [base_table]
     for hop in path:
-        candidate = _sql_identifier(f"{child_table}_{hop}")
-        if candidate in tables_by_name:
-            child_table = candidate
-            continue
-        if child_table == base_table and len(path) == 1:
-            geom_col = _geometry_inspection_column(base_cls, hop, base_table, tables_by_name, symbol_for)
-            if geom_col is not None:
-                return _build_geometry_inspection_view(view, base_alias, base_table, hop, geom_col)
-        raise _UnsupportedView(
-            f"the inspected attribute {' -> '.join(path)!r} has no child table "
-            f"(a geometry inspection over a SURFACE/AREA attribute decomposes to its own boundary "
-            f"instead - see _build_geometry_inspection_view - a LINE/POLYLINE geometry or a path "
-            f"nesting more than one level deep still has no child table at all)",
-            "SQL-VIEW-FORMATION-UNSUPPORTED",
-        )
+        candidate = _sql_identifier(f"{chain[-1]}_{hop}")
+        if candidate not in tables_by_name:
+            raise _UnsupportedView(
+                f"the inspected attribute {' -> '.join(path)!r} has no child table {candidate!r} (build_tables "
+                f"emits child tables for BAG/LIST OF structure attributes, to the nesting depth it flattens)",
+                "SQL-VIEW-FORMATION-UNSUPPORTED",
+            )
+        chain.append(candidate)
+    child_table, parent_table = chain[-1], chain[-2]
     columns = {c.name for c in tables_by_name[child_table].columns}
-    base_columns = {c.name for c in tables_by_name[base_table].columns} if base_table in tables_by_name else set()
-    fk_col = _sql_identifier(f"{base_table}_fk")
+    parent_columns = {c.name for c in tables_by_name[parent_table].columns}
+    parent_alias = base_alias if len(path) == 1 else "parent"
+    fk_col = _sql_identifier(f"{parent_table}_fk")
     elem_alias = "insp"
     select_items: list[str] = []
     needs_parent_join = False
@@ -662,22 +672,16 @@ def _build_inspection_view(
                 raise _UnsupportedView(f"element attribute {refs[1]!r} has no column on {child_table!r}")
             select_items.append(f'"{elem_alias}"."{col}" AS "{_sql_identifier(aname or "")}"')
         elif len(path_els) == 2 and getattr(path_els[0], "Kind", None) == "Parent" and refs[1] is not None:
-            if len(path) > 1:
-                raise _UnsupportedView(
-                    "an inspection view attribute navigates PARENT-> on a multi-hop path - the child table's "
-                    "FK points at the intermediate table, not the base table",
-                    "SQL-VIEW-FORMATION-UNSUPPORTED",
-                )
             if fk_col not in columns:
                 raise _UnsupportedView(
                     f"the inspected element table {child_table!r} has no {fk_col!r} column to join back to "
-                    f"{base_table!r}",
+                    f"{parent_table!r}",
                     "SQL-VIEW-FORMATION-UNSUPPORTED",
                 )
             col = _sql_identifier(refs[1])
-            if col not in base_columns:
-                raise _UnsupportedView(f"PARENT-> attribute {refs[1]!r} has no column on {base_table!r}")
-            select_items.append(f'"{base_alias}"."{col}" AS "{_sql_identifier(aname or "")}"')
+            if col not in parent_columns:
+                raise _UnsupportedView(f"PARENT-> attribute {refs[1]!r} has no column on {parent_table!r}")
+            select_items.append(f'"{parent_alias}"."{col}" AS "{_sql_identifier(aname or "")}"')
             needs_parent_join = True
         else:
             raise _UnsupportedView(f"inspection view attribute {aname!r}: unsupported element path {refs}")
@@ -686,74 +690,108 @@ def _build_inspection_view(
     from_clause = f'FROM "{child_table}" "{elem_alias}"'
     if needs_parent_join:
         from_clause += (
-            f'\nJOIN "{base_table}" "{base_alias}" ON "{elem_alias}"."{fk_col}" = "{base_alias}"."{OID_COLUMN}"'
+            f'\nJOIN "{parent_table}" "{parent_alias}" ON "{elem_alias}"."{fk_col}" = "{parent_alias}"."{OID_COLUMN}"'
         )
-    return "SELECT\n    " + ",\n    ".join(select_items) + f"\n{from_clause}"
-
-
-def _geometry_inspection_column(
-    base_cls: MetaInstance,
-    attr_name: str,
-    base_table: str,
-    tables_by_name: dict[str, Table],
-    symbol_for,
-) -> str | None:
-    """Return `attr_name`'s SQL column name on `base_table` if it's a single-valued SURFACE/AREA-`Kind` geometry
-    attribute, else `None`.
-
-    `Kind in ("Surface", "Area")` only - a `Polyline`/`DirectedPolyline`
-    has a different decomposition, not covered here.
-    """
-    st = symbol_for(base_cls)
-    members = schema_members_of(base_cls, st) if st is not None else attributes_of(base_cls)
-    attr = members.get(attr_name)
-    if attr is None:
-        return None
-    resolved = resolve_attribute(attr)
-    if resolved.type_kind != "LineType" or getattr(resolved.type_instance, "Kind", None) not in ("Surface", "Area"):
-        return None
-    col = _sql_identifier(attr_name)
-    if base_table not in tables_by_name or col not in {c.name for c in tables_by_name[base_table].columns}:
-        return None
-    return col
+    return "SELECT\n    " + ",\n    ".join(select_items) + f"\n{from_clause}", None
 
 
 def _build_geometry_inspection_view(
     view: MetaInstance,
+    insp: GeometryInspection,
     base_alias: str,
     base_table: str,
-    geom_attr_name: str,
-    geom_col: str,
-) -> str:
-    """Return a `SELECT ST_Boundary(...) FROM "<base>"` body for a single-hop geometry `INSPECTION`.
+    tables_by_name: dict[str, Table],
+) -> tuple[str, str | None]:
+    """Return `(body, postgis_only reason)` for an `INSPECTION OF` a SURFACE/AREA/POLYLINE column (eCH-0031 SS3.15).
 
-    Decomposed as ONE row per base object whose geometry IS that boundary
-    (`ST_Boundary`, OGC SFA/PostGIS) - the pragmatic reading a `GRAPHIC
-    ... BASED ON` an inspection view needs, not the full nested
-    `Lines`/`SurfaceEdge` structure (out of scope, eCH-0031 itself treats
-    that as a separate conformance level). Only reading the SAME
-    inspected attribute back is translatable.
+    Uses only OGC SFA functions both PostGIS and SpatiaLite provide, with a
+    recursive CTE to enumerate rings or vertices: a surface boundary is
+    `ST_Boundary`, its `SurfaceEdge`s are the exterior and interior rings,
+    a `LineGeometry` is the line itself, its `LineSegment`s are its
+    vertices (`ST_PointN`; arcs are stroked on load, so no `ArcPoint`
+    survives). An `AREA INSPECTION` is the noded union of every area's
+    boundary (`ST_Dump(ST_Union(...))`, PostGIS only): each shared edge
+    appears once, split where other boundaries meet it.
     """
+    col = _sql_identifier(insp.attr)
+    if base_table not in tables_by_name or col not in {c.name for c in tables_by_name[base_table].columns}:
+        raise _UnsupportedView(
+            f"the inspected geometry {insp.attr!r} is not a column of {base_table!r} (a further geometry of a "
+            f"multi-geometry class is a side table in GeoPackage)",
+            "SQL-VIEW-FORMATION-UNSUPPORTED",
+        )
+    base_columns = {c.name for c in tables_by_name[base_table].columns}
+    geom = f'"{base_alias}"."{col}"'
+    element = {
+        SURFACE_BOUNDARY: geom,
+        LINE_GEOMETRY: geom,
+        SURFACE_EDGE: '"insp"."geom"',
+        AREA_EDGE: '"insp"."geom"',
+        LINE_SEGMENT: f'ST_PointN({geom}, "insp"."n")',
+    }
     select_items: list[str] = []
     for attr in getattr(view, "ClassAttribute", None) or []:
         aname = getattr(attr, "Name", None)
         derivates = getattr(attr, "Derivates", None) or []
-        if not derivates:
-            raise _UnsupportedView(f"inspection view attribute {aname!r} has no assigned expression")
-        factor = derivates[0]
-        if not factor._qualified_class.endswith("PathOrInspFactor") or getattr(factor, "Inspection", None):
-            raise _UnsupportedView(f"inspection view attribute {aname!r} is not a plain element path")
-        refs = [getattr(el, "Ref", None) for el in (getattr(factor, "PathEls", None) or [])]
-        if len(refs) == 2 and (refs[0] or "").lower() == base_alias and refs[1] == geom_attr_name:
-            select_items.append(f'ST_Boundary("{base_alias}"."{geom_col}") AS "{_sql_identifier(aname or "")}"')
+        reading, why = inspection_reading(derivates[0] if derivates else None, insp, base_alias)
+        if reading is None:
+            raise _UnsupportedView(
+                f"geometry inspection view attribute {aname!r} {why}", "SQL-VIEW-FORMATION-UNSUPPORTED"
+            )
+        out = f'"{_sql_identifier(aname or "")}"'
+        if reading.what == "geometry":
+            expr = f"ST_Boundary({geom})" if insp.kind == SURFACE_BOUNDARY else element[insp.kind]
+        elif reading.what == "endpoint":
+            expr = element[insp.kind]
+        elif reading.what == "parent":
+            parent_col = _sql_identifier(reading.field or "")
+            if parent_col not in base_columns:
+                raise _UnsupportedView(f"PARENT-> attribute {reading.field!r} has no column on {base_table!r}")
+            expr = f'"{base_alias}"."{parent_col}"'
+        elif reading.what == "arcpoint":
+            raise _UnsupportedView(
+                f"view attribute {aname!r} reads ArcPoint: arc segments are stroked into straight ones on load, "
+                "so no ArcSegment exists in the table",
+                "SQL-VIEW-FORMATION-UNSUPPORTED",
+            )
         else:
             raise _UnsupportedView(
-                f"geometry inspection view attribute {aname!r}: only the inspected geometry's own "
-                f"boundary ({geom_attr_name!r}) is selectable - no further sub-structure is translated"
+                f"view attribute {aname!r} uses THISAREA/THATAREA: the two areas bordering an edge are not "
+                "derivable from the noded boundary union",
+                "SQL-VIEW-FORMATION-UNSUPPORTED",
             )
+        select_items.append(f"{expr} AS {out}")
     if not select_items:
         raise _UnsupportedView("inspection view has no projectable ATTRIBUTE definitions", "SQL-VIEW-NO-ATTRS")
-    return "SELECT\n    " + ",\n    ".join(select_items) + f'\nFROM "{base_table}" "{base_alias}"'
+    items = "SELECT\n    " + ",\n    ".join(select_items)
+    owner = f'"{base_alias}"."{OID_COLUMN}"'
+    base = f'"{base_table}" "{base_alias}"'
+    if insp.kind in (SURFACE_BOUNDARY, LINE_GEOMETRY):
+        return f"{items}\nFROM {base}", None
+    if insp.kind == SURFACE_EDGE:
+        cte = (
+            'WITH RECURSIVE "insp_ring" ("owner", "n", "geom") AS (\n'
+            f"    SELECT {owner}, 0, ST_ExteriorRing({geom}) FROM {base} WHERE {geom} IS NOT NULL\n"
+            "    UNION ALL\n"
+            f'    SELECT "r"."owner", "r"."n" + 1, ST_InteriorRingN({geom}, "r"."n" + 1)\n'
+            f'    FROM "insp_ring" "r" JOIN {base} ON {owner} = "r"."owner"\n'
+            f'    WHERE "r"."n" < ST_NumInteriorRing({geom})\n'
+            ")\n"
+        )
+        return f'{cte}{items}\nFROM "insp_ring" "insp"', None
+    if insp.kind == LINE_SEGMENT:
+        cte = (
+            'WITH RECURSIVE "insp_vertex" ("owner", "n") AS (\n'
+            f"    SELECT {owner}, 1 FROM {base} WHERE {geom} IS NOT NULL\n"
+            "    UNION ALL\n"
+            '    SELECT "v"."owner", "v"."n" + 1\n'
+            f'    FROM "insp_vertex" "v" JOIN {base} ON {owner} = "v"."owner"\n'
+            f'    WHERE "v"."n" < ST_NumPoints({geom})\n'
+            ")\n"
+        )
+        return f'{cte}{items}\nFROM "insp_vertex" "insp" JOIN {base} ON {owner} = "insp"."owner"', None
+    union = f'SELECT (ST_Dump(ST_Union(ST_Boundary({geom})))).geom AS "geom" FROM {base}'
+    return f'{items}\nFROM ({union}) "insp"', "AREA INSPECTION is the ST_Dump of a ST_Union aggregate (PostGIS only)"
 
 
 def _build_aggregation_view(
@@ -803,7 +841,7 @@ def _build_aggregation_view(
         expr = resolver.scalar_ref(factor)
         select_items.append(f'{expr} AS "{out_col}"')
         has_plain = True
-        if key_factor is not None and expr not in group_by:
+        if key_factor is not None and expr not in group_by and not factor._qualified_class.endswith("Constant"):
             group_by.append(expr)
     if not select_items:
         raise _UnsupportedView("aggregation view has no projectable ATTRIBUTE definitions", "SQL-VIEW-NO-ATTRS")
@@ -815,27 +853,15 @@ def _build_aggregation_view(
         )
     _alias, _cls, table = bases[0]
     verb = "SELECT" if key_factor is not None or has_aggregate else "SELECT DISTINCT"
+    where = _view_where_conjuncts(getattr(view, "Where", None), resolver)
     body = (
         f"{verb}\n    " + ",\n    ".join(select_items) + "\nFROM " + _from_clause([f'"{table}" "{_alias}"'], resolver)
     )
+    if where:
+        body += "\nWHERE " + "\n  AND ".join(where)
     if key_factor is not None:
         body += "\nGROUP BY " + ", ".join(group_by)
     return body
-
-
-_STANDARD_AGGREGATE_COUNT_FUNCTIONS = {"INTERLIS.objectCount", "INTERLIS.elementCount"}
-
-
-def _is_aggregates_marker(expr: MetaInstance) -> bool:
-    """True for the bare `AGGREGATES` argument (no `Ref`, unlike a real attribute)."""
-    if not expr._qualified_class.endswith("PathOrInspFactor"):
-        return False
-    path_els = getattr(expr, "PathEls", None) or []
-    return (
-        len(path_els) == 1
-        and getattr(path_els[0], "Kind", None) == "Attribute"
-        and getattr(path_els[0], "Ref", None) is None
-    )
 
 
 def _standard_aggregate_function_sql(factor: MetaInstance, aname: str | None) -> str:
@@ -845,10 +871,7 @@ def _standard_aggregate_function_sql(factor: MetaInstance, aname: str | None) ->
     applied to the grouped bag itself - any other function, or these two
     applied to anything but the bare `AGGREGATES` argument, demotes.
     """
-    func_name = getattr(factor, "Function", None)
-    args = getattr(factor, "Arguments", None) or []
-    arg_expr = getattr(args[0], "Expression", None) if len(args) == 1 else None
-    if func_name in _STANDARD_AGGREGATE_COUNT_FUNCTIONS and arg_expr is not None and _is_aggregates_marker(arg_expr):
+    if is_standard_count_call(factor):
         return "COUNT(*)"
     raise _UnsupportedView(
         f"aggregation view attribute {aname!r} is a function/expression over the implicit AGGREGATES bag - "
@@ -1143,6 +1166,22 @@ def _resolve_view_bases(
             "no resolved base classes - pass the base model via --repo or --catalog", "SQL-VIEW-BASE-MISSING"
         )
     return bases, assoc_near_roles
+
+
+def gpkg_views(views: tuple[SqlView, ...]) -> tuple[SqlView, ...]:
+    """`views` as GeoPackage can carry them: a PostGIS-only view becomes a NOTE (no body) giving the reason."""
+    return tuple(
+        (
+            SqlView(
+                v.name,
+                None,
+                [*v.notes, _diag("SQL-VIEW-FORMATION-UNSUPPORTED", f"{v.postgis_only}; not created in GeoPackage")],
+            )
+            if v.postgis_only
+            else v
+        )
+        for v in views
+    )
 
 
 def _render_views(views: tuple[SqlView, ...]) -> list[str]:
