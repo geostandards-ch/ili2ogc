@@ -14,17 +14,52 @@
           "maxLength": 12
         },
         "Geometrie": {
-          "type": "array",
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": {
-                "type": "number"
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "coordinates"
+              ],
+              "properties": {
+                "type": {
+                  "const": "Polygon"
+                },
+                "coordinates": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "x-boundary-order": "outer-first"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "enum": [
+                    "CurvePolygon"
+                  ]
+                },
+                "coordinates": {
+                  "type": "array"
+                },
+                "geometries": {
+                  "type": "array"
+                }
               }
             }
-          },
-          "x-boundary-order": "outer-first"
+          ]
         },
         "Fiktiv": {
           "type": "boolean"
@@ -73,17 +108,52 @@
           "maxLength": 12
         },
         "Geometrie": {
-          "type": "array",
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": {
-                "type": "number"
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "coordinates"
+              ],
+              "properties": {
+                "type": {
+                  "const": "Polygon"
+                },
+                "coordinates": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "x-boundary-order": "outer-first"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "enum": [
+                    "CurvePolygon"
+                  ]
+                },
+                "coordinates": {
+                  "type": "array"
+                },
+                "geometries": {
+                  "type": "array"
+                }
               }
             }
-          },
-          "x-boundary-order": "outer-first"
+          ]
         },
         "Flaechenmass": {
           "type": "integer",
@@ -123,17 +193,52 @@
           "maxLength": 12
         },
         "Geometrie": {
-          "type": "array",
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": {
-                "type": "number"
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "coordinates"
+              ],
+              "properties": {
+                "type": {
+                  "const": "Polygon"
+                },
+                "coordinates": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "x-boundary-order": "outer-first"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "enum": [
+                    "CurvePolygon"
+                  ]
+                },
+                "coordinates": {
+                  "type": "array"
+                },
+                "geometries": {
+                  "type": "array"
+                }
               }
             }
-          },
-          "x-boundary-order": "outer-first"
+          ]
         },
         "Flaechenmass": {
           "type": "integer",
@@ -178,17 +283,52 @@
           "maxLength": 60
         },
         "Perimeter": {
-          "type": "array",
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": {
-                "type": "number"
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "coordinates"
+              ],
+              "properties": {
+                "type": {
+                  "const": "Polygon"
+                },
+                "coordinates": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "x-boundary-order": "outer-first"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "enum": [
+                    "CurvePolygon"
+                  ]
+                },
+                "coordinates": {
+                  "type": "array"
+                },
+                "geometries": {
+                  "type": "array"
+                }
               }
             }
-          },
-          "x-boundary-order": "outer-first"
+          ]
         },
         "Mutationsart": {
           "type": "string",
@@ -648,17 +788,52 @@
           "maxLength": 12
         },
         "Geometrie": {
-          "type": "array",
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": {
-                "type": "number"
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "coordinates"
+              ],
+              "properties": {
+                "type": {
+                  "const": "Polygon"
+                },
+                "coordinates": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "x-boundary-order": "outer-first"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "enum": [
+                    "CurvePolygon"
+                  ]
+                },
+                "coordinates": {
+                  "type": "array"
+                },
+                "geometries": {
+                  "type": "array"
+                }
               }
             }
-          },
-          "x-boundary-order": "outer-first"
+          ]
         },
         "Fiktiv": {
           "type": "boolean"
@@ -702,17 +877,52 @@
           "maxLength": 12
         },
         "Geometrie": {
-          "type": "array",
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": {
-                "type": "number"
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "coordinates"
+              ],
+              "properties": {
+                "type": {
+                  "const": "Polygon"
+                },
+                "coordinates": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "x-boundary-order": "outer-first"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "enum": [
+                    "CurvePolygon"
+                  ]
+                },
+                "coordinates": {
+                  "type": "array"
+                },
+                "geometries": {
+                  "type": "array"
+                }
               }
             }
-          },
-          "x-boundary-order": "outer-first"
+          ]
         },
         "Flaechenmass": {
           "type": "integer",
@@ -747,17 +957,52 @@
           "maxLength": 12
         },
         "Geometrie": {
-          "type": "array",
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": {
-                "type": "number"
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "coordinates"
+              ],
+              "properties": {
+                "type": {
+                  "const": "Polygon"
+                },
+                "coordinates": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "x-boundary-order": "outer-first"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "enum": [
+                    "CurvePolygon"
+                  ]
+                },
+                "coordinates": {
+                  "type": "array"
+                },
+                "geometries": {
+                  "type": "array"
+                }
               }
             }
-          },
-          "x-boundary-order": "outer-first"
+          ]
         },
         "Flaechenmass": {
           "type": "integer",

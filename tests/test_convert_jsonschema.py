@@ -322,7 +322,7 @@ END Foo.
     assert "properties" in schema and set(schema["properties"]) == {"Id", "Opt"}
 
 
-def test_coordtype_2d_gets_position_tuple():
+def test_coordtype_2d_gets_point_object():
     builder = _build("""INTERLIS 2.4;
 MODEL Foo AT "http://x" VERSION "1" =
   DOMAIN
@@ -338,14 +338,21 @@ END Foo.
     cls = _resolved_class(builder, "A")
     schema = class_to_json_schema(cls)
     assert schema["properties"]["Position"] == {
-        "type": "array",
-        "prefixItems": [
-            {"type": "number", "minimum": 0.0, "maximum": 1000.0},
-            {"type": "number", "minimum": 0.0, "maximum": 2000.0},
-        ],
-        "items": False,
-        "minItems": 2,
-        "maxItems": 2,
+        "type": "object",
+        "required": ["type", "coordinates"],
+        "properties": {
+            "type": {"const": "Point"},
+            "coordinates": {
+                "type": "array",
+                "prefixItems": [
+                    {"type": "number", "minimum": 0.0, "maximum": 1000.0},
+                    {"type": "number", "minimum": 0.0, "maximum": 2000.0},
+                ],
+                "items": False,
+                "minItems": 2,
+                "maxItems": 2,
+            },
+        },
     }
     assert schema["properties"]["Label"] == {"type": "string", "maxLength": 10}
 
@@ -364,11 +371,12 @@ END Foo.
 """)
     cls = _resolved_class(builder, "A")
     schema = class_to_json_schema(cls)
-    assert len(schema["properties"]["Position"]["prefixItems"]) == 3
-    assert schema["properties"]["Position"]["minItems"] == 3
+    coordinates = schema["properties"]["Position"]["properties"]["coordinates"]
+    assert len(coordinates["prefixItems"]) == 3
+    assert coordinates["minItems"] == 3
 
 
-def test_multicoord_wraps_position_in_array():
+def test_multicoord_gets_multipoint_object():
     builder = _build("""INTERLIS 2.4;
 MODEL Foo AT "http://x" VERSION "1" =
   DOMAIN
@@ -382,12 +390,13 @@ END Foo.
 """)
     cls = _resolved_class(builder, "A")
     schema = class_to_json_schema(cls)
-    assert schema["properties"]["Positions"]["type"] == "array"
-    assert schema["properties"]["Positions"]["items"]["type"] == "array"
-    assert schema["properties"]["Positions"]["items"]["minItems"] == 2
+    positions = schema["properties"]["Positions"]
+    assert positions["properties"]["type"] == {"const": "MultiPoint"}
+    assert positions["properties"]["coordinates"]["type"] == "array"
+    assert positions["properties"]["coordinates"]["items"]["minItems"] == 2
 
 
-def test_polyline_gets_array_of_positions():
+def test_polyline_gets_linestring_object_or_curved_object():
     builder = _build("""INTERLIS 2.4;
 MODEL Foo AT "http://x" VERSION "1" =
   DOMAIN
@@ -402,7 +411,9 @@ END Foo.
 """)
     cls = _resolved_class(builder, "A")
     schema = class_to_json_schema(cls)
-    assert schema["properties"]["Geometrie"] == {
+    straight, curved = schema["properties"]["Geometrie"]["anyOf"]
+    assert straight["properties"]["type"] == {"const": "LineString"}
+    assert straight["properties"]["coordinates"] == {
         "type": "array",
         "items": {
             "type": "array",
@@ -415,9 +426,10 @@ END Foo.
             "maxItems": 2,
         },
     }
+    assert curved["properties"]["type"] == {"enum": ["CircularString", "CompoundCurve"]}
 
 
-def test_surface_gets_array_of_rings_with_boundary_order_marker():
+def test_surface_gets_polygon_object_with_boundary_order_marker():
     builder = _build("""INTERLIS 2.4;
 MODEL Foo AT "http://x" VERSION "1" =
   DOMAIN
@@ -432,11 +444,12 @@ END Foo.
 """)
     cls = _resolved_class(builder, "A")
     schema = class_to_json_schema(cls)
-    geom = schema["properties"]["Geometrie"]
-    assert geom["type"] == "array"
-    assert geom["x-boundary-order"] == "outer-first"
-    assert geom["items"]["type"] == "array"  # one ring = array of positions
-    assert geom["items"]["items"]["type"] == "array"  # one position = [x, y]
+    polygon = schema["properties"]["Geometrie"]["anyOf"][0]
+    assert polygon["properties"]["type"] == {"const": "Polygon"}
+    rings = polygon["properties"]["coordinates"]
+    assert rings["x-boundary-order"] == "outer-first"
+    assert rings["items"]["type"] == "array"  # one ring = array of positions
+    assert rings["items"]["items"]["type"] == "array"  # one position = [x, y]
 
 
 def test_area_gets_same_shape_as_surface():
@@ -454,10 +467,11 @@ END Foo.
 """)
     cls = _resolved_class(builder, "A")
     schema = class_to_json_schema(cls)
-    assert schema["properties"]["Geometrie"]["x-boundary-order"] == "outer-first"
+    polygon = schema["properties"]["Geometrie"]["anyOf"][0]
+    assert polygon["properties"]["coordinates"]["x-boundary-order"] == "outer-first"
 
 
-def test_multisurface_wraps_ring_array_once_more():
+def test_multisurface_gets_multipolygon_object():
     builder = _build("""INTERLIS 2.4;
 MODEL Foo AT "http://x" VERSION "1" =
   DOMAIN
@@ -472,11 +486,12 @@ END Foo.
 """)
     cls = _resolved_class(builder, "A")
     schema = class_to_json_schema(cls)
-    geom = schema["properties"]["Geometrie"]
-    assert geom["type"] == "array"
-    assert geom["items"]["x-boundary-order"] == "outer-first"
-    assert geom["items"]["items"]["type"] == "array"  # ring
-    assert geom["items"]["items"]["items"]["type"] == "array"  # position
+    multi = schema["properties"]["Geometrie"]["anyOf"][0]
+    assert multi["properties"]["type"] == {"const": "MultiPolygon"}
+    polygons = multi["properties"]["coordinates"]
+    assert polygons["items"]["x-boundary-order"] == "outer-first"
+    assert polygons["items"]["items"]["type"] == "array"  # ring
+    assert polygons["items"]["items"]["items"]["type"] == "array"  # position
 
 
 def test_coordtype_axis_unresolved_falls_back_to_number_array():

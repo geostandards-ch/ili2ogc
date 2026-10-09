@@ -33,6 +33,7 @@ from interlis.xtf.schema import (
     reference_target_class,
     resolve_attribute,
     schema_members_of,
+    wrapped_reference,
 )
 
 JSON_SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema"
@@ -221,57 +222,50 @@ def _position_schema(coord_type: MetaInstance | None) -> dict[str, Any]:
     }
 
 
-def _wrap_multi(schema: dict[str, Any], multi: object) -> dict[str, Any]:
-    """Wrap `schema` in one more array level for MULTICOORD/MULTIPOLYLINE/MULTISURFACE/MULTIAREA.
-
-    `Multi` (own BOOLEAN on `CoordType`/`LineType`, true for the `MULTI*`
-    keyword) - the extra array level fully captures "possibly disjoint
-    parts" on its own; unlike `MultiValue.Ordered`, no marker is needed
-    since no information is lost by the nesting alone.
-    """
-    return {"type": "array", "items": schema} if bool(multi) else schema
+def _geometry_object_schema(geometry_type: str, coordinates: dict[str, Any]) -> dict[str, Any]:
+    """A GeoJSON geometry object of `geometry_type`, as `convert-jsonfg` writes a geometry value."""
+    return {
+        "type": "object",
+        "required": ["type", "coordinates"],
+        "properties": {"type": {"const": geometry_type}, "coordinates": coordinates},
+    }
 
 
 def _coord_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
-    """`COORD`/`MULTICOORD` attribute -> a position, or an array of positions if `Multi`."""
-    return _wrap_multi(_position_schema(type_instance), getattr(type_instance, "Multi", None))
+    """`COORD` -> a `Point`, `MULTICOORD` -> a `MultiPoint` geometry object."""
+    position = _position_schema(type_instance)
+    if getattr(type_instance, "Multi", None):
+        return _geometry_object_schema("MultiPoint", {"type": "array", "items": position})
+    return _geometry_object_schema("Point", position)
 
 
 _SURFACE_LIKE_KINDS = frozenset({"Surface", "Area"})
 
 
 def _line_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
-    """`POLYLINE`/`DIRECTED POLYLINE` -> array of positions; `SURFACE`/`AREA` -> array of boundary rings.
+    """`POLYLINE`/`SURFACE`/`AREA` (and `MULTI*`) -> the geometry object `convert-jsonfg` writes.
 
-    Vertex coordinate shape comes from `xtf.schema.line_coord_type`
-    (association `LineCoord`, walks the `EXTENDS` chain like
-    `xtf.schema.attributes_of`) fed into `_position_schema` - a vertex is
-    always a single position, never itself MULTI, so `_coord_type_schema`
-    (which would apply `Multi`-wrapping) is deliberately NOT reused here:
-    that flag belongs to the referenced `CoordType` domain in its OWN
-    right, unrelated to its use as a polyline/surface vertex type.
-    `Kind in {Surface, Area}` (eCH-0031: both encoded identically on the
-    wire - `AREA` is a semantic "WITHOUT OVERLAPS" constraint over the
-    same `SURFACE` shape, not a distinct geometry) -> one more array
-    level (boundary rings) than Polyline/DirectedPolyline; the first ring
-    is the outer boundary, the rest are holes - no native JSON Schema
-    keyword expresses "first item is special", surfaced as an
-    informational `x-boundary-order` marker (RULE #5). ARC
-    segments (a circular arc between two vertices) have no representation
-    here - a straight-line-only simplification shared by GeoJSON itself,
-    not something this mapping alone introduces.
+    Straight-only values are `LineString`/`Polygon`/`MultiLineString`/`MultiPolygon`; one holding an ARC is a
+    curved object, described loosely. Surface rings are outer-first, surfaced as `x-boundary-order`.
     """
-    coord_schema = _position_schema(line_coord_type(type_instance))
-    position_array: dict[str, Any] = {"type": "array", "items": coord_schema}
-    if getattr(type_instance, "Kind", None) in _SURFACE_LIKE_KINDS:
-        schema: dict[str, Any] = {
-            "type": "array",
-            "items": position_array,
-            "x-boundary-order": "outer-first",
-        }
-    else:
-        schema = position_array
-    return _wrap_multi(schema, getattr(type_instance, "Multi", None))
+    multi = bool(getattr(type_instance, "Multi", None))
+    surface = getattr(type_instance, "Kind", None) in _SURFACE_LIKE_KINDS
+    line: dict[str, Any] = {"type": "array", "items": _position_schema(line_coord_type(type_instance))}
+    straight = line
+    if surface:
+        straight = {"type": "array", "items": line, "x-boundary-order": "outer-first"}
+    if multi:
+        straight = {"type": "array", "items": straight}
+    names = {
+        (False, False): ("LineString", ["CircularString", "CompoundCurve"]),
+        (False, True): ("Polygon", ["CurvePolygon"]),
+        (True, False): ("MultiLineString", ["MultiCurve"]),
+        (True, True): ("MultiPolygon", ["MultiSurface"]),
+    }
+    straight_type, curved_types = names[(multi, surface)]
+    return {
+        "anyOf": [_geometry_object_schema(straight_type, straight), _geometry_value_schema(curved_types)],
+    }
 
 
 def _scalar_type_schema(kind: str | None, type_instance: MetaInstance | None) -> dict[str, Any] | None:
@@ -408,6 +402,9 @@ def _element_schema(
     if scalar is not None:
         return scalar
     if kind == "Class" and _is_structure(type_instance):
+        wrapped = wrapped_reference(type_instance)
+        if wrapped is not None:
+            return _reference_type_schema(wrapped)
         return _class_ref_or_marker(type_instance, ref_keys, symbol_table)
     if kind == "Class" and type_instance is not None:
         return {"type": "string"}
@@ -488,7 +485,12 @@ def _attribute_schema(
     if resolved.type_kind == "MultiValue" and resolved.type_instance is not None:
         schema = _multi_value_schema(resolved.type_instance, ref_keys, symbol_table)
     elif resolved.type_kind == "Class" and _is_structure(resolved.type_instance):
-        schema = _class_ref_or_marker(resolved.type_instance, ref_keys, symbol_table)
+        wrapped = wrapped_reference(resolved.type_instance)
+        schema = (
+            _reference_type_schema(wrapped)
+            if wrapped is not None
+            else _class_ref_or_marker(resolved.type_instance, ref_keys, symbol_table)
+        )
     elif resolved.type_kind in ("Class", "ReferenceType") and resolved.type_instance is not None:
         schema = _reference_type_schema(resolved)
     else:

@@ -5,22 +5,34 @@
       "type": "object",
       "properties": {
         "Pos": {
-          "type": "array",
-          "prefixItems": [
-            {
-              "type": "number",
-              "minimum": 0.0,
-              "maximum": 100.0
-            },
-            {
-              "type": "number",
-              "minimum": 0.0,
-              "maximum": 200.0
-            }
+          "type": "object",
+          "required": [
+            "type",
+            "coordinates"
           ],
-          "items": false,
-          "minItems": 2,
-          "maxItems": 2
+          "properties": {
+            "type": {
+              "const": "Point"
+            },
+            "coordinates": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number",
+                  "minimum": 0.0,
+                  "maximum": 100.0
+                },
+                {
+                  "type": "number",
+                  "minimum": 0.0,
+                  "maximum": 200.0
+                }
+              ],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
         }
       },
       "title": "Point",
@@ -36,24 +48,36 @@
       "type": "object",
       "properties": {
         "Pos": {
-          "type": "array",
-          "items": {
-            "type": "array",
-            "prefixItems": [
-              {
-                "type": "number",
-                "minimum": 0.0,
-                "maximum": 100.0
-              },
-              {
-                "type": "number",
-                "minimum": 0.0,
-                "maximum": 200.0
+          "type": "object",
+          "required": [
+            "type",
+            "coordinates"
+          ],
+          "properties": {
+            "type": {
+              "const": "MultiPoint"
+            },
+            "coordinates": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 100.0
+                  },
+                  {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 200.0
+                  }
+                ],
+                "items": false,
+                "minItems": 2,
+                "maxItems": 2
               }
-            ],
-            "items": false,
-            "minItems": 2,
-            "maxItems": 2
+            }
           }
         }
       },
@@ -70,25 +94,61 @@
       "type": "object",
       "properties": {
         "Geom": {
-          "type": "array",
-          "items": {
-            "type": "array",
-            "prefixItems": [
-              {
-                "type": "number",
-                "minimum": 0.0,
-                "maximum": 100.0
-              },
-              {
-                "type": "number",
-                "minimum": 0.0,
-                "maximum": 200.0
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "coordinates"
+              ],
+              "properties": {
+                "type": {
+                  "const": "LineString"
+                },
+                "coordinates": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 100.0
+                      },
+                      {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 200.0
+                      }
+                    ],
+                    "items": false,
+                    "minItems": 2,
+                    "maxItems": 2
+                  }
+                }
               }
-            ],
-            "items": false,
-            "minItems": 2,
-            "maxItems": 2
-          }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "enum": [
+                    "CircularString",
+                    "CompoundCurve"
+                  ]
+                },
+                "coordinates": {
+                  "type": "array"
+                },
+                "geometries": {
+                  "type": "array"
+                }
+              }
+            }
+          ]
         }
       },
       "title": "Way",
@@ -104,25 +164,61 @@
       "type": "object",
       "properties": {
         "Geom": {
-          "type": "array",
-          "items": {
-            "type": "array",
-            "prefixItems": [
-              {
-                "type": "number",
-                "minimum": 0.0,
-                "maximum": 100.0
-              },
-              {
-                "type": "number",
-                "minimum": 0.0,
-                "maximum": 200.0
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "coordinates"
+              ],
+              "properties": {
+                "type": {
+                  "const": "LineString"
+                },
+                "coordinates": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 100.0
+                      },
+                      {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 200.0
+                      }
+                    ],
+                    "items": false,
+                    "minItems": 2,
+                    "maxItems": 2
+                  }
+                }
               }
-            ],
-            "items": false,
-            "minItems": 2,
-            "maxItems": 2
-          }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "enum": [
+                    "CircularString",
+                    "CompoundCurve"
+                  ]
+                },
+                "coordinates": {
+                  "type": "array"
+                },
+                "geometries": {
+                  "type": "array"
+                }
+              }
+            }
+          ]
         }
       },
       "title": "DirectedWay",
@@ -138,28 +234,63 @@
       "type": "object",
       "properties": {
         "Geom": {
-          "type": "array",
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "prefixItems": [
-                {
-                  "type": "number",
-                  "minimum": 0.0,
-                  "maximum": 100.0
-                },
-                {
-                  "type": "number",
-                  "minimum": 0.0,
-                  "maximum": 200.0
-                }
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "coordinates"
               ],
-              "items": false,
-              "minItems": 2,
-              "maxItems": 2
+              "properties": {
+                "type": {
+                  "const": "MultiLineString"
+                },
+                "coordinates": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "minimum": 0.0,
+                          "maximum": 100.0
+                        },
+                        {
+                          "type": "number",
+                          "minimum": 0.0,
+                          "maximum": 200.0
+                        }
+                      ],
+                      "items": false,
+                      "minItems": 2,
+                      "maxItems": 2
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "enum": [
+                    "MultiCurve"
+                  ]
+                },
+                "coordinates": {
+                  "type": "array"
+                },
+                "geometries": {
+                  "type": "array"
+                }
+              }
             }
-          }
+          ]
         }
       },
       "title": "MultiWay",
@@ -175,29 +306,64 @@
       "type": "object",
       "properties": {
         "Geom": {
-          "type": "array",
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "prefixItems": [
-                {
-                  "type": "number",
-                  "minimum": 0.0,
-                  "maximum": 100.0
-                },
-                {
-                  "type": "number",
-                  "minimum": 0.0,
-                  "maximum": 200.0
-                }
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "coordinates"
               ],
-              "items": false,
-              "minItems": 2,
-              "maxItems": 2
+              "properties": {
+                "type": {
+                  "const": "Polygon"
+                },
+                "coordinates": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "minimum": 0.0,
+                          "maximum": 100.0
+                        },
+                        {
+                          "type": "number",
+                          "minimum": 0.0,
+                          "maximum": 200.0
+                        }
+                      ],
+                      "items": false,
+                      "minItems": 2,
+                      "maxItems": 2
+                    }
+                  },
+                  "x-boundary-order": "outer-first"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "enum": [
+                    "CurvePolygon"
+                  ]
+                },
+                "coordinates": {
+                  "type": "array"
+                },
+                "geometries": {
+                  "type": "array"
+                }
+              }
             }
-          },
-          "x-boundary-order": "outer-first"
+          ]
         }
       },
       "title": "Zone",
