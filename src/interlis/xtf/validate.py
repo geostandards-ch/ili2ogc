@@ -189,6 +189,9 @@ def _validate_scalar(resolved: ResolvedAttribute, node: RawNode, ctx: str) -> li
     elif kind == "TextType":
         if node.text is None and not node.children:
             problems.append(f"{ctx}: TEXT attribute present but empty")
+        max_length = getattr(resolved.type_instance, "MaxLength", None)
+        if node.text is not None and max_length is not None and len(node.text) > int(max_length):
+            problems.append(f"{ctx}: text of {len(node.text)} characters exceeds TEXT*{max_length}")
     return problems
 
 
