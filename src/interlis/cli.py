@@ -219,7 +219,7 @@ def cmd_build(args: argparse.Namespace) -> int:
 # user-FUNCTION result over the implicit AGGREGATES bag, an INSPECTION
 # member the target cannot express, a PostGIS-only AREA INSPECTION in a
 # GeoPackage).
-_SUPPORTED_VIEW_FORMATION_KINDS = ("Projection", "Join", "Union", "Aggregation", "Inspection")
+_SUPPORTED_VIEW_FORMATION_KINDS = _jsonschema_mod.SUPPORTED_VIEW_FORMATION_KINDS
 _SQL_VIEW_FORMATION_KINDS = _SUPPORTED_VIEW_FORMATION_KINDS
 
 
@@ -271,19 +271,7 @@ def cmd_convert(args: argparse.Namespace) -> int:
         root = builder.build(tree, meta_attributes=meta_attribute_comments_in_file(path))
     bag.extend(builder_warnings_to_diagnostics(caught, file=str(path)))
 
-    classes = [
-        instance
-        for instance in builder.symbol_table.all_registered()
-        if isinstance(instance, MetaInstance) and instance._qualified_class.rsplit(".", 1)[-1] == "Class"
-    ]
-    classes += _jsonschema_mod.topic_inherited_classes(builder.symbol_table)
-    views = [
-        instance
-        for instance in builder.symbol_table.all_registered()
-        if isinstance(instance, MetaInstance)
-        and instance._qualified_class.rsplit(".", 1)[-1] == "View"
-        and getattr(instance, "FormationKind", None) in _SUPPORTED_VIEW_FORMATION_KINDS
-    ]
+    roots = _jsonschema_mod.convertible_roots(builder.symbol_table)
     # `build()` returns the root Model instance directly for the (real-corpus
     # dominant) single-MODEL-per-file case - a file declaring more than one
     # MODEL yields something else here, so `x-meta` is simply omitted rather
@@ -291,7 +279,7 @@ def cmd_convert(args: argparse.Namespace) -> int:
     root_model = (
         root if isinstance(root, MetaInstance) and root._qualified_class.rsplit(".", 1)[-1] == "Model" else None
     )
-    schema = model_to_json_schema(classes + views, symbol_table=builder.symbol_table, model=root_model)
+    schema = model_to_json_schema(roots, symbol_table=builder.symbol_table, model=root_model)
     bag.extend(_jsonschema_mod.collect_diagnostics(schema, file=str(path)))
     if args.lang:
         translation = load_translation(getattr(root_model, "Name", None) or "", args.lang, repository)

@@ -10,13 +10,14 @@ duplicating any resolution logic - convert() is a decoupled stage from
 validate().
 """
 
+from collections.abc import Iterator
 from typing import Any
 
 import jsonschema
 
 from interlis.builder.forward_refs import SymbolTable
+from interlis.convert.geometry_kinds import GEOMETRY_KINDS, geometry_format
 from interlis.convert.view_formation import (
-    SURFACE_BOUNDARY,
     geometry_inspection,
     inspection_reading,
     is_standard_count_call,
@@ -26,9 +27,7 @@ from interlis.xtf.schema import (
     ResolvedAttribute,
     attributes_of,
     concrete_structure_subclasses,
-    coord_axes,
     enum_values,
-    line_coord_type,
     reference_external_status,
     reference_target_class,
     resolve_attribute,
@@ -198,76 +197,6 @@ def _enum_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
     return {"type": "string", "enum": sorted(values)}
 
 
-def _position_schema(coord_type: MetaInstance | None) -> dict[str, Any]:
-    """A single position - `[x, y, (z)]`, one array item per `CoordType.Axis`.
-
-    `xtf.schema.coord_axes` (association `AxisSpec`, ORDERED `{1..3}
-    NumType`) gives the exact axis count plus each axis's own Min/Max -
-    reused directly via `_num_type_schema` (no duplicated numeric-range
-    logic), one `prefixItems` entry per axis (2020-12 tuple validation),
-    `items: false` to forbid a 4th coordinate. Falls back to an
-    open-ended array of numbers when `Axis` isn't resolved (e.g. an
-    external domain not loaded via `--repo`) - same graceful-degradation
-    style already used by the XTF validator for the identical case.
-    """
-    axes = coord_axes(coord_type)
-    if not axes:
-        return {"type": "array", "items": {"type": "number"}}
-    return {
-        "type": "array",
-        "prefixItems": [_num_type_schema(a) for a in axes],
-        "items": False,
-        "minItems": len(axes),
-        "maxItems": len(axes),
-    }
-
-
-def _geometry_object_schema(geometry_type: str, coordinates: dict[str, Any]) -> dict[str, Any]:
-    """A GeoJSON geometry object of `geometry_type`, as `convert-jsonfg` writes a geometry value."""
-    return {
-        "type": "object",
-        "required": ["type", "coordinates"],
-        "properties": {"type": {"const": geometry_type}, "coordinates": coordinates},
-    }
-
-
-def _coord_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
-    """`COORD` -> a `Point`, `MULTICOORD` -> a `MultiPoint` geometry object."""
-    position = _position_schema(type_instance)
-    if getattr(type_instance, "Multi", None):
-        return _geometry_object_schema("MultiPoint", {"type": "array", "items": position})
-    return _geometry_object_schema("Point", position)
-
-
-_SURFACE_LIKE_KINDS = frozenset({"Surface", "Area"})
-
-
-def _line_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
-    """`POLYLINE`/`SURFACE`/`AREA` (and `MULTI*`) -> the geometry object `convert-jsonfg` writes.
-
-    Straight-only values are `LineString`/`Polygon`/`MultiLineString`/`MultiPolygon`; one holding an ARC is a
-    curved object, described loosely. Surface rings are outer-first, surfaced as `x-boundary-order`.
-    """
-    multi = bool(getattr(type_instance, "Multi", None))
-    surface = getattr(type_instance, "Kind", None) in _SURFACE_LIKE_KINDS
-    line: dict[str, Any] = {"type": "array", "items": _position_schema(line_coord_type(type_instance))}
-    straight = line
-    if surface:
-        straight = {"type": "array", "items": line, "x-boundary-order": "outer-first"}
-    if multi:
-        straight = {"type": "array", "items": straight}
-    names = {
-        (False, False): ("LineString", ["CircularString", "CompoundCurve"]),
-        (False, True): ("Polygon", ["CurvePolygon"]),
-        (True, False): ("MultiLineString", ["MultiCurve"]),
-        (True, True): ("MultiPolygon", ["MultiSurface"]),
-    }
-    straight_type, curved_types = names[(multi, surface)]
-    return {
-        "anyOf": [_geometry_object_schema(straight_type, straight), _geometry_value_schema(curved_types)],
-    }
-
-
 def _scalar_type_schema(kind: str | None, type_instance: MetaInstance | None) -> dict[str, Any] | None:
     """Return the scalar mapping for one (kind, instance) pair, or None if unmapped."""
     if kind == "NumType" and type_instance is not None:
@@ -282,10 +211,8 @@ def _scalar_type_schema(kind: str | None, type_instance: MetaInstance | None) ->
         return _formatted_type_schema(type_instance)
     if kind == "BlackboxType" and type_instance is not None:
         return _blackbox_type_schema(type_instance)
-    if kind == "CoordType" and type_instance is not None:
-        return _coord_type_schema(type_instance)
-    if kind == "LineType" and type_instance is not None:
-        return _line_type_schema(type_instance)
+    if kind in GEOMETRY_KINDS and type_instance is not None:
+        return {"format": geometry_format(kind, type_instance, feature_level=False)}
     return None
 
 
@@ -556,8 +483,12 @@ def _discover_classes(roots: list[MetaInstance], symbol_table: SymbolTable | Non
             for concrete in _concrete_subclasses(cls, symbol_table):
                 if id(concrete) not in found:
                     queue.append(concrete)
+        feature = getattr(cls, "Kind", None) != "Structure"
         for attr in attributes_of(cls).values():
-            nested = _nested_class(resolve_attribute(attr))
+            resolved = resolve_attribute(attr)
+            if feature and geometry_format(resolved.type_kind, resolved.type_instance, feature_level=True):
+                continue
+            nested = _nested_class(resolved)
             if nested is not None and id(nested) not in found:
                 queue.append(nested)
     return found
@@ -579,23 +510,6 @@ def _assign_keys(classes_by_id: dict[int, MetaInstance]) -> dict[int, str]:
     return keys
 
 
-_LINE_GEOMETRY_TYPES = ["LineString", "CircularString", "CompoundCurve"]
-_BOUNDARY_GEOMETRY_TYPES = ["LineString", "MultiLineString", "MultiCurve"]
-
-
-def _geometry_value_schema(types: list[str]) -> dict[str, Any]:
-    """A GeoJSON/JSON-FG geometry object of one of `types`, as `convert-jsonfg` writes a derived geometry value."""
-    return {
-        "type": "object",
-        "required": ["type"],
-        "properties": {
-            "type": {"enum": types},
-            "coordinates": {"type": "array"},
-            "geometries": {"type": "array"},
-        },
-    }
-
-
 def _geometry_inspection_schemas(
     view: MetaInstance, ref_keys: dict[int, str], symbol_table: SymbolTable | None
 ) -> dict[str, dict[str, Any]]:
@@ -614,7 +528,6 @@ def _geometry_inspection_schemas(
     if insp is None or insp.problem is not None:
         return {}
     members = schema_members_of(base_view, symbol_table) if symbol_table is not None else attributes_of(base_view)
-    geometry_type = resolve_attribute(members[insp.attr]).type_instance
     alias = getattr(bases[0], "Name", None) or getattr(base_view, "Name", None) or ""
     schemas: dict[str, dict[str, Any]] = {}
     for attr in getattr(view, "ClassAttribute", None) or []:
@@ -623,17 +536,9 @@ def _geometry_inspection_schemas(
         if reading is None or not getattr(attr, "Name", None):
             continue
         if reading.what == "geometry":
-            types = _BOUNDARY_GEOMETRY_TYPES if insp.kind == SURFACE_BOUNDARY else _LINE_GEOMETRY_TYPES
-            schemas[attr.Name] = _geometry_value_schema(types)
+            schemas[attr.Name] = {"format": "geometry-any"}
         elif reading.what in ("endpoint", "arcpoint"):
-            schemas[attr.Name] = {
-                "type": "object",
-                "required": ["type", "coordinates"],
-                "properties": {
-                    "type": {"const": "Point"},
-                    "coordinates": _position_schema(line_coord_type(geometry_type)),
-                },
-            }
+            schemas[attr.Name] = {"format": "geometry-point"}
         elif reading.field in members:
             schemas[attr.Name] = _attribute_schema(resolve_attribute(members[reading.field]), ref_keys, symbol_table)
     return schemas
@@ -643,6 +548,16 @@ def _is_untyped_count_column(attr: MetaInstance) -> bool:
     """True for an aggregation-view attribute `Name := INTERLIS.objectCount(AGGREGATES)` declared without a type."""
     derivates = getattr(attr, "Derivates", None) or []
     return bool(derivates) and is_standard_count_call(derivates[0])
+
+
+ROLE_KEY = "x-ogc-role"
+PRIMARY_GEOMETRY = "primary-geometry"
+
+
+def is_spatial_schema(prop: Any) -> bool:
+    """Whether a property schema is an OGC API Schemas spatial property (`format: geometry-*`)."""
+    fmt = prop.get("format") if isinstance(prop, dict) else None
+    return isinstance(fmt, str) and fmt.startswith("geometry-")
 
 
 def class_to_json_schema(
@@ -700,6 +615,7 @@ def class_to_json_schema(
         schema_members_of(class_instance, symbol_table) if symbol_table is not None else attributes_of(class_instance)
     )
     derived = _geometry_inspection_schemas(class_instance, ref_keys, symbol_table)
+    is_feature = getattr(class_instance, "Kind", None) != "Structure"
     for name, attr in members.items():
         resolved = resolve_attribute(attr)
         if name in derived:
@@ -708,8 +624,15 @@ def class_to_json_schema(
             properties[name] = {"type": "integer", "minimum": 0}
         else:
             properties[name] = _attribute_schema(resolved, ref_keys, symbol_table)
+            fmt = geometry_format(resolved.type_kind, resolved.type_instance, feature_level=is_feature)
+            if fmt and "format" not in properties[name]:
+                properties[name] = {key: value for key, value in properties[name].items() if key == "x-meta"}
+                properties[name]["format"] = fmt
         if resolved.mandatory:
             required.append(name)
+    spatial = [name for name, prop in properties.items() if is_spatial_schema(prop)]
+    if len(spatial) == 1:
+        properties[spatial[0]][ROLE_KEY] = PRIMARY_GEOMETRY
     schema: dict[str, Any] = {"type": "object", "properties": properties}
     class_name = getattr(class_instance, "Name", None)
     if class_name:
@@ -723,6 +646,22 @@ def class_to_json_schema(
     if crud is not None:
         schema["x-crud"] = list(crud)
     return schema
+
+
+def property_validator(schema: dict[str, Any], key: str) -> jsonschema.Draft202012Validator:
+    """A validator of one feature's `properties` against `$defs[key]`; its spatial properties are not required.
+
+    Geometry travels outside `properties` in JSON-FG (`place`), so the `format: geometry-*` properties
+    are left to a geometry check.
+    """
+    defs = dict(schema.get("$defs", {}))
+    entry = dict(defs[key])
+    spatial = {name for name, prop in entry.get("properties", {}).items() if is_spatial_schema(prop)}
+    if spatial and "required" in entry:
+        entry["required"] = [name for name in entry["required"] if name not in spatial]
+    defs[key] = entry
+    root = {"$schema": schema.get("$schema", JSON_SCHEMA_DRAFT), "$defs": defs, "$ref": f"#/$defs/{key}"}
+    return jsonschema.Draft202012Validator(root)
 
 
 def validate_feature_properties(properties: dict[str, Any], schema: dict[str, Any], key: str) -> list[str]:
@@ -753,22 +692,15 @@ def validate_feature_properties(properties: dict[str, Any], schema: dict[str, An
     for this collection (a JOIN OF View) - that's `_crud_operations`'s
     job, a separate concern from payload SHAPE validation.
     """
-    root = {
-        "$schema": schema.get("$schema", JSON_SCHEMA_DRAFT),
-        "$defs": schema.get("$defs", {}),
-        "$ref": f"#/$defs/{key}",
-    }
-    validator = jsonschema.Draft202012Validator(root)
-    return [error.message for error in validator.iter_errors(properties)]
+    return [error.message for error in property_validator(schema, key).iter_errors(properties)]
 
 
-def topic_inherited_classes(symbol_table: SymbolTable) -> list[MetaInstance]:
-    """Classes the registered topics inherit from their base topics through `TOPIC ... EXTENDS`.
+def inherited_topic_classes(symbol_table: SymbolTable) -> Iterator[tuple[MetaInstance, MetaInstance]]:
+    """`(topic, class)` pairs: the classes a registered topic inherits through `TOPIC ... EXTENDS` from its base topics.
 
     A topic that extends another takes over every concept the base topic defines (eCH-0031 V2.1.0 §2.3), so the
     objects of an extension-only topic are typed by classes the extending model never declares itself.
     """
-    found: list[MetaInstance] = []
     seen: set[int] = set()
     for topic in symbol_table.all_registered():
         if not isinstance(topic, MetaInstance) or not topic._qualified_class.endswith("ModelData.SubModel"):
@@ -780,8 +712,33 @@ def topic_inherited_classes(symbol_table: SymbolTable) -> list[MetaInstance]:
             base = getattr(data_unit, "_twin", None)
             for element in getattr(base, "Element", None) or []:
                 if isinstance(element, MetaInstance) and element._qualified_class.endswith("ModelData.Class"):
-                    found.append(element)
-    return found
+                    yield topic, element
+
+
+def topic_inherited_classes(symbol_table: SymbolTable) -> list[MetaInstance]:
+    """The classes of `inherited_topic_classes`, without their topic."""
+    return [element for _topic, element in inherited_topic_classes(symbol_table)]
+
+
+SUPPORTED_VIEW_FORMATION_KINDS = ("Projection", "Join", "Union", "Aggregation", "Inspection")
+
+
+def convertible_roots(symbol_table: SymbolTable) -> list[MetaInstance]:
+    """The classes and supported VIEWs of a built model that `model_to_json_schema` takes as its roots."""
+    instances = [i for i in symbol_table.all_registered() if isinstance(i, MetaInstance)]
+    kind = lambda i: i._qualified_class.rsplit(".", 1)[-1]  # noqa: E731
+    classes = [i for i in instances if kind(i) == "Class"] + topic_inherited_classes(symbol_table)
+    views = [
+        i
+        for i in instances
+        if kind(i) == "View" and getattr(i, "FormationKind", None) in SUPPORTED_VIEW_FORMATION_KINDS
+    ]
+    return classes + views
+
+
+def class_schema_keys(classes: list[MetaInstance], symbol_table: SymbolTable | None = None) -> dict[int, str]:
+    """The `$defs` key (by instance id) of every class `model_to_json_schema(classes)` emits."""
+    return _assign_keys(_discover_classes(classes, symbol_table))
 
 
 def model_to_json_schema(

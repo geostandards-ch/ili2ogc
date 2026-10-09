@@ -8,7 +8,7 @@ implements.
 
 from conftest import build_from_text as _build
 
-from interlis.convert.jsonschema import class_to_json_schema, model_to_json_schema
+from interlis.convert.jsonschema import class_to_json_schema, model_to_json_schema, validate_feature_properties
 from interlis.xtf.schema import attributes_of, resolve_attribute
 
 
@@ -337,27 +337,11 @@ END Foo.
 """)
     cls = _resolved_class(builder, "A")
     schema = class_to_json_schema(cls)
-    assert schema["properties"]["Position"] == {
-        "type": "object",
-        "required": ["type", "coordinates"],
-        "properties": {
-            "type": {"const": "Point"},
-            "coordinates": {
-                "type": "array",
-                "prefixItems": [
-                    {"type": "number", "minimum": 0.0, "maximum": 1000.0},
-                    {"type": "number", "minimum": 0.0, "maximum": 2000.0},
-                ],
-                "items": False,
-                "minItems": 2,
-                "maxItems": 2,
-            },
-        },
-    }
+    assert schema["properties"]["Position"] == {"format": "geometry-point", "x-ogc-role": "primary-geometry"}
     assert schema["properties"]["Label"] == {"type": "string", "maxLength": 10}
 
 
-def test_coordtype_3d_gets_three_axes():
+def test_coordtype_3d_is_a_spatial_property_without_type():
     builder = _build("""INTERLIS 2.4;
 MODEL Foo AT "http://x" VERSION "1" =
   DOMAIN
@@ -371,12 +355,12 @@ END Foo.
 """)
     cls = _resolved_class(builder, "A")
     schema = class_to_json_schema(cls)
-    coordinates = schema["properties"]["Position"]["properties"]["coordinates"]
-    assert len(coordinates["prefixItems"]) == 3
-    assert coordinates["minItems"] == 3
+    position = schema["properties"]["Position"]
+    assert position["format"] == "geometry-point"
+    assert "type" not in position and "$ref" not in position
 
 
-def test_multicoord_gets_multipoint_object():
+def test_multicoord_gets_multipoint_format():
     builder = _build("""INTERLIS 2.4;
 MODEL Foo AT "http://x" VERSION "1" =
   DOMAIN
@@ -390,13 +374,10 @@ END Foo.
 """)
     cls = _resolved_class(builder, "A")
     schema = class_to_json_schema(cls)
-    positions = schema["properties"]["Positions"]
-    assert positions["properties"]["type"] == {"const": "MultiPoint"}
-    assert positions["properties"]["coordinates"]["type"] == "array"
-    assert positions["properties"]["coordinates"]["items"]["minItems"] == 2
+    assert schema["properties"]["Positions"]["format"] == "geometry-multipoint"
 
 
-def test_polyline_gets_linestring_object_or_curved_object():
+def test_straight_polyline_is_a_linestring():
     builder = _build("""INTERLIS 2.4;
 MODEL Foo AT "http://x" VERSION "1" =
   DOMAIN
@@ -411,96 +392,7 @@ END Foo.
 """)
     cls = _resolved_class(builder, "A")
     schema = class_to_json_schema(cls)
-    straight, curved = schema["properties"]["Geometrie"]["anyOf"]
-    assert straight["properties"]["type"] == {"const": "LineString"}
-    assert straight["properties"]["coordinates"] == {
-        "type": "array",
-        "items": {
-            "type": "array",
-            "prefixItems": [
-                {"type": "number", "minimum": 0.0, "maximum": 1000.0},
-                {"type": "number", "minimum": 0.0, "maximum": 1000.0},
-            ],
-            "items": False,
-            "minItems": 2,
-            "maxItems": 2,
-        },
-    }
-    assert curved["properties"]["type"] == {"enum": ["CircularString", "CompoundCurve"]}
-
-
-def test_surface_gets_polygon_object_with_boundary_order_marker():
-    builder = _build("""INTERLIS 2.4;
-MODEL Foo AT "http://x" VERSION "1" =
-  DOMAIN
-    Coord2D = COORD 0.000 .. 1000.000, 0.000 .. 1000.000;
-    SurfaceGeom = SURFACE WITH (STRAIGHTS) VERTEX Coord2D WITHOUT OVERLAPS > 0.001;
-  TOPIC T =
-    CLASS A =
-      Geometrie : SurfaceGeom;
-    END A;
-  END T;
-END Foo.
-""")
-    cls = _resolved_class(builder, "A")
-    schema = class_to_json_schema(cls)
-    polygon = schema["properties"]["Geometrie"]["anyOf"][0]
-    assert polygon["properties"]["type"] == {"const": "Polygon"}
-    rings = polygon["properties"]["coordinates"]
-    assert rings["x-boundary-order"] == "outer-first"
-    assert rings["items"]["type"] == "array"  # one ring = array of positions
-    assert rings["items"]["items"]["type"] == "array"  # one position = [x, y]
-
-
-def test_area_gets_same_shape_as_surface():
-    builder = _build("""INTERLIS 2.4;
-MODEL Foo AT "http://x" VERSION "1" =
-  DOMAIN
-    Coord2D = COORD 0.000 .. 1000.000, 0.000 .. 1000.000;
-    SurfaceGeom = AREA WITH (STRAIGHTS) VERTEX Coord2D WITHOUT OVERLAPS > 0.001;
-  TOPIC T =
-    CLASS A =
-      Geometrie : SurfaceGeom;
-    END A;
-  END T;
-END Foo.
-""")
-    cls = _resolved_class(builder, "A")
-    schema = class_to_json_schema(cls)
-    polygon = schema["properties"]["Geometrie"]["anyOf"][0]
-    assert polygon["properties"]["coordinates"]["x-boundary-order"] == "outer-first"
-
-
-def test_multisurface_gets_multipolygon_object():
-    builder = _build("""INTERLIS 2.4;
-MODEL Foo AT "http://x" VERSION "1" =
-  DOMAIN
-    Coord2D = COORD 0.000 .. 1000.000, 0.000 .. 1000.000;
-    MultiSurfaceGeom = MULTISURFACE WITH (STRAIGHTS) VERTEX Coord2D WITHOUT OVERLAPS > 0.001;
-  TOPIC T =
-    CLASS A =
-      Geometrie : MultiSurfaceGeom;
-    END A;
-  END T;
-END Foo.
-""")
-    cls = _resolved_class(builder, "A")
-    schema = class_to_json_schema(cls)
-    multi = schema["properties"]["Geometrie"]["anyOf"][0]
-    assert multi["properties"]["type"] == {"const": "MultiPolygon"}
-    polygons = multi["properties"]["coordinates"]
-    assert polygons["items"]["x-boundary-order"] == "outer-first"
-    assert polygons["items"]["items"]["type"] == "array"  # ring
-    assert polygons["items"]["items"]["items"]["type"] == "array"  # position
-
-
-def test_coordtype_axis_unresolved_falls_back_to_number_array():
-    """When Axis isn't resolved (e.g. an unresolved cross-model domain),
-    a position still gets a meaningfully typed schema - an open-ended
-    array of numbers, not x-unsupported."""
-    from interlis.convert.jsonschema import _position_schema
-
-    assert _position_schema(None) == {"type": "array", "items": {"type": "number"}}
+    assert schema["properties"]["Geometrie"]["format"] == "geometry-linestring"
 
 
 def test_class_schema_has_title_and_object_type():
@@ -771,3 +663,94 @@ def test_abstract_structure_with_no_concrete_subclass_falls_back_to_marked_ref()
         "$ref": "#/$defs/OrphanAbstract",
         "x-abstract": True,
     }
+
+
+def test_arc_admitting_line_is_geometry_any():
+    builder = _build("""INTERLIS 2.4;
+MODEL Foo AT "http://x" VERSION "1" =
+  DOMAIN
+    Coord2D = COORD 0.000 .. 1000.000, 0.000 .. 1000.000;
+    Curve = POLYLINE WITH (STRAIGHTS, ARCS) VERTEX Coord2D;
+  TOPIC T =
+    CLASS A =
+      Geometrie : Curve;
+    END A;
+  END T;
+END Foo.
+""")
+    cls = _resolved_class(builder, "A")
+    schema = class_to_json_schema(cls)
+    assert schema["properties"]["Geometrie"]["format"] == "geometry-any"
+
+
+def test_surface_and_area_are_polygons():
+    for kind in ("SURFACE", "AREA"):
+        builder = _build(f"""INTERLIS 2.4;
+    MODEL Foo AT "http://x" VERSION "1" =
+      DOMAIN
+        Coord2D = COORD 0.000 .. 1000.000, 0.000 .. 1000.000;
+        Geom = {kind} WITH (STRAIGHTS) VERTEX Coord2D WITHOUT OVERLAPS > 0.001;
+      TOPIC T =
+        CLASS A =
+          Geometrie : Geom;
+        END A;
+      END T;
+    END Foo.
+    """)
+        cls = _resolved_class(builder, "A")
+        schema = class_to_json_schema(cls)
+
+        assert schema["properties"]["Geometrie"]["format"] == "geometry-polygon"
+
+
+def test_multisurface_is_a_multipolygon():
+    builder = _build("""INTERLIS 2.4;
+MODEL Foo AT "http://x" VERSION "1" =
+  DOMAIN
+    Coord2D = COORD 0.000 .. 1000.000, 0.000 .. 1000.000;
+    MultiSurfaceGeom = MULTISURFACE WITH (STRAIGHTS) VERTEX Coord2D WITHOUT OVERLAPS > 0.001;
+  TOPIC T =
+    CLASS A =
+      Geometrie : MultiSurfaceGeom;
+    END A;
+  END T;
+END Foo.
+""")
+    cls = _resolved_class(builder, "A")
+    schema = class_to_json_schema(cls)
+    assert schema["properties"]["Geometrie"]["format"] == "geometry-multipolygon"
+
+
+def test_several_spatial_properties_have_no_primary_role():
+    builder = _build("""INTERLIS 2.4;
+MODEL Foo AT "http://x" VERSION "1" =
+  DOMAIN
+    Coord2D = COORD 0.000 .. 1000.000, 0.000 .. 1000.000;
+  TOPIC T =
+    CLASS A =
+      First : Coord2D;
+      Second : Coord2D;
+    END A;
+  END T;
+END Foo.
+""")
+    schema = class_to_json_schema(_resolved_class(builder, "A"))
+    assert all("x-ogc-role" not in schema["properties"][name] for name in ("First", "Second"))
+
+
+def test_validate_feature_properties_ignores_the_spatial_property():
+    builder = _build("""INTERLIS 2.4;
+MODEL Foo AT "http://x" VERSION "1" =
+  DOMAIN
+    Coord2D = COORD 0.000 .. 1000.000, 0.000 .. 1000.000;
+  TOPIC T =
+    CLASS A =
+      Position : MANDATORY Coord2D;
+      Label : MANDATORY TEXT*3;
+    END A;
+  END T;
+END Foo.
+""")
+    doc = model_to_json_schema([_resolved_class(builder, "A")])
+    assert validate_feature_properties({"Label": "abc"}, doc, "A") == []
+    assert validate_feature_properties({"Label": "abcd"}, doc, "A") != []

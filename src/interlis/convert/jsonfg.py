@@ -53,6 +53,14 @@ from interlis.convert.constraint_eval import (
     _try_number,
     evaluate_expression,
 )
+from interlis.convert.geometry_kinds import (
+    GEOMETRY_KINDS,
+    is_chbase_multisurface,
+    is_composite_surface3d,
+    is_curve3d,
+    is_pointcloud3d,
+    is_solid3d,
+)
 from interlis.convert.jsonschema import _is_integer_range
 from interlis.convert.view_formation import (
     LINE_GEOMETRY,
@@ -100,7 +108,6 @@ CONF_POLYHEDRA = f"http://www.opengis.net/spec/json-fg-1/{JSON_FG_VERSION}/conf/
 CRS_URI_PREFIX = "http://www.opengis.net/def/crs/EPSG/0/"
 
 _SCALAR_KINDS = {"NumType", "TextType", "EnumType", "BooleanType", "FormattedType", "BlackboxType"}
-_GEOMETRY_KINDS = {"CoordType", "LineType"}
 # JSON-FG Part 1 Core §7.5 (conformance class "circular-arcs") - geometry
 # "type" values that require CONF_CIRCULAR_ARCS to be declared in
 # "conformsTo".
@@ -108,7 +115,7 @@ _CIRCULAR_ARC_TYPES = frozenset({"CircularString", "CompoundCurve", "CurvePolygo
 _POLYHEDRA_TYPES = frozenset({"Polyhedron", "MultiPolyhedron"})
 # `Geometry3D_V2.Solid3D` (CHBase Part VIII, models.geo.admin.ch) is the
 # only published INTERLIS 3D solid structure - matched by Name + its
-# distinctive `OuterShell` attribute (see `_is_solid3d`), not by qualified
+# distinctive `OuterShell` attribute (see `is_solid3d`), not by qualified
 # model path (`SymbolTable.qualified_name_of` only resolves within the
 # model actually being built, never an imported one - same cross-model
 # identity limitation already documented on `concrete_structure_subclasses`
@@ -238,7 +245,7 @@ def _attribute_value(
     kind = resolved.type_kind
     if kind in _SCALAR_KINDS:
         return _scalar_value(resolved, raw_nodes[0])
-    if kind in _GEOMETRY_KINDS and raw_nodes:
+    if kind in GEOMETRY_KINDS and raw_nodes:
         # A CoordType/LineType NESTED inside a STRUCTURE or a BAG/LIST
         # element - the Feature's own `place` is a separate, top-level
         # attribute (`_place_and_crs`). A nested one has nowhere native to
@@ -471,7 +478,7 @@ def _members_value(
             continue
         value = _attribute_value(resolved_attrs[name], raw_nodes, symbol_table=symbol_table)
         kind = resolved_attrs[name].type_kind
-        if value is not None or kind in _SCALAR_KINDS or kind in _GEOMETRY_KINDS:
+        if value is not None or kind in _SCALAR_KINDS or kind in GEOMETRY_KINDS:
             result[name] = value
     return result
 
@@ -892,16 +899,6 @@ def _place_and_crs_via(
     return _place_and_crs_for_shape
 
 
-def _is_solid3d(type_instance: MetaInstance | None) -> bool:
-    """Whether `type_instance` is (an occurrence of) `Geometry3D_V2.Solid3D` - see module-level constant."""
-    return (
-        isinstance(type_instance, MetaInstance)
-        and getattr(type_instance, "Kind", None) == "Structure"
-        and getattr(type_instance, "Name", None) == "Solid3D"
-        and "OuterShell" in attributes_of(type_instance)
-    )
-
-
 def _solid3d_coord_type(solid_class: MetaInstance) -> MetaInstance | None:
     """Walk `Solid3D.OuterShell -> Simplified -> Triangle3D.Geometry` to the ultimate `CoordType`, for CRS lookup.
 
@@ -979,26 +976,6 @@ _solid3d_place_and_crs = _place_and_crs_via(
 )
 
 
-def _is_curve3d(type_instance: MetaInstance | None) -> bool:
-    """Whether `type_instance` is `Geometry3D_V2.PolylineStraight3D` or `.CompositeCurve3D`.
-
-    Same Name+shape matching as `_is_solid3d` (cross-model qualified-name
-    lookup doesn't work here either). `Pipe3D` (`EXTENDS CompositeCurve3D`,
-    no JSON-FG target - no tube/extrusion primitive exists in any
-    conformance class) is excluded by construction: its own `Name` is
-    `"Pipe3D"`, never `"CompositeCurve3D"`.
-    """
-    if not isinstance(type_instance, MetaInstance) or getattr(type_instance, "Kind", None) != "Structure":
-        return False
-    name = getattr(type_instance, "Name", None)
-    attrs = attributes_of(type_instance)
-    if name == "PolylineStraight3D":
-        return "Geometry" in attrs
-    if name == "CompositeCurve3D":
-        return "Simplified" in attrs
-    return False
-
-
 def _curve3d_coord_type(type_instance: MetaInstance) -> MetaInstance | None:
     """Walk a `PolylineStraight3D`/`CompositeCurve3D` type down to its ultimate `CoordType`, for CRS lookup."""
     name = getattr(type_instance, "Name", None)
@@ -1061,22 +1038,6 @@ def _curve3d_geometry(type_instance: MetaInstance, value: dict[str, Any]) -> dic
 _curve3d_place_and_crs = _place_and_crs_via(_curve3d_coord_type, _curve3d_geometry)
 
 
-def _is_composite_surface3d(type_instance: MetaInstance | None) -> bool:
-    """Whether `type_instance` is `Geometry3D_V2.Tin3D`/`.SurfaceShell3D`/`.CompositeSurface3D`, standing alone.
-
-    Same Name+shape matching as `_is_solid3d`. A `SurfaceShell3D` NESTED
-    inside `Solid3D.OuterShell`/`.InnerShells` is never reached by this
-    check - it is only ever a top-level Class attribute here, read
-    directly via `_polyhedron_shell` as part of `Solid3D` otherwise.
-    """
-    return (
-        isinstance(type_instance, MetaInstance)
-        and getattr(type_instance, "Kind", None) == "Structure"
-        and getattr(type_instance, "Name", None) in {"Tin3D", "SurfaceShell3D", "CompositeSurface3D"}
-        and "Simplified" in attributes_of(type_instance)
-    )
-
-
 def _composite_surface3d_coord_type(type_instance: MetaInstance) -> MetaInstance | None:
     """Walk a `Tin3D`/`SurfaceShell3D`/`CompositeSurface3D` type down to its ultimate `CoordType`, for CRS lookup."""
     triangle_class = _resolve_base_type(type_instance, "Simplified")
@@ -1106,24 +1067,6 @@ def _composite_surface3d_multipolygon(value: dict[str, Any]) -> dict[str, Any] |
 _composite_surface3d_place_and_crs = _place_and_crs_via(
     _composite_surface3d_coord_type, lambda _type_instance, value: _composite_surface3d_multipolygon(value)
 )
-
-
-def _is_chbase_multisurface(type_instance: MetaInstance | None) -> bool:
-    """Whether `type_instance` is (an occurrence of) `GeometryCHLV95_V1`/`GeometryCHLV03_V1`'s `MultiSurface`.
-
-    A STRUCTURE wrapping `Surfaces: BAG {1..*} OF SurfaceStructure`, each
-    `SurfaceStructure` holding one `Surface` (`LineType`, Kind=Surface) -
-    the CHBase base-module convention for a multi-part surface predating
-    (or alongside) a native `LineType.Multi=True` attribute, which
-    `_line_geometry` already handles directly. Real corpus evidence:
-    `RichtplanungErneuerbareEnergien_V1.Objekte.Flaeche.Geometrie`.
-    """
-    return (
-        isinstance(type_instance, MetaInstance)
-        and getattr(type_instance, "Kind", None) == "Structure"
-        and getattr(type_instance, "Name", None) == "MultiSurface"
-        and "Surfaces" in attributes_of(type_instance)
-    )
 
 
 def _chbase_multisurface_surface_type(type_instance: MetaInstance) -> ResolvedAttribute | None:
@@ -1169,16 +1112,6 @@ _chbase_multisurface_place_and_crs = _place_and_crs_via(
 )
 
 
-def _is_pointcloud3d(type_instance: MetaInstance | None) -> bool:
-    """Whether `type_instance` is (an occurrence of) `Geometry3D_V2.PointCloud3D` - see module-level constant."""
-    return (
-        isinstance(type_instance, MetaInstance)
-        and getattr(type_instance, "Kind", None) == "Structure"
-        and getattr(type_instance, "Name", None) == "PointCloud3D"
-        and "Points" in attributes_of(type_instance)
-    )
-
-
 def _pointcloud3d_coord_type(type_instance: MetaInstance) -> MetaInstance | None:
     """The `CoordType` of `PointCloud3D.Points` (`BAG {1..*} OF Coord3`), for CRS lookup."""
     return _resolve_base_type(type_instance, "Points")
@@ -1203,6 +1136,24 @@ def _pointcloud3d_multipoint(value: dict[str, Any]) -> dict[str, Any] | None:
 _pointcloud3d_place_and_crs = _place_and_crs_via(
     _pointcloud3d_coord_type, lambda _type_instance, value: _pointcloud3d_multipoint(value)
 )
+
+
+def geometry_coord_type(resolved: ResolvedAttribute) -> MetaInstance | None:
+    """The `CoordType` whose axes and CRS a geometry attribute uses, or `None` for any other attribute."""
+    if resolved.type_kind == "CoordType":
+        return resolved.type_instance
+    if resolved.type_kind == "LineType":
+        return line_coord_type(resolved.type_instance)
+    for matches, coord_type_of in (
+        (is_solid3d, _solid3d_coord_type),
+        (is_curve3d, _curve3d_coord_type),
+        (is_composite_surface3d, _composite_surface3d_coord_type),
+        (is_pointcloud3d, _pointcloud3d_coord_type),
+        (is_chbase_multisurface, _chbase_multisurface_coord_type),
+    ):
+        if matches(resolved.type_instance):
+            return coord_type_of(resolved.type_instance)
+    return None
 
 
 def _feature_schema_ref(schema_url: str, feature_type: str) -> str:
@@ -1346,13 +1297,13 @@ def _object_to_feature(
 
     place: dict[str, Any] | None = None
     crs_uri: str | None = None
-    geometry_names = [name for name, r in resolved_attrs.items() if r.type_kind in _GEOMETRY_KINDS]
+    geometry_names = [name for name, r in resolved_attrs.items() if r.type_kind in GEOMETRY_KINDS]
     geometry_names_set = set(geometry_names)
-    solid3d_names = {name for name, r in resolved_attrs.items() if _is_solid3d(r.type_instance)}
-    curve3d_names = {name for name, r in resolved_attrs.items() if _is_curve3d(r.type_instance)}
-    composite_surface3d_names = {name for name, r in resolved_attrs.items() if _is_composite_surface3d(r.type_instance)}
-    pointcloud3d_names = {name for name, r in resolved_attrs.items() if _is_pointcloud3d(r.type_instance)}
-    chbase_multisurface_names = {name for name, r in resolved_attrs.items() if _is_chbase_multisurface(r.type_instance)}
+    solid3d_names = {name for name, r in resolved_attrs.items() if is_solid3d(r.type_instance)}
+    curve3d_names = {name for name, r in resolved_attrs.items() if is_curve3d(r.type_instance)}
+    composite_surface3d_names = {name for name, r in resolved_attrs.items() if is_composite_surface3d(r.type_instance)}
+    pointcloud3d_names = {name for name, r in resolved_attrs.items() if is_pointcloud3d(r.type_instance)}
+    chbase_multisurface_names = {name for name, r in resolved_attrs.items() if is_chbase_multisurface(r.type_instance)}
     # Single pass over `resolved_attrs` (declaration order) so a class
     # mixing a plain 2D/curve geometry with a 3D/CHBase shape gets its
     # `GeometryCollection` in the documented declaration order, not

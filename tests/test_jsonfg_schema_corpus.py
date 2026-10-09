@@ -2,7 +2,8 @@
 
 Runs on `xtf_corpus/` + `ili_corpus/` (scratch directories, absent in a fresh checkout: the test is then skipped) for
 transfers up to 3 MB. Value facets (ranges, lengths, item counts, integer-ness, empty values) are left to
-`interlis validate`; this checks the SHAPE: objects, arrays, references as OID strings, geometry objects.
+`interlis validate`; this checks the SHAPE: objects, arrays, references as OID strings. Geometry
+(`format: geometry-*`) is not a property of the document and is left to `validate-jsonfg`.
 """
 
 import json
@@ -15,10 +16,8 @@ import pytest
 
 from interlis.builder.model_builder import InterlisModelBuilder
 from interlis.builder.repository import ModelRepository
-from interlis.cli import _SUPPORTED_VIEW_FORMATION_KINDS
 from interlis.convert.jsonfg import transfer_to_feature_collection
-from interlis.convert.jsonschema import model_to_json_schema
-from interlis.metamodel.instance import MetaInstance
+from interlis.convert.jsonschema import convertible_roots, is_spatial_schema, model_to_json_schema
 from interlis.runtime.parse import parse_file
 from interlis.xtf.model_resolution import root_model_names
 from interlis.xtf.parse import parse_xtf
@@ -59,13 +58,7 @@ def _schema_and_features(xtf: Path):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         builder.build(tree)
-    instances = [i for i in builder.symbol_table.all_registered() if isinstance(i, MetaInstance)]
-    kind = lambda i: i._qualified_class.rsplit(".", 1)[-1]  # noqa: E731
-    roots = [i for i in instances if kind(i) == "Class"] + [
-        i
-        for i in instances
-        if kind(i) == "View" and getattr(i, "FormationKind", None) in _SUPPORTED_VIEW_FORMATION_KINDS
-    ]
+    roots = convertible_roots(builder.symbol_table)
     schema = model_to_json_schema(roots, symbol_table=builder.symbol_table)
     collection = transfer_to_feature_collection(transfer, symbol_table=builder.symbol_table, repository=repository)
     return schema, collection
@@ -83,12 +76,11 @@ def test_feature_properties_match_the_model_schema(xtf):
         if not keys:
             continue  # a class of an imported model is not part of this model's schema
         properties = feature["properties"]
-        placed = "place" in feature or feature.get("geometry")
         attempts = []
         for key in keys:
             definition = dict(defs[key])
-            if placed:
-                definition["required"] = [name for name in definition.get("required", []) if name in properties]
+            spatial = {n for n, prop in schema["$defs"][key].get("properties", {}).items() if is_spatial_schema(prop)}
+            definition["required"] = [name for name in definition.get("required", []) if name not in spatial]
             root = {"$schema": schema["$schema"], "$defs": defs, **definition}
             attempts.append([e.message for e in jsonschema.Draft202012Validator(root).iter_errors(properties)])
         if all(attempts):

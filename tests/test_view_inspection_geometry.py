@@ -115,9 +115,9 @@ def test_surface_boundary_and_edges_sql_equal_jsonfg_on_the_same_data():
 def test_surface_inspection_json_schema_describes_the_derived_values():
     schema = json_schema(build("inspection_of_surface_edges"))["$defs"]
     boundary = schema["ZoneBoundary"]["properties"]
-    assert boundary["Boundary"]["properties"]["type"]["enum"] == ["LineString", "MultiLineString", "MultiCurve"]
+    assert boundary["Boundary"]["format"] == "geometry-any"
     assert boundary["OwnerName"] == {"type": "string", "maxLength": 40}
-    assert schema["ZoneEdge"]["properties"]["Line"]["properties"]["type"]["enum"][0] == "LineString"
+    assert schema["ZoneEdge"]["properties"]["Line"]["format"] == "geometry-any"
     assert schema["ZoneEdge"]["x-crud"] == ["GET"]
 
 
@@ -231,12 +231,8 @@ def test_an_unreadable_member_is_a_stable_diagnostic_in_every_target():
 
 def test_line_inspection_json_schema_types_points_and_geometry():
     schema = json_schema(build("inspection_of_line"))["$defs"]
-    assert schema["RoadVertex"]["properties"]["EndPoint"]["properties"]["type"] == {"const": "Point"}
-    assert schema["RoadLine"]["properties"]["Line"]["properties"]["type"]["enum"] == [
-        "LineString",
-        "CircularString",
-        "CompoundCurve",
-    ]
+    assert schema["RoadVertex"]["properties"]["EndPoint"]["format"] == "geometry-point"
+    assert schema["RoadLine"]["properties"]["Line"]["format"] == "geometry-any"
 
 
 def test_geometry_inspection_has_no_xtf_transferable_shape():
