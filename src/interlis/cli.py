@@ -276,6 +276,7 @@ def cmd_convert(args: argparse.Namespace) -> int:
         for instance in builder.symbol_table.all_registered()
         if isinstance(instance, MetaInstance) and instance._qualified_class.rsplit(".", 1)[-1] == "Class"
     ]
+    classes += _jsonschema_mod.topic_inherited_classes(builder.symbol_table)
     views = [
         instance
         for instance in builder.symbol_table.all_registered()

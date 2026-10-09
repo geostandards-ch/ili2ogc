@@ -762,6 +762,28 @@ def validate_feature_properties(properties: dict[str, Any], schema: dict[str, An
     return [error.message for error in validator.iter_errors(properties)]
 
 
+def topic_inherited_classes(symbol_table: SymbolTable) -> list[MetaInstance]:
+    """Classes the registered topics inherit from their base topics through `TOPIC ... EXTENDS`.
+
+    A topic that extends another takes over every concept the base topic defines (eCH-0031 V2.1.0 §2.3), so the
+    objects of an extension-only topic are typed by classes the extending model never declares itself.
+    """
+    found: list[MetaInstance] = []
+    seen: set[int] = set()
+    for topic in symbol_table.all_registered():
+        if not isinstance(topic, MetaInstance) or not topic._qualified_class.endswith("ModelData.SubModel"):
+            continue
+        data_unit = getattr(topic, "_twin", None)
+        while data_unit is not None and id(data_unit) not in seen:
+            seen.add(id(data_unit))
+            data_unit = getattr(data_unit, "Super", None)
+            base = getattr(data_unit, "_twin", None)
+            for element in getattr(base, "Element", None) or []:
+                if isinstance(element, MetaInstance) and element._qualified_class.endswith("ModelData.Class"):
+                    found.append(element)
+    return found
+
+
 def model_to_json_schema(
     classes: list[MetaInstance],
     symbol_table: SymbolTable | None = None,
