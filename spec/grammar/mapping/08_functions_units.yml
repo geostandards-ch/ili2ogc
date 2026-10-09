@@ -110,8 +110,7 @@ functionDef:
     ArgumentType - OBJECTS OF included - and may be followed by an Explanation). Renamed
     from functionDecl (upstream issue #2, geostandards-ch/interlis-antlr4) -
     this rule builds the real FunctionDef of the INTERLIS 2 spec; the
-    unrelated unit-adjacent rule below was renamed to functionallyDerivedUnit
-    to free up this name.'
+    unit-adjacent rule that shared the name is now derivedUnit (3.9.3).'
 parameterDef:
   grammar:
     rule: parameterDef
