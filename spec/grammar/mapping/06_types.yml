@@ -258,25 +258,20 @@ coordinateType:
         '
     Axis:
       source:
-        field: numeric|NUMERIC
+        field: numeric|numericType
         kind: alt_rule_or_token
         multi: true
         cardinality: 1..3
+        by_position: true
       wrap:
         numeric: IlisMeta16.ModelData.NumType
-        NUMERIC: IlisMeta16.ModelData.NumType
-      note: '1 to 3 axis definitions, comma-separated, each either a full numeric() range or the bare
-        NUMERIC keyword (unrestricted axis). Confirmed via the metamodel PDF: "ASSOCIATION AxisSpec =
-        CoordType -- Axis (ORDERED, EXTERNAL) {1..3} NumType;" - each numeric() feeds one ordered NumType
-        instance linked via AxisSpec.Axis; a bare NUMERIC keyword (no range/circular/unit) still produces
-        a NumType instance (with Min/Max/Circular/Unit left unset).
-
-        `wrap:` was missing from the engine''s `multi: true` branch (source_resolver.py,
-        `_resolve_multi_node`), unlike the `alt` branch (already used by attributeDef.Type). Real
-        consequence: CoordType.Axis contained only raw bag dicts (`{Min:..., Max:..., ...}`), never real
-        `NumType` instances - silently unusable by any downstream code expecting `MetaInstance` (e.g.
-        `xtf/schema.coord_axes`). Each `numeric()`/`NUMERIC` in the list now becomes its own `NumType`
-        instance (empty for the bare token - see note above).
+      note: '1 to 3 axis definitions, comma-separated, each either a full numeric() range or a numericType()
+        (the bare NUMERIC keyword, optionally with a unit: the grammar parses it as a numericType, never as a
+        NUMERIC token of coordinateType). `by_position` keeps the declaration order when both forms are mixed.
+        Confirmed via the metamodel PDF: "ASSOCIATION AxisSpec = CoordType -- Axis (ORDERED, EXTERNAL) {1..3}
+        NumType;" - each axis becomes one ordered NumType instance; a bare NUMERIC leaves Min/Max/Circular
+        unset. Reading a bare NUMERIC as a token found no node, so a `COORD NUMERIC, NUMERIC, NUMERIC` domain
+        ended up with a single axis.
 
         '
     NullAxis:

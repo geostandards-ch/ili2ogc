@@ -9,7 +9,7 @@ builder, which applies that rule's own logic - kind, attribute_bindings).
 See _resolve_node().
 
 `source` forms covered: field+index, field+presence,
-field+kind:alt_token(+optional), field+multi(+optional), field+optional,
+field+kind:alt_token(+optional), field+multi(+optional, +by_position), field+optional,
 field+alt+index+optional, field+anchor+optional, field+path+optional,
 kind:constant+value, composed segments+join(+negative index),
 sequence_pattern, field:null alone (value propagated by the build
@@ -199,6 +199,9 @@ def _resolve_source(
         for name in names:
             if ca.has_accessor(ctx, name):
                 nodes.extend(ca.call_list(ctx, name))
+        if source.get("by_position") and ctx.children:
+            children = list(ctx.children)
+            nodes.sort(key=children.index)
         between = source.get("between")
         if between and nodes:
             # The same accessor (e.g. Name) reused at several distinct
