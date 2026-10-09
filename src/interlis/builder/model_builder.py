@@ -23,6 +23,7 @@ from interlis.antlr.InterlisParserVisitor import InterlisParserVisitor
 from interlis.builder import context_access as ca
 from interlis.builder.attach import AttachmentResolver
 from interlis.builder.context_mixin import _ContextMixin
+from interlis.builder.derived_mixin import _DerivedAttributesMixin
 from interlis.builder.errors import BuildError
 from interlis.builder.forward_refs import ForwardRef, ForwardRefResolver, SymbolTable
 from interlis.builder.oid_mixin import _OidMixin
@@ -51,7 +52,9 @@ def _plain_attribute_path(text: str) -> list[str] | None:
     return names if all(re.fullmatch(r"[A-Za-z_]\w*", name) for name in names) else None
 
 
-class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _ContextMixin, InterlisParserVisitor):
+class InterlisModelBuilder(
+    _ViewBuildingMixin, _OidMixin, _TranslationMixin, _ContextMixin, _DerivedAttributesMixin, InterlisParserVisitor
+):
     def __init__(self, mappings_dir: Path, spec_dir: Path, *, repository: ModelRepository | None = None):
         schema = MetamodelSchema.load(mappings_dir)
         registry = MetamodelRegistry.build(schema)
@@ -159,6 +162,7 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
         self._apply_pending_view_bare_attr_types()
         self._apply_pending_translations()
         return result
+        self._apply_derived_role_flags()
 
     def _apply_pending_mandatory_overrides(self) -> None:
         """Give each attribute queued in `_pending_mandatory_overrides` its OWN, Mandatory=True `Type` clone.

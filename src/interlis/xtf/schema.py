@@ -324,27 +324,35 @@ def embedded_roles_of(class_instance: MetaInstance, symbol_table: SymbolTable) -
     for candidate in symbol_table.all_registered():
         if not isinstance(candidate, MetaInstance) or candidate._qualified_class.rsplit(".", 1)[-1] != "Class":
             continue
-        if getattr(candidate, "Kind", None) != "Association":
+        embedding = association_embedding(candidate)
+        if embedding is None:
             continue
-        roles = [r for r in (getattr(candidate, "Role", None) or []) if isinstance(r, MetaInstance)]
-        if len(roles) != 2:
-            continue
-        role_a, role_b = roles
-        target_a, target_b = _class_related_base_class(role_a), _class_related_base_class(role_b)
-        if target_a is None or target_b is None:
-            continue
-        multi_a, multi_b = _role_is_multi(role_a), _role_is_multi(role_b)
-        if multi_a and multi_b:
-            continue
-        if multi_a:
-            embed_on, embedded_role = target_a, role_b
-        elif multi_b:
-            embed_on, embedded_role = target_b, role_a
-        else:
-            embed_on, embedded_role = target_b, role_a
+        embed_on, embedded_role = embedding
         if is_class_compatible(class_instance, embed_on) and getattr(embedded_role, "Name", None):
             result[embedded_role.Name] = embedded_role
     return result
+
+
+def association_embedding(association: MetaInstance) -> tuple[MetaInstance, MetaInstance] | None:
+    """Return `(class it embeds on, embedded role)` for an association that travels embedded, else `None`.
+
+    Applies the eCH-0031 §4.3.9 rule described on `embedded_roles_of` to ONE association (own roles only).
+    """
+    if getattr(association, "Kind", None) != "Association":
+        return None
+    roles = [r for r in (getattr(association, "Role", None) or []) if isinstance(r, MetaInstance)]
+    if len(roles) != 2:
+        return None
+    role_a, role_b = roles
+    target_a, target_b = _class_related_base_class(role_a), _class_related_base_class(role_b)
+    if target_a is None or target_b is None:
+        return None
+    multi_a, multi_b = _role_is_multi(role_a), _role_is_multi(role_b)
+    if multi_a and multi_b:
+        return None
+    if multi_a:
+        return target_a, role_b
+    return target_b, role_a
 
 
 def schema_members_of(class_instance: MetaInstance, symbol_table: SymbolTable) -> dict[str, MetaInstance]:
@@ -387,8 +395,9 @@ class ResolvedAttribute:
 def resolve_attribute(attr: MetaInstance) -> ResolvedAttribute:
     if attr._qualified_class.rsplit(".", 1)[-1] == "Role":
         # Role EXTENDS ReferenceType EXTENDS ClassRelatedType EXTENDS
-        # DomainType (ilismeta16-classes.yml): carries its OWN
-        # Mandatory (inherited from DomainType) - unlike AttrOrParam,
+        # DomainType (ilismeta16-classes.yml): its inherited `Mandatory` is
+        # always true (the reference exists), so requiredness comes from the
+        # cardinality instead - unlike AttrOrParam,
         # there's no separate Type field, the target class comes from
         # BaseClass (attached via the BaseClass association, same
         # mechanism as any other ClassRelatedType - like ReferenceType).
@@ -397,7 +406,7 @@ def resolve_attribute(attr: MetaInstance) -> ResolvedAttribute:
             attr=attr,
             type_instance=target,
             type_kind="Class" if target is not None else None,
-            mandatory=bool(getattr(attr, "Mandatory", False)) or _role_is_required(attr),
+            mandatory=_role_is_required(attr),
         )
     type_instance = getattr(attr, "Type", None)
     type_instance = type_instance if isinstance(type_instance, MetaInstance) else None
@@ -603,7 +612,7 @@ def reference_external_status(resolved: ResolvedAttribute) -> bool | None:
     if resolved.type_kind == "ReferenceType" and resolved.type_instance is not None:
         return bool(getattr(resolved.type_instance, "External", False))
     if resolved.attr._qualified_class.rsplit(".", 1)[-1] == "Role":
-        return bool(getattr(resolved.attr, "EmbeddedTransfer", None))
+        return bool(getattr(resolved.attr, "External", None))
     if resolved.type_kind == "Class" and resolved.type_instance is not None:
         # `_own_attributes_of` (NOT `attributes_of`): this checks a
         # structural pattern on the STRUCTURE ITSELF (a wrapper with a

@@ -130,21 +130,13 @@ roleDef:
         alternativ verschiedene Klassen ... zugeordnet sein"), real example CHBase_Part4 V2
         `Supervisor (EXTERNAL) -<> {1..1} Agency OR ...AdministrativeElement`; BaseClass (0..*) holds them
         all, the first being the primary target.'
-    EmbeddedTransfer:
+    External:
       source:
         field: EXTERNAL
-        presence: false
-      note: 'This binding structurally computes "the EXTERNAL token''s text if this role carries it, None
-        otherwise" (`presence: false` above has no actual effect - `bool(source.get("presence"))`
-        being false, the calculation falls back to the "standard case" field+index) - `bool(...)` extracts the same
-        binary signal as `ReferenceType.External`, which is reliable and sufficient for its intended use
-        (`schema.reference_external_status`, distinguishing a legitimate external REF from a potentially broken one).
-        The metamodel NAME "EmbeddedTransfer" suggests a link with the XTF embedding mechanism
-        (`schema.embedded_roles_of`, eCH-0031 §4.3.9), but no evidence confirms an
-        exact correspondence - the two mechanisms are verified to be independent (EXTERNAL does not affect
-        the XTF embedding decision, only the legitimacy of a cross-basket target). Full
-        investigation history (distinguishing eCH-0031 §3.7.5 AssociationAccess vs §4.3.9 XTF embedding,
-        empirical verification on CHBase_Part4_ADMINISTRATIVEUNITS_V1.ili): docs/dev-notes/embedded-transfer-investigation.md.'
+        presence: true
+      note: 'Role.External (BOOLEAN) - true when the role carries the `(EXTERNAL)` clause (eCH-0031 V2.1.0 3.7.5,
+        the opposite class lives outside the basket). Role.EmbeddedTransfer is a different, derived attribute (XTF
+        embedding, 4.3.9) set once the whole model is built, see InterlisModelBuilder._apply_derived_role_flags.'
   note: 'Strongness resolved dynamically: LT/GT -> Assoc, HASH -> Comp, default -> Aggr (needs confirmation
     against kind-values.yml) || Grammar covers two distinct alternatives sharing this rule name: --- Alternative
     1 (spec-documented, §2.7.1 EBNF): full role declaration --- Name (modifiers)? (--|-<>|-<#>) cardinality?
