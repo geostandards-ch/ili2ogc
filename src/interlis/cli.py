@@ -1167,7 +1167,7 @@ def cmd_convert_sld(args: argparse.Namespace) -> int:
             continue
         try:
             rendered[name] = _cartosym_mod.write_sld(_cartosym_mod.graphic_to_style(graphic, sign_library))
-        except NotImplementedError as exc:
+        except (NotImplementedError, _cartosym_mod.ScaleRangeError) as exc:
             _warn(f"GRAPHIC {name!r}: {exc} - skipped")
     if refused and not rendered:
         return ExitCode.INVALID
@@ -1531,7 +1531,8 @@ def main(argv: list[str] | None = None) -> int:
 
     convert_sld_parser = subparsers.add_parser(
         "convert-sld",
-        help="Convert an .ili GRAPHIC's DrawingRules to SLD (OGC Styled Layer Descriptor) - one file per GRAPHIC.",
+        help="Convert an .ili GRAPHIC's DrawingRules to SLD (OGC Styled Layer Descriptor) - one file per GRAPHIC. "
+        "A rule's Priority sets its drawing pass; MinScaleDenominator/MaxScaleDenominator set its scale range.",
     )
     convert_sld_parser.add_argument("model", help="Path to the .ili file declaring the GRAPHIC(s) to convert.")
     convert_sld_parser.add_argument(

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- Synthetic SIGN BASKET data for scale_example.ili (one blue solid PolylineSign). -->
+
+<ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS"
+  xmlns="http://www.interlis.ch/xtf/2.4/ScaleExample">
+   <ili:headersection>
+      <ili:models>
+         <ili:model>ScaleExample</ili:model>
+      </ili:models>
+      <ili:sender>ili2ogc test fixture</ili:sender>
+   </ili:headersection>
+   <ili:datasection>
+      <T ili:bid="ScaleExample">
+         <Color ili:tid="1"><!-- #0066cc -->
+            <Name>blue</Name>
+            <L>44.0</L>
+            <C>54.0</C>
+            <H>262.0</H>
+         </Color>
+         <PolylineAttrs ili:tid="10">
+            <Width>2</Width>
+         </PolylineAttrs>
+         <LineStyle_Solid ili:tid="20">
+            <LineAttrs ili:ref="10"></LineAttrs>
+         </LineStyle_Solid>
+         <PolylineSign ili:tid="100">
+            <ili:Name>MainRoad</ili:Name>
+            <Color ili:ref="1"></Color>
+            <Style ili:ref="20"></Style>
+         </PolylineSign>
+      </T>
+   </ili:datasection>
+</ili:transfer>

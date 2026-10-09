@@ -986,12 +986,49 @@ _SIGN_OBJECT_BUILDERS = {
 }
 
 
+def _and_selector(left: dict[str, Any] | None, right: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Conjunction of two optional CQL2-JSON selectors."""
+    if left is None or right is None:
+        return left if right is None else right
+    return {"op": "and", "args": [left, right]}
+
+
 def _with_feature_type(selector: dict[str, Any] | None, feature_type: str | None) -> dict[str, Any] | None:
     """Prepend a `dataLayer.id` conjunct - pycartosym's own writer pulls this back out as `se:FeatureTypeName`."""
     if feature_type is None:
         return selector
-    conjunct = {"op": "=", "args": [{"sysId": "dataLayer.id"}, feature_type]}
-    return conjunct if selector is None else {"op": "and", "args": [conjunct, selector]}
+    return _and_selector({"op": "=", "args": [{"sysId": "dataLayer.id"}, feature_type]}, selector)
+
+
+class ScaleRangeError(ValueError):
+    """A `MinScaleDenominator`/`MaxScaleDenominator` pair that selects no scale at all."""
+
+
+def scale_selector(params: dict[str, Any]) -> dict[str, Any] | None:
+    """`viz.sd` conjunction for a rule's `MinScaleDenominator`/`MaxScaleDenominator` parameters.
+
+    Visible when `denominator >= Min` and `denominator < Max`; absent or 0 means no bound. pycartosym's SLD
+    writer turns these back into `se:MinScaleDenominator`/`se:MaxScaleDenominator`.
+    """
+    bounds: dict[str, float] = {}
+    for name in ("MinScaleDenominator", "MaxScaleDenominator"):
+        value = params.get(name)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise NotImplementedError(f"{name} must be a literal number, got {value!r}")
+        bounds[name] = value
+    low, high = bounds.get("MinScaleDenominator", 0), bounds.get("MaxScaleDenominator", 0)
+    if low and high and low >= high:
+        raise ScaleRangeError(
+            f"MinScaleDenominator {low:g} is not below MaxScaleDenominator {high:g}: no scale selected"
+        )
+    selector = None
+    if low:
+        selector = {"op": ">=", "args": [{"sysId": "viz.sd"}, low]}
+    if high:
+        selector = _and_selector(selector, {"op": "<", "args": [{"sysId": "viz.sd"}, high]})
+    return selector
 
 
 def styling_rule_from_drawing_rule(
@@ -1005,7 +1042,8 @@ def styling_rule_from_drawing_rule(
     back-reference to it, so the caller must pass it) is prepended as a
     `dataLayer.id` conjunct, pycartosym's own convention for `se:
     FeatureTypeName` (confirmed against its writer source). `Priority` ->
-    `z_order`. A `Sign := {name}` reference resolves (via `sign_library`,
+    `z_order`; `MinScaleDenominator`/`MaxScaleDenominator` -> `viz.sd` bounds
+    (`scale_selector`, ANDed with the `WHERE`). A `Sign := {name}` reference resolves (via `sign_library`,
     a parsed SIGN BASKET data section - `None` skips it entirely, same as
     before this was wired) to its own library-object data, dispatched by
     `drawing_rule.Class` to `_symbol_sign_kwargs`/`_surface_sign_kwargs`/
@@ -1025,7 +1063,6 @@ def styling_rule_from_drawing_rule(
     conditions = drawing_rule.Rule if isinstance(drawing_rule.Rule, list) else [drawing_rule.Rule]
     cond = conditions[0]
     where = getattr(cond, "Where", None)
-    selector = _with_feature_type(to_cql2(where) if where is not None else None, feature_type)
 
     raw_assignments = cond.Assignments if isinstance(cond.Assignments, list) else [cond.Assignments]
     params: dict[str, Any] = {}
@@ -1040,6 +1077,9 @@ def styling_rule_from_drawing_rule(
                 sign_object = sign_library.by_name.get(name)
             continue
         params[assignment.Param] = to_cql2(assignment.Assignment)
+    selector = _with_feature_type(
+        _and_selector(to_cql2(where) if where is not None else None, scale_selector(params)), feature_type
+    )
 
     symbolizer_kwargs: dict[str, Any] = {}
     if "Priority" in params:
@@ -1138,7 +1178,7 @@ def _add_visualization_passes(styling_rules: list[StylingRule]) -> None:
     rank = {p: index for index, p in enumerate(sorted(set(priorities)))}
     for rule, priority in zip(styling_rules, priorities):
         pass_eq = {"op": "=", "args": [{"sysId": "viz.pass"}, rank[priority]]}
-        rule.selector = pass_eq if rule.selector is None else {"op": "and", "args": [rule.selector, pass_eq]}
+        rule.selector = _and_selector(rule.selector, pass_eq)
 
 
 def graphic_to_style(graphic: MetaInstance, sign_library: SignLibrary | None = None) -> Style:

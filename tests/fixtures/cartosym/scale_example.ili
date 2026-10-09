@@ -1,0 +1,110 @@
+INTERLIS 2.4;
+
+!! Drawing rules that set MinScaleDenominator / MaxScaleDenominator on a PolylineSign
+!! (StandardSymbologyScale, tests/fixtures/cartosym/scale_repo/). Synthetic: no real model
+!! carries these parameters. Compile with ili2c: --ilidirs tests/fixtures/cartosym/scale_repo.
+
+MODEL ScaleExample (en)
+AT "https://example.org/models/" VERSION "2026-10-09" =
+  IMPORTS StandardSymbologyScale;
+
+  DOMAIN
+    Coord2 = COORD 2460000.000 .. 2870000.000 [INTERLIS.m], 1045000.000 .. 1310000.000 [INTERLIS.m], ROTATION 2 -> 1;
+    Line = POLYLINE WITH (STRAIGHTS) VERTEX Coord2;
+
+  TOPIC T =
+    DEPENDS ON StandardSymbologyScale.ScaledSigns;
+
+    CLASS Road =
+      RoadKind : (main, side);
+      Geometry : Line;
+    END Road;
+
+    SIGN BASKET Signs ~ StandardSymbologyScale.ScaledSigns
+      OBJECTS OF PolylineSign: MainRoad;
+
+    GRAPHIC Road_NoScale BASED ON Road =
+      RoadRule OF StandardSymbologyScale.ScaledSigns.PolylineSign: (
+          Sign := {MainRoad};
+          Geometry := Geometry;
+          Priority := 1
+        );
+    END Road_NoScale;
+
+    GRAPHIC Road_MinOnly BASED ON Road =
+      RoadRule OF StandardSymbologyScale.ScaledSigns.PolylineSign: (
+          Sign := {MainRoad};
+          Geometry := Geometry;
+          Priority := 1;
+          MinScaleDenominator := 25000
+        );
+    END Road_MinOnly;
+
+    GRAPHIC Road_MaxOnly BASED ON Road =
+      RoadRule OF StandardSymbologyScale.ScaledSigns.PolylineSign: (
+          Sign := {MainRoad};
+          Geometry := Geometry;
+          Priority := 1;
+          MaxScaleDenominator := 100000
+        );
+    END Road_MaxOnly;
+
+    GRAPHIC Road_Both BASED ON Road =
+      RoadRule OF StandardSymbologyScale.ScaledSigns.PolylineSign: (
+          Sign := {MainRoad};
+          Geometry := Geometry;
+          Priority := 1;
+          MinScaleDenominator := 1000;
+          MaxScaleDenominator := 100000
+        );
+    END Road_Both;
+
+    GRAPHIC Road_Zero BASED ON Road =
+      RoadRule OF StandardSymbologyScale.ScaledSigns.PolylineSign: (
+          Sign := {MainRoad};
+          Geometry := Geometry;
+          Priority := 1;
+          MinScaleDenominator := 0;
+          MaxScaleDenominator := 0
+        );
+    END Road_Zero;
+
+    GRAPHIC Road_Where BASED ON Road =
+      RoadRule OF StandardSymbologyScale.ScaledSigns.PolylineSign:
+        WHERE RoadKind == #main (
+          Sign := {MainRoad};
+          Geometry := Geometry;
+          Priority := 1;
+          MinScaleDenominator := 5000;
+          MaxScaleDenominator := 200000
+        );
+    END Road_Where;
+
+    GRAPHIC Road_Passes BASED ON Road =
+      SideRule OF StandardSymbologyScale.ScaledSigns.PolylineSign:
+        WHERE RoadKind == #side (
+          Sign := {MainRoad};
+          Geometry := Geometry;
+          Priority := 1;
+          MaxScaleDenominator := 50000
+        );
+      MainRule OF StandardSymbologyScale.ScaledSigns.PolylineSign:
+        WHERE RoadKind == #main (
+          Sign := {MainRoad};
+          Geometry := Geometry;
+          Priority := 2;
+          MinScaleDenominator := 10000
+        );
+    END Road_Passes;
+
+    GRAPHIC Road_Inverted BASED ON Road =
+      RoadRule OF StandardSymbologyScale.ScaledSigns.PolylineSign: (
+          Sign := {MainRoad};
+          Geometry := Geometry;
+          Priority := 1;
+          MinScaleDenominator := 100000;
+          MaxScaleDenominator := 5000
+        );
+    END Road_Inverted;
+  END T;
+END ScaleExample.

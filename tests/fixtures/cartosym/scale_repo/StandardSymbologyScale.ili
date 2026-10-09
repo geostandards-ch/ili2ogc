@@ -1,0 +1,43 @@
+INTERLIS 2.4;
+
+SYMBOLOGY MODEL StandardSymbologyScale (en)
+  AT "https://example.org/models/" VERSION "2026-10-09" =
+
+  !! Scale-dependent visibility for every sign interface of StandardSymbology.
+  !! A rule is visible when denominator >= MinScaleDenominator and
+  !! denominator < MaxScaleDenominator; 0 means no bound.
+
+  IMPORTS StandardSymbology;
+
+  DOMAIN
+    SS_ScaleDenominator = 0 .. 1000000000;
+
+  TOPIC ScaledSigns EXTENDS StandardSymbology.StandardSigns =
+
+    CLASS TextSign (EXTENDED) =
+    PARAMETER
+      MinScaleDenominator : SS_ScaleDenominator;
+      MaxScaleDenominator : SS_ScaleDenominator;
+    END TextSign;
+
+    CLASS SymbolSign (EXTENDED) =
+    PARAMETER
+      MinScaleDenominator : SS_ScaleDenominator;
+      MaxScaleDenominator : SS_ScaleDenominator;
+    END SymbolSign;
+
+    CLASS PolylineSign (EXTENDED) =
+    PARAMETER
+      MinScaleDenominator : SS_ScaleDenominator;
+      MaxScaleDenominator : SS_ScaleDenominator;
+    END PolylineSign;
+
+    CLASS SurfaceSign (EXTENDED) =
+    PARAMETER
+      MinScaleDenominator : SS_ScaleDenominator;
+      MaxScaleDenominator : SS_ScaleDenominator;
+    END SurfaceSign;
+
+  END ScaledSigns;
+
+END StandardSymbologyScale.

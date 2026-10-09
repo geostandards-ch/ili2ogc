@@ -1,0 +1,3 @@
+`AbstractSymbology.ili` and `StandardSymbology.ili` are the official refhb24 models, unmodified (same
+files as `roadsexgm2ien_repo/`). `StandardSymbologyScale.ili` is a project-proposed extension adding
+scale-dependent visibility parameters to the sign interfaces; it is not an official model.
