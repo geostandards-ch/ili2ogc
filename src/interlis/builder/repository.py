@@ -28,6 +28,16 @@ from interlis.runtime.parse import meta_attribute_comments, meta_attribute_comme
 # indexing for e.g. `REFSYSTEM MODEL CoordSys`.)
 _MODEL_NAME_RE = re.compile(r"\bMODEL\s+([A-Za-z_][A-Za-z0-9_]*)")
 
+# Strings, block comments and line comments, in one alternation so that a `!!` or `/*` inside a string
+# literal is not taken for a comment (and the other way round).
+_STRING_OR_COMMENT_RE = re.compile(r'"(?:[^"\\]|\\.)*"|/\*.*?\*/|!![^\n]*', re.DOTALL)
+
+
+def _strip_strings_and_comments(text: str) -> str:
+    """Blank out string literals and comments, so a prose "MODEL X" in a comment never indexes a model."""
+    return _STRING_OR_COMMENT_RE.sub(" ", text)
+
+
 # The predefined "INTERLIS" namespace model, built via the real parse+build
 # pipeline rather than hand-crafted Python instances (same guarantees as
 # any other model). ANYOID/UUIDOID/BOOLEAN cannot be declared as an
@@ -77,7 +87,7 @@ class ModelRepository:
                     text = path.read_text(encoding="utf-8", errors="replace")
                 except OSError:
                     continue
-                for match in _MODEL_NAME_RE.finditer(text):
+                for match in _MODEL_NAME_RE.finditer(_strip_strings_and_comments(text)):
                     # first found wins (heuristic: a text-scan false
                     # positive, e.g. inside a comment, must never overwrite
                     # a name already indexed correctly).
