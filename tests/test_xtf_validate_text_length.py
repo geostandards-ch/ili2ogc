@@ -9,12 +9,15 @@ from interlis.xtf.validate import validate_transfer
 
 MODEL = """INTERLIS 2.4;
 MODEL TextLen (en) AT "https://example.org/" VERSION "2026-01-01" =
+  DOMAIN
+    Code = OID TEXT*5;
   TOPIC T =
     CLASS Item =
       Short: TEXT*5;
       Multi: MTEXT*5;
       Free: TEXT;
       Ident: NAME;
+      Coded: Code;
     END Item;
   END T;
 END TextLen.
@@ -58,3 +61,9 @@ def test_unbounded_text_has_no_limit(builder):
 
 def test_name_type_is_not_checked_against_a_text_limit(builder):
     assert _issues(builder, Ident="x" * 200) == []
+
+
+def test_oid_text_domain_carries_its_length_limit(builder):
+    assert _issues(builder, Coded="abcde") == []
+    issues = _issues(builder, Coded="abcdef")
+    assert [(i.attribute, i.severity) for i in issues] == [("Coded", "error")]

@@ -1747,6 +1747,9 @@ class InterlisModelBuilder(_ViewBuildingMixin, _OidMixin, _TranslationMixin, _Co
     def _resolve_discriminant(self, ctx, rule_name, discriminant, construction_ctx, consumed) -> Any:
         extra = discriminant.model_extra or {}
         if "value" in extra and not isinstance(extra["value"], dict):
+        if isinstance(bag, MetaInstance):
+            # An Instance rule (e.g. `textType`) yields the built instance itself, not a bag: take its own fields.
+            bag = {k: v for k, v in {**bag.__dict__, **(bag.model_extra or {})}.items() if not k.startswith("_")}
             return extra["value"]
         if isinstance(extra.get("value"), dict):
             nested = extra["value"]
