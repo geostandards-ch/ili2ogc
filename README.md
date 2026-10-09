@@ -26,6 +26,7 @@ interlis convert model.ili -o model.schema.json                         # .ili -
 interlis convert-sql model.ili --dialect postgresql -o model.sql        # .ili -> SQL DDL
 interlis import transfer.xtf --model model.ili --repo models/ -o data.sql # .xtf -> INSERTs into that schema
 interlis convert-jsonfg transfer.xtf --repo models/ -o out.jsonfg.json   # .xtf -> OGC JSON-FG
+interlis validate-jsonfg out.jsonfg.json --model m.ili --repo models/ # check a JSON-FG file against the model
 interlis convert-cql2 model.ili -o model.cql2.json                      # CONSTRAINT -> CQL2-JSON filters
 interlis convert-sld symbology.ili --sign-xtf signs.xtf -o styles/      # GRAPHIC -> OGC SLD/SE
 interlis write-xtf view-model.ili source.xtf -o view.xtf                # VIEW TOPIC data -> .xtf

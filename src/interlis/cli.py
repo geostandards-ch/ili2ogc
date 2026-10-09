@@ -51,6 +51,7 @@ from interlis.diagnostics import (
 )
 from interlis.metamodel.instance import MetaInstance
 from interlis.runtime.parse import meta_attribute_comments_in_file, parse_file
+from interlis.xtf.jsonfg_validate import validate_jsonfg
 from interlis.xtf.model_resolution import header_completeness, header_model_lookup, root_model_names
 from interlis.xtf.parse import parse_xtf
 from interlis.xtf.validate import validate_transfer
@@ -763,6 +764,16 @@ def cmd_validate(args: argparse.Namespace) -> int:
         check_constraints=not args.no_constraints,
     )
 
+    header_suffix = (
+        f" - {len(header_status) - len(incomplete)}/{len(header_status)} header models resolved"
+        if header_status
+        else ""
+    )
+    return _report_issues(issues, args, xtf_path, header_suffix)
+
+
+def _report_issues(issues, args: argparse.Namespace, source: Path, header_suffix: str = "") -> int:
+    """Print validation issues and their summary, write the SARIF report if asked, and return the exit code."""
     counts: dict[str, int] = {}
     for issue in issues:
         counts[issue.severity] = counts.get(issue.severity, 0) + 1
@@ -770,11 +781,6 @@ def cmd_validate(args: argparse.Namespace) -> int:
             continue
         print(f"[{issue.severity:7s}] {issue.qualified_class}[{issue.object_tid}].{issue.attribute}: {issue.message}")
 
-    header_suffix = (
-        f" - {len(header_status) - len(incomplete)}/{len(header_status)} header models resolved"
-        if header_status
-        else ""
-    )
     print(
         f"\n{len(issues)} issue(s): "
         f"{counts.get('error', 0)} error(s), {counts.get('warning', 0)} warning(s), "
@@ -784,7 +790,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
     if getattr(args, "output_format", "text") == "sarif" or getattr(args, "report", None):
         bag = DiagnosticBag()
-        bag.extend(issue.to_diagnostic(file=str(xtf_path)) for issue in issues)
+        bag.extend(issue.to_diagnostic(file=str(source)) for issue in issues)
         report = getattr(args, "report", None)
         if report is not None:
             Path(report).write_text(
@@ -802,6 +808,43 @@ def cmd_validate(args: argparse.Namespace) -> int:
     if getattr(args, "strict", False) and len(issues):
         return ExitCode.ERROR
     return ExitCode.OK
+
+
+def cmd_validate_jsonfg(args: argparse.Namespace) -> int:
+    """Validate a JSON-FG file against an .ili model: properties, geometry, then the model's constraints."""
+    json_path = Path(args.jsonfg)
+    if not json_path.exists():
+        _error(f"JSON-FG file not found: {json_path}")
+        return ExitCode.NOT_FOUND
+    model_path = Path(args.model)
+    if not model_path.exists():
+        _error(f".ili file not found: {model_path}")
+        return ExitCode.NOT_FOUND
+    try:
+        document = json.loads(json_path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        _error(f"{json_path} is not valid JSON: {exc}")
+        return ExitCode.INVALID
+
+    tree, syntax_errors = parse_file(model_path)
+    if syntax_errors:
+        _error(f"{len(syntax_errors)} syntax error(s) in {model_path}:")
+        for e in syntax_errors:
+            print(f"  {e}", file=sys.stderr)
+        return ExitCode.INVALID
+    repository = ModelRepository([Path(d) for d in args.repo]) if args.repo else None
+    builder = _open_builder(repository)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        builder.build(tree)
+    issues = validate_jsonfg(
+        document,
+        symbol_table=builder.symbol_table,
+        repository=repository,
+        catalogs=[parse_xtf(Path(c)) for c in args.catalog],
+        check_constraints=not args.no_constraints,
+    )
+    return _report_issues(issues, args, json_path)
 
 
 def cmd_fetch_models(args: argparse.Namespace) -> int:
@@ -1413,6 +1456,42 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_diagnostic_args(validate_parser)
     validate_parser.set_defaults(func=cmd_validate)
+
+    validate_jsonfg_parser = subparsers.add_parser(
+        "validate-jsonfg",
+        help="Validate a JSON-FG file against an .ili model: properties (JSON Schema), geometry, constraints.",
+    )
+    validate_jsonfg_parser.add_argument("jsonfg", help="Path to the JSON-FG file (a FeatureCollection) to validate.")
+    validate_jsonfg_parser.add_argument(
+        "--model",
+        required=True,
+        help="Path to the .ili file describing the expected schema (a JSON-FG file does not name its model).",
+    )
+    validate_jsonfg_parser.add_argument(
+        "--repo",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="Directory of .ili models to resolve the schema's IMPORTS (repeatable).",
+    )
+    validate_jsonfg_parser.add_argument(
+        "--catalog",
+        action="append",
+        default=[],
+        metavar="FILE.xtf",
+        help="Additional catalogue .xtf file (repeatable) - its objects also count for reference resolution.",
+    )
+    validate_jsonfg_parser.add_argument(
+        "--no-constraints",
+        action="store_true",
+        help="Skip the model's CONSTRAINTs (MANDATORY, plausibility, UNIQUE); by default they are evaluated.",
+    )
+    validate_jsonfg_parser.add_argument("-q", "--quiet", action="store_true", help="Only print the final summary.")
+    validate_jsonfg_parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Also print 'info'-severity issues."
+    )
+    _add_diagnostic_args(validate_jsonfg_parser)
+    validate_jsonfg_parser.set_defaults(func=cmd_validate_jsonfg)
 
     convert_jsonfg_parser = subparsers.add_parser(
         "convert-jsonfg",

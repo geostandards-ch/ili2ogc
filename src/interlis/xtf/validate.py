@@ -640,6 +640,24 @@ def _validate_restriction_text(
     )
 
 
+def unresolved_reference_detail(status: bool | None) -> str:
+    """Say why a REF that resolves to no object is, or is not, a likely sign of bad data (eCH-0031 §3.6.3)."""
+    if status is True:
+        return (
+            "declared reference (EXTERNAL): target object expected in an external "
+            "basket/catalogue (DEPENDS ON), unresolved for lack of a loaded catalogue - normal"
+        )
+    if status is False:
+        return (
+            "NOT declared as EXTERNAL: should normally resolve in this same "
+            "basket (eCH-0031 V2.1.0 §3.6.3) - a more likely sign of bad data"
+        )
+    return (
+        "likely external/catalogue reference, or a broken one - EXTERNAL status "
+        "undetermined by this validator (unrecognized structure)"
+    )
+
+
 def _build_tid_index(transfer: XtfTransfer, catalogs: list[XtfTransfer] | None = None) -> dict[str, XtfObject]:
     """Map TID -> XtfObject, across every basket of the transfer.
 
@@ -998,22 +1016,7 @@ def _validate_resolved_attr(
             # Tri-state: `None` means genuinely
             # undetermined (e.g. a structure wrapping non-reference content
             # like geometry), never asserted as "not declared" by default.
-            status = reference_external_status(resolved)
-            if status is True:
-                detail = (
-                    "declared reference (EXTERNAL): target object expected in an external "
-                    "basket/catalogue (DEPENDS ON), unresolved for lack of a loaded catalogue - normal"
-                )
-            elif status is False:
-                detail = (
-                    "NOT declared as EXTERNAL: should normally resolve in this same "
-                    "basket (eCH-0031 V2.1.0 §3.6.3) - a more likely sign of bad data"
-                )
-            else:
-                detail = (
-                    "likely external/catalogue reference, or a broken one - EXTERNAL status "
-                    "undetermined by this validator (unrecognized structure)"
-                )
+            detail = unresolved_reference_detail(reference_external_status(resolved))
             issues.append(
                 ValidationIssue(
                     "warning",
