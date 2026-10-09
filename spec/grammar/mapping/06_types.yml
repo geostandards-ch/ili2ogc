@@ -795,11 +795,11 @@ lineType:
   attribute_bindings:
     Kind:
       source:
-        field: POLYLINE|SURFACE|AREA|MULTIPOLYLINE|MULTISURFACE|MULTIAREA
+        field: DIRECTED|POLYLINE|SURFACE|AREA|MULTIPOLYLINE|MULTISURFACE|MULTIAREA
         kind: alt_token
       rule:
         POLYLINE: Polyline
-        DIRECTED_POLYLINE: DirectedPolyline
+        DIRECTED: DirectedPolyline
         SURFACE: Surface
         AREA: Area
         MULTIPOLYLINE: Polyline
@@ -807,7 +807,9 @@ lineType:
         MULTIAREA: Area
       note: confirmed LineType.Kind enum (Polyline/DirectedPolyline/Surface/Area, kind-values.yml) - exactly
         4 values for 6 grammar alternatives; the MULTI* alternatives collapse onto the same Kind as their
-        singular counterpart, distinguished instead by Multi below.
+        singular counterpart, distinguished instead by Multi below. DIRECTED comes first in the alternative
+        list because it precedes POLYLINE/MULTIPOLYLINE in the grammar (`DIRECTED? POLYLINE`, `DIRECTED?
+        MULTIPOLYLINE`) and, when present, decides the Kind whatever follows.
     Multi:
       source:
         field: MULTIPOLYLINE|MULTISURFACE|MULTIAREA
@@ -838,8 +840,8 @@ lineType:
       source:
         field: DIRECTED
         presence: true
-      note: optional DIRECTED token before POLYLINE/MULTIPOLYLINE dispatches Kind=DirectedPolyline vs
-        Polyline (see Kind rule above) - not a separate attribute.
+      note: optional DIRECTED token before POLYLINE/MULTIPOLYLINE; consumed by the Kind rule above, not a
+        separate attribute.
     MaxOverlap:
       source:
         field: intersectionDef
