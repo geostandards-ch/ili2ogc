@@ -656,3 +656,20 @@ def enum_values(enum_type: MetaInstance) -> set[str]:
 
     walk(getattr(enum_type, "TopNode", None), "", is_synthetic_root=True)
     return values
+
+
+def wrapped_reference(structure: MetaInstance | None) -> ResolvedAttribute | None:
+    """The reference of a STRUCTURE whose only attribute is a `REFERENCE TO` (a catalogue-reference wrapper).
+
+    Both JSON converters write such a structure as the bare OID string; any other structure stays an object.
+    """
+    if structure is None or getattr(structure, "Kind", None) != "Structure":
+        return None
+    members = attributes_of(structure)
+    if len(members) != 1:
+        return None
+    resolved = resolve_attribute(next(iter(members.values())))
+    is_reference = resolved.type_kind == "ReferenceType" or (
+        resolved.type_kind == "Class" and getattr(resolved.type_instance, "Kind", None) != "Structure"
+    )
+    return resolved if is_reference and resolved.type_instance is not None else None

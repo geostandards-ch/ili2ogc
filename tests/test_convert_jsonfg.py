@@ -210,6 +210,21 @@ def test_scalar_properties_id_and_metadata():
     assert feature["properties"] == {"Age": 42, "Height": 1.75, "Code": "hello", "Active": True}
 
 
+def test_decimal_text_in_an_integer_domain_stays_a_number():
+    """eCH-0031 4.3.11.4 lets a sender transfer more precision than the domain defines (`10.0`, `1.0e1`, `7.5`)."""
+    builder = _build(_MODEL)
+    cls = _resolved_class(builder, "A")
+
+    def age(text):
+        obj = XtfObject(tid="o", qualified_class="Foo.T.A", attributes={"Age": [_node("Age", text)]})
+        return object_to_feature(obj, cls)["properties"]["Age"]
+
+    assert age("10.0") == 10 and isinstance(age("10.0"), int)
+    assert age("1.0e1") == 10 and isinstance(age("1.0e1"), int)
+    assert age("7.5") == 7.5
+    assert age("n/a") == "n/a"
+
+
 def test_boolean_false_and_integer_vs_number_typing():
     builder = _build(_MODEL)
     cls = _resolved_class(builder, "A")
@@ -941,6 +956,45 @@ def test_genuine_structure_without_ref_recurses_into_nested_object():
     )
     feature = object_to_feature(obj, cls)
     assert feature["properties"]["NoRefStruct"] == {"Sub": "hello"}
+
+
+_MIXED_STRUCTURE_MODEL = """INTERLIS 2.4;
+MODEL Foo AT "http://x" VERSION "1" =
+  TOPIC T =
+    CLASS Item =
+      Code : TEXT*10;
+    END Item;
+    STRUCTURE OnlyRef =
+      To : REFERENCE TO Item;
+    END OnlyRef;
+    STRUCTURE RefAndMore =
+      To : REFERENCE TO Item;
+      Note : TEXT*20;
+    END RefAndMore;
+    CLASS Holder =
+      Plain : OnlyRef;
+      Rich : RefAndMore;
+    END Holder;
+  END T;
+END Foo.
+"""
+
+
+def test_structure_with_a_reference_among_other_attributes_keeps_every_attribute():
+    """Only a structure reduced to one reference is written as the bare OID; the others stay objects."""
+    builder = _build(_MIXED_STRUCTURE_MODEL)
+    cls = _resolved_class(builder, "Holder")
+    obj = XtfObject(
+        tid="h-1",
+        qualified_class="Foo.T.Holder",
+        attributes={
+            "Plain": [_wrap("Plain", _wrap("OnlyRef", _ref_node("To", "i-1")))],
+            "Rich": [_wrap("Rich", _wrap("RefAndMore", _ref_node("To", "i-1"), _node("Note", "n")))],
+        },
+    )
+    properties = object_to_feature(obj, cls)["properties"]
+    assert properties["Plain"] == "i-1"
+    assert properties["Rich"] == {"To": "i-1", "Note": "n"}
 
 
 def test_embedded_role_absent_without_symbol_table():

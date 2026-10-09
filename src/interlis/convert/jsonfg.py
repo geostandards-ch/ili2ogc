@@ -78,6 +78,7 @@ from interlis.xtf.schema import (
     resolve_attribute,
     resolve_class,
     schema_members_of,
+    wrapped_reference,
 )
 from interlis.xtf.validate import (
     _BOUNDARY_TAGS,
@@ -159,7 +160,12 @@ def _scalar_value(resolved: ResolvedAttribute, node: RawNode) -> Any:
         try:
             return int(text) if as_int else float(text)
         except ValueError:
+            pass
+        try:
+            number = float(text)
+        except ValueError:
             return text
+        return int(number) if as_int and number.is_integer() else number
     if kind == "BooleanType":
         return text == "true"
     return text  # TextType/EnumType: the wire text itself (EnumType: a dotted path)
@@ -258,6 +264,9 @@ def _attribute_value(
         # _extract_reference searches the whole subtree regardless of which
         # of these 3 real wire shapes produced it, so all 3 are handled by
         # this ONE lookup, never 3 separate cases.
+        is_structure = kind == "Class" and getattr(resolved.type_instance, "Kind", None) == "Structure"
+        if is_structure and wrapped_reference(resolved.type_instance) is None:
+            return _structure_value(resolved, raw_nodes, symbol_table=symbol_table, already_unwrapped=already_unwrapped)
         ref = _extract_reference(raw_nodes[0]) if raw_nodes else None
         if ref is not None:
             return ref
