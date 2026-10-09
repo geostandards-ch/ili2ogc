@@ -34,6 +34,7 @@ from interlis.builder.view_mixin import _ViewBuildingMixin
 from interlis.metamodel.instance import MetaInstance
 from interlis.metamodel.registry import MetamodelRegistry
 from interlis.metamodel.uml_schema import MetamodelSchema
+from interlis.runtime.parse import _unquote_interlis_string
 from interlis.spec.models import Parent, SpecEntry
 from interlis.spec.spec_index import load_spec
 
@@ -161,8 +162,8 @@ class InterlisModelBuilder(
         self._apply_pending_view_all_of()
         self._apply_pending_view_bare_attr_types()
         self._apply_pending_translations()
-        return result
         self._apply_derived_role_flags()
+        return result
 
     def _apply_pending_mandatory_overrides(self) -> None:
         """Give each attribute queued in `_pending_mandatory_overrides` its OWN, Mandatory=True `Type` clone.
@@ -412,6 +413,8 @@ class InterlisModelBuilder(
             self._build_metadata_basket_members(instance, ctx)
         elif rule_name == "lineType":
             self._attach_line_forms(instance, ctx)
+        elif rule_name == "formattedType":
+            self._set_formatted_template(instance, ctx)
         if association_attribute and ctx.MANDATORY() is not None:
             self._pending_mandatory_overrides.append(instance)
 
@@ -604,6 +607,7 @@ class InterlisModelBuilder(
                     instance._source_ctx = name_node.symbol
                     self._maybe_register_symbol(instance)
                     self._attach_domain_extends(instance, segment, rule_name)
+                    self._apply_domain_modifiers(instance, segment, name_node)
                     self._attach_domain_constraints(instance, segment, rule_name)
                     if entry.parent and self._parent_stack:
                         self.attachment.attach(
@@ -627,6 +631,7 @@ class InterlisModelBuilder(
                 instance._source_ctx = instance._source_ctx or name_node.symbol
                 self._attach_pending_meta_attributes(instance, instance._source_ctx)
                 self._attach_domain_extends(instance, segment, rule_name)
+                self._apply_domain_modifiers(instance, segment, name_node)
                 if getattr(instance, "Name", None) is None:
                     instance.Name = name_node.getText()
                     self._maybe_register_symbol(instance)
@@ -661,6 +666,7 @@ class InterlisModelBuilder(
             if not isinstance(instance, MetaInstance):
                 continue
             self._attach_domain_extends(instance, segment, rule_name)
+            self._apply_domain_modifiers(instance, segment, name_node)
             self._attach_domain_constraints(instance, segment, rule_name)
             if getattr(instance, "Name", None) is None:
                 instance.Name = name_node.getText()
@@ -681,6 +687,37 @@ class InterlisModelBuilder(
         if not results:
             return None
         return results[0] if len(results) == 1 else results
+
+    @staticmethod
+    def _set_formatted_template(instance: MetaInstance, ctx: ParserRuleContext) -> None:
+        """Set `FormattedType.Format` to the template of `FORMAT BASED ON <struct> (<template>)`."""
+        template_ctx = ctx.formatDef()
+        if template_ctx is None:
+            return
+        skipped = (InterlisParser.LPAR, InterlisParser.RPAR, InterlisParser.INHERITANCE)
+        parts = [
+            c.getText()
+            for c in template_ctx.children or []
+            if getattr(getattr(c, "symbol", None), "type", None) not in skipped
+        ]
+        instance.Format = "".join(parts)
+
+    @staticmethod
+    def _apply_domain_modifiers(instance: MetaInstance, segment: list[Any], name_node: TerminalNode) -> None:
+        """Set `Abstract`/`Final`/`Generic` from a domain's `(ABSTRACT, FINAL, GENERIC)` clause (ExtendableME)."""
+        attributes = {
+            InterlisParser.ABSTRACT: "Abstract",
+            InterlisParser.FINAL: "Final",
+            InterlisParser.GENERIC: "Generic",
+        }
+        start = segment.index(name_node) + 1
+        for child in segment[start:]:
+            if not isinstance(child, TerminalNode):
+                break
+            if child.symbol.type in (InterlisParser.ASSIGN, InterlisParser.EXTENDS):
+                break
+            if child.symbol.type in attributes:
+                setattr(instance, attributes[child.symbol.type], True)
 
     def _build_metadata_basket_members(self, instance: MetaInstance, ctx: ParserRuleContext) -> None:
         """Materialize `MetaObjectDef` children for each `OBJECTS OF <Class>: <Name>(, <Name>)*` clause.
@@ -886,8 +923,8 @@ class InterlisModelBuilder(
         if len(strings) != 2:
             return None
         instance = self.registry.new_instance("IlisMeta16.ModelData.FormattedType")
-        instance.Min = strings[0].getText()
-        instance.Max = strings[1].getText()
+        instance.Min = _unquote_interlis_string(strings[0].getText())
+        instance.Max = _unquote_interlis_string(strings[1].getText())
         return instance
 
     def _build_control_points_ref(self, ctx: ParserRuleContext, rule_name: str) -> ForwardRef | None:
@@ -1710,6 +1747,9 @@ class InterlisModelBuilder(
         `numeric()`/`textType()`'s own content for any numeric/text OID
         rule (e.g. `I32OID = OID 0..2147483647;`).
         """
+        if isinstance(bag, MetaInstance):
+            # An Instance rule (e.g. `textType`) yields the built instance itself, not a bag: take its own fields.
+            bag = {k: v for k, v in {**bag.__dict__, **(bag.model_extra or {})}.items() if not k.startswith("_")}
         if not isinstance(bag, dict):
             return
         for field, value in bag.items():
@@ -1751,9 +1791,6 @@ class InterlisModelBuilder(
     def _resolve_discriminant(self, ctx, rule_name, discriminant, construction_ctx, consumed) -> Any:
         extra = discriminant.model_extra or {}
         if "value" in extra and not isinstance(extra["value"], dict):
-        if isinstance(bag, MetaInstance):
-            # An Instance rule (e.g. `textType`) yields the built instance itself, not a bag: take its own fields.
-            bag = {k: v for k, v in {**bag.__dict__, **(bag.model_extra or {})}.items() if not k.startswith("_")}
             return extra["value"]
         if isinstance(extra.get("value"), dict):
             nested = extra["value"]

@@ -108,14 +108,24 @@ attributeDef:
         V2.1.0 3.2.7, Tabelle 1): a published model names an attribute UUIDOID.'
     SubdivisionKind:
       source:
-        field: SUBDIVISION
-        presence: true
+        field: CONTINUOUS|SUBDIVISION
+        kind: alt_token
       rule:
-        SUBDIVISION only: SubDiv
-        CONTINUOUS + SUBDIVISION: ContSubDiv
-        neither: NoSubDiv
-      note: needs final confirmation of CONTINUOUS+SUBDIVISION -> ContSubDiv mapping against a real .ili
-        example
+        CONTINUOUS: ContSubDiv
+        SUBDIVISION: SubDiv
+        absent: NoSubDiv
+      note: '`CONTINUOUS SUBDIVISION` gives ContSubDiv, a plain `SUBDIVISION` SubDiv, neither NoSubDiv
+        (CoordSys `CONTINUOUS SUBDIVISION Minutes`, eCH-0031 V2.1.0 Annex A).'
+    Abstract:
+      source:
+        field: ABSTRACT
+        presence: true
+      note: optional `(ABSTRACT)` modifier of the attribute (ExtendableME.Abstract).
+    Final:
+      source:
+        field: FINAL
+        presence: true
+      note: optional `(FINAL)` modifier of the attribute (ExtendableME.Final).
     Transient:
       source:
         field: TRANSIENT
