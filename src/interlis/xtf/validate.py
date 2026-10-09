@@ -1105,6 +1105,28 @@ def _validate_resolved_attr(
     return issues
 
 
+def _duplicate_tid_issues(transfer: XtfTransfer) -> list[ValidationIssue]:
+    """Flag an object whose TID already identifies another object of the transfer.
+
+    eCH-0031 V2.1.0 §4.3.7: in a FULL transfer every TID must be unique within the whole transfer (INITIAL
+    behaves like FULL); a basket without KIND is read as FULL. UPDATE baskets are skipped.
+    """
+    first_seen: dict[str, str] = {}
+    issues: list[ValidationIssue] = []
+    for basket in transfer.baskets:
+        if basket.kind == "UPDATE":
+            continue
+        for obj in basket.objects:
+            if obj.tid is None:
+                continue
+            if obj.tid in first_seen:
+                message = f"TID {obj.tid!r} already used by {first_seen[obj.tid]}"
+                issues.append(ValidationIssue("error", basket.bid, obj.tid, obj.qualified_class, None, message))
+            else:
+                first_seen[obj.tid] = obj.qualified_class
+    return issues
+
+
 def validate_transfer(
     transfer: XtfTransfer,
     *,
@@ -1126,7 +1148,7 @@ def validate_transfer(
     """
     tid_index = _build_tid_index(transfer, catalogs)
     schema_cache: dict[int, dict[str, ResolvedAttribute]] = {}
-    issues: list[ValidationIssue] = []
+    issues: list[ValidationIssue] = _duplicate_tid_issues(transfer)
     for basket in transfer.baskets:
         for obj in basket.objects:
             issues.extend(

@@ -977,3 +977,29 @@ def test_multivalue_nested_inside_structure_validated(struct_content_builder):
     assert _messages(issues, attribute="HomeAddress.Notes[0].Text") == []
     msgs = _messages(issues, attribute="HomeAddress.Notes[1].Text", severity="error")
     assert any("MANDATORY" in m for m in msgs)
+
+
+def _basket(bid: str, kind: str | None, *objects: XtfObject) -> XtfBasket:
+    return XtfBasket(bid=bid, qualified_topic="MinimalTest.MainTopic", kind=kind, endstate=None, objects=list(objects))
+
+
+def test_duplicate_tid_in_a_full_transfer_is_an_error(builder):
+    objects = [_object("t1", {"Name": "A"}), _object("t1", {"Name": "B"})]
+    transfer = XtfTransfer(sender=None, ili_version=None, models=[], baskets=[_basket("b1", None, *objects)])
+    msgs = _messages(validate_transfer(transfer, symbol_table=builder.symbol_table), severity="error")
+    assert any("TID 't1' already used" in m for m in msgs)
+
+
+def test_duplicate_tid_across_baskets_is_an_error(builder):
+    first, second = _object("t1", {"Name": "A"}), _object("t1", {"Name": "B"})
+    baskets = [_basket("b1", "INITIAL", first), _basket("b2", None, second)]
+    transfer = XtfTransfer(sender=None, ili_version=None, models=[], baskets=baskets)
+    msgs = _messages(validate_transfer(transfer, symbol_table=builder.symbol_table), severity="error")
+    assert any("already used" in m for m in msgs)
+
+
+def test_repeated_tid_in_an_update_basket_is_not_flagged(builder):
+    objects = [_object("t1", {"Name": "A"}), _object("t1", {"Name": "B"})]
+    transfer = XtfTransfer(sender=None, ili_version=None, models=[], baskets=[_basket("b1", "UPDATE", *objects)])
+    issues = validate_transfer(transfer, symbol_table=builder.symbol_table)
+    assert not any("already used" in m for m in _messages(issues))
