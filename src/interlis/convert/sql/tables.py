@@ -8,6 +8,7 @@ UNIQUE/CHECK/FOREIGN KEY constraints.
 from __future__ import annotations
 
 from interlis.builder.forward_refs import SymbolTable
+from interlis.convert.geometry_kinds import GEOMETRY_KINDS
 from interlis.convert.jsonschema import _is_structure
 from interlis.diagnostic_ids import note as _diag
 from interlis.metamodel.instance import MetaInstance
@@ -30,7 +31,7 @@ from interlis.xtf.schema import (
 from .expressions import _MAX_STRUCT_FLATTEN_DEPTH, _expression_to_sql, _UnsupportedCheckExpression
 from .identifiers import OID_COLUMN, RESERVED_COLUMNS, SEQ_COLUMN, _dedup_name, _sql_identifier, _truncate_identifier
 from .model import CheckConstraint, Column, ForeignKey, Table, UniqueConstraint
-from .types import _GEOMETRY_KINDS, _domain_check, _geometry_column_info, _scalar_sql_type
+from .types import _domain_check, _geometry_column_info, _scalar_sql_type
 
 
 def _avoid_identity_collision(columns: list[Column]) -> dict[str, str]:
@@ -249,7 +250,7 @@ def _columns_for_class(
             )
             continue
 
-        if resolved.type_kind in _GEOMETRY_KINDS:
+        if resolved.type_kind in GEOMETRY_KINDS:
             sfa_type, srid, reason = _geometry_column_info(resolved)
             if sfa_type is None:
                 notes.append(
@@ -366,7 +367,7 @@ def _build_child_table(
                 ref_class_id=id(target),
             )
         )
-    elif base_kind in _GEOMETRY_KINDS:
+    elif base_kind in GEOMETRY_KINDS:
         synthetic = ResolvedAttribute(attr=base_type, type_instance=base_type, type_kind=base_kind, mandatory=True)
         sfa_type, srid, reason = _geometry_column_info(synthetic)
         if sfa_type is None:

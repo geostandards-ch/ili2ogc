@@ -11,8 +11,6 @@ from interlis.convert.jsonschema import _is_integer_range
 from interlis.metamodel.instance import MetaInstance
 from interlis.xtf.schema import ResolvedAttribute, coord_axes, enum_values, line_coord_type
 
-_GEOMETRY_KINDS = {"CoordType", "LineType"}
-
 
 def _srid(coord_type: MetaInstance | None) -> str | None:
     """Return the bare numeric EPSG code (e.g. `"2056"`) from a CoordType's `!!@CRS=EPSG:<code>` meta-attribute, or
