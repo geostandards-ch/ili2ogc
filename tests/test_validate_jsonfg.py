@@ -329,3 +329,44 @@ def test_a_geometry_counts_as_a_defined_attribute_in_a_constraint():
     with_geometry = {**base, "place": {"type": "Point", "coordinates": [2600000.0, 1200000.0]}, "coordRefSys": _CRS}
     assert validate_jsonfg(_document(with_geometry), symbol_table=table) == []
     assert [i.severity for i in validate_jsonfg(_document(base), symbol_table=table)] == ["error"]
+
+
+_NESTED_MODEL = """INTERLIS 2.4;
+MODEL Nst AT "http://x" VERSION "1" =
+  TOPIC T =
+    CLASS Owner =
+      Name : MANDATORY TEXT*10;
+    END Owner;
+    STRUCTURE Share =
+      Percent : 0 .. 100;
+      Holder : REFERENCE TO Owner;
+    END Share;
+    CLASS Parcel =
+      Shares : LIST OF Share;
+      Main : Share;
+    END Parcel;
+  END T;
+END Nst.
+"""
+
+
+@pytest.fixture(scope="module")
+def nested_table():
+    return build_from_text(_NESTED_MODEL, meta_attributes=meta_attribute_comments(_NESTED_MODEL)).symbol_table
+
+
+def _nested_parcel(**properties):
+    return {"type": "Feature", "id": "p1", "featureType": "Parcel", "geometry": None, "properties": properties}
+
+
+def test_a_reference_inside_a_structure_is_checked(nested_table):
+    parcel = _nested_parcel(Main={"Percent": 50, "Holder": "nobody"})
+    [(severity, attribute, message)] = _problems(nested_table, parcel)
+    assert (severity, attribute) == ("warning", "Main.Holder") and message.startswith("[references]")
+
+
+def test_a_reference_inside_a_list_of_structures_is_checked(nested_table):
+    owner = {"type": "Feature", "id": "o1", "featureType": "Owner", "geometry": None, "properties": {"Name": "ada"}}
+    parcel = _nested_parcel(Shares=[{"Percent": 10, "Holder": "o1"}, {"Percent": 90, "Holder": "nobody"}])
+    [(_, attribute, _)] = _problems(nested_table, owner, parcel)
+    assert attribute == "Shares[1].Holder"

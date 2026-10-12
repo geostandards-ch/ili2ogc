@@ -19,6 +19,7 @@ from interlis.builder.repository import ModelRepository
 from interlis.convert.geometry_kinds import geometry_types
 from interlis.convert.jsonfg import _context_concrete_domain, _crs_uri, geometry_coord_type
 from interlis.convert.jsonschema import (
+    _is_structure,
     class_schema_keys,
     convertible_roots,
     inherited_topic_classes,
@@ -30,6 +31,7 @@ from interlis.xtf.constraints import check_transfer_constraints
 from interlis.xtf.parse import RawNode, XtfBasket, XtfObject, XtfTransfer
 from interlis.xtf.schema import (
     ResolvedAttribute,
+    attributes_of,
     coord_axes,
     reference_external_status,
     resolve_attribute,
@@ -38,6 +40,7 @@ from interlis.xtf.schema import (
 from interlis.xtf.validate import ValidationIssue, _build_tid_index, unresolved_reference_detail
 
 _CURVE_TYPES_WITH_POSITIONS = ("CircularString",)
+_MAX_NESTING = 8
 
 
 @dataclass
@@ -381,18 +384,22 @@ class _JsonFgValidator:
             properties = item.feature.get("properties")
             if not isinstance(properties, dict):
                 continue
-            for name, resolved in item.info.references.items():
-                value = properties.get(name)
+            info = item.info
+            targets = [(name, resolved, properties.get(name)) for name, resolved in info.references.items()]
+            for name, resolved in info.members.items():
+                if name not in info.references and properties.get(name) is not None:
+                    targets.extend(_nested_references(resolved, properties[name], name))
+            for path, resolved, value in targets:
                 for target in value if isinstance(value, list) else [value]:
                     if isinstance(target, str) and target not in known:
                         detail = unresolved_reference_detail(reference_external_status(resolved))
                         found.append(
                             ValidationIssue(
                                 "warning",
-                                item.info.topic,
+                                info.topic,
                                 item.feature.get("id"),
-                                item.info.qualified,
-                                name,
+                                info.qualified,
+                                path,
                                 f"[references] REF {target!r} not found in this document ({detail})",
                             )
                         )
@@ -403,6 +410,34 @@ class _JsonFgValidator:
             self._transfer(checked), symbol_table=self.symbol_table, repository=self.repository, catalogs=catalogs
         )
         return [replace(issue, message=f"[constraints] {issue.message}") for issue in found]
+
+
+def _nested_references(
+    resolved: ResolvedAttribute, value: Any, path: str, depth: int = 0
+) -> list[tuple[str, ResolvedAttribute, Any]]:
+    """List the references inside a structure value (an object or a list of them) as (path, attribute, value)."""
+    structure = resolved.type_instance
+    if resolved.type_kind == "MultiValue":
+        structure = getattr(structure, "BaseType", None)
+    elif resolved.type_kind != "Class":
+        return []
+    if not isinstance(structure, MetaInstance) or not _is_structure(structure) or depth > _MAX_NESTING:
+        return []
+    found: list[tuple[str, ResolvedAttribute, Any]] = []
+    for index, element in enumerate(value if isinstance(value, list) else [value]):
+        if not isinstance(element, dict):
+            continue
+        element_path = f"{path}[{index}]" if isinstance(value, list) else path
+        for name, attr in attributes_of(structure).items():
+            member = resolve_attribute(attr)
+            member_value = element.get(name)
+            if member_value is None:
+                continue
+            if reference_external_status(member) is not None:
+                found.append((f"{element_path}.{name}", member, member_value))
+            else:
+                found.extend(_nested_references(member, member_value, f"{element_path}.{name}", depth + 1))
+    return found
 
 
 def _features_of(document: Any) -> tuple[list[dict[str, Any]] | None, dict[str, Any]]:
