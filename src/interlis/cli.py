@@ -291,6 +291,15 @@ def cmd_convert(args: argparse.Namespace) -> int:
             )
             return ExitCode.NOT_FOUND
         schema = rename_json_schema(schema, translation)
+    if args.schema_id and not args.collection:
+        _error("--schema-id needs --collection")
+        return ExitCode.INVALID
+    if args.collection:
+        try:
+            schema = _jsonschema_mod.collection_schema(schema, args.collection, schema_id=args.schema_id)
+        except KeyError:
+            _error(f"--collection {args.collection}: no such class; available: {', '.join(schema.get('$defs', {}))}")
+            return ExitCode.NOT_FOUND
     text = json.dumps(schema, indent=2, ensure_ascii=False)
     if args.output:
         Path(args.output).write_text(text + "\n", encoding="utf-8")
@@ -1323,6 +1332,20 @@ def main(argv: list[str] | None = None) -> int:
         metavar="CODE",
         help="Rename output identifiers through a `TRANSLATION OF` model for this language (e.g. `fr`), "
         "found by name in --repo. The input .ili and the transfer format are unchanged.",
+    )
+    convert_parser.add_argument(
+        "--collection",
+        default=None,
+        metavar="CLASS",
+        help="Write only this class, as the standalone schema OGC API Schemas serves at "
+        "/collections/{id}/schema: structures inlined, reference properties marked with x-ogc-role and "
+        "x-ogc-collectionId (the target class name, i.e. each class is a collection).",
+    )
+    convert_parser.add_argument(
+        "--schema-id",
+        default=None,
+        metavar="URI",
+        help="With --collection: the schema's $id, the HTTP(S) URI it is served at.",
     )
     convert_parser.add_argument("-o", "--output", default=None, metavar="FILE", help="Write to FILE instead of stdout.")
     _add_diagnostic_args(convert_parser)

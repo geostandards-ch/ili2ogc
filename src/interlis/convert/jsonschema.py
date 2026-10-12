@@ -35,6 +35,7 @@ from interlis.xtf.schema import (
     wrapped_reference,
 )
 
+_MAX_INLINE_DEPTH = 8
 JSON_SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema"
 
 
@@ -646,6 +647,38 @@ def class_to_json_schema(
     if crud is not None:
         schema["x-crud"] = list(crud)
     return schema
+
+
+def collection_schema(schema: dict[str, Any], key: str, *, schema_id: str | None = None) -> dict[str, Any]:
+    """Return one `$defs` entry as the standalone schema OGC API Schemas serves at `/collections/{id}/schema`.
+
+    Structures are inlined (the standard advises against `$ref`) and `$id` is set when `schema_id` is given.
+    A reference property gains `x-ogc-role: reference` and `x-ogc-collectionId` (the target class name, which
+    is the collection id when each class is a collection). Raises `KeyError` for an unknown class.
+    """
+    defs = schema.get("$defs", {})
+    if key not in defs:
+        raise KeyError(key)
+
+    def inline(node: Any, depth: int) -> Any:
+        if isinstance(node, list):
+            return [inline(item, depth) for item in node]
+        if not isinstance(node, dict):
+            return node
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/$defs/") and depth < _MAX_INLINE_DEPTH:
+            return inline(defs[ref.removeprefix("#/$defs/")], depth + 1)
+        out = {name: inline(value, depth) for name, value in node.items()}
+        if "x-reference-target" in out and "x-ogc-role" not in out:
+            out["x-ogc-role"] = "reference"
+            out["x-ogc-collectionId"] = out["x-reference-target"]
+        return out
+
+    result: dict[str, Any] = {"$schema": schema.get("$schema", JSON_SCHEMA_DRAFT)}
+    if schema_id:
+        result["$id"] = schema_id
+    result.update(inline(defs[key], 0))
+    return result
 
 
 def property_validator(schema: dict[str, Any], key: str) -> jsonschema.Draft202012Validator:
