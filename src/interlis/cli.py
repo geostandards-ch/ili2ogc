@@ -79,7 +79,7 @@ def _resource_dirs():
         yield _DEV_ROOT / "mappings", _DEV_ROOT / "spec/grammar/mapping"
 
 
-def _open_builder(repository: ModelRepository | None) -> InterlisModelBuilder:
+def open_builder(repository: ModelRepository | None) -> InterlisModelBuilder:
     """Construct an `InterlisModelBuilder` from the packaged/dev-repo grammar+mapping resources.
 
     The constructor reads everything eagerly, so this scope can close right after - no timing change here.
@@ -200,7 +200,7 @@ def cmd_build(args: argparse.Namespace) -> int:
         return ExitCode.INVALID
 
     repository = ModelRepository([Path(d) for d in args.repo]) if args.repo else None
-    builder = _open_builder(repository)
+    builder = open_builder(repository)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         model = builder.build(tree)
@@ -258,7 +258,7 @@ def cmd_convert(args: argparse.Namespace) -> int:
 
     repository = ModelRepository([Path(d) for d in args.repo]) if args.repo else None
     bag = DiagnosticBag()
-    builder = _open_builder(repository)
+    builder = open_builder(repository)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         # eCH-0117 `!!@Name=Value` meta-attributes declared directly in
@@ -475,7 +475,7 @@ def _sql_schema(args: argparse.Namespace, bag: DiagnosticBag) -> SimpleNamespace
         return ExitCode.INVALID
 
     repository = ModelRepository([Path(d) for d in args.repo]) if args.repo else None
-    builder = _open_builder(repository)
+    builder = open_builder(repository)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         builder.build(tree, meta_attributes=meta_attribute_comments_in_file(path))
@@ -537,7 +537,7 @@ def _sql_schema(args: argparse.Namespace, bag: DiagnosticBag) -> SimpleNamespace
                 for e in catalog_syntax_errors:
                     print(f"  {e}", file=sys.stderr)
                 return ExitCode.INVALID
-            catalog_builder = _open_builder(repository)
+            catalog_builder = open_builder(repository)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 catalog_builder.build(catalog_tree, meta_attributes=meta_attribute_comments_in_file(catalog_path))
@@ -732,7 +732,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
             print(f"  {e}", file=sys.stderr)
         return ExitCode.INVALID
 
-    builder = _open_builder(repository)
+    builder = open_builder(repository)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         builder.build(tree)
@@ -842,7 +842,7 @@ def cmd_validate_jsonfg(args: argparse.Namespace) -> int:
             print(f"  {e}", file=sys.stderr)
         return ExitCode.INVALID
     repository = ModelRepository([Path(d) for d in args.repo]) if args.repo else None
-    builder = _open_builder(repository)
+    builder = open_builder(repository)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         builder.build(tree)
@@ -975,7 +975,7 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
         return ExitCode.INVALID
 
     bag = DiagnosticBag()
-    builder = _open_builder(repository)
+    builder = open_builder(repository)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         # eCH-0117 `!!@Name=Value` meta-attributes declared directly in the
@@ -1065,7 +1065,7 @@ def cmd_write_xtf(args: argparse.Namespace) -> int:
         return ExitCode.INVALID
 
     repository = ModelRepository([Path(d) for d in args.repo]) if args.repo else None
-    builder = _open_builder(repository)
+    builder = open_builder(repository)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         builder.build(tree)
@@ -1161,7 +1161,7 @@ def cmd_convert_sld(args: argparse.Namespace) -> int:
         return ExitCode.INVALID
 
     repository = ModelRepository([Path(d) for d in args.repo]) if args.repo else None
-    builder = _open_builder(repository)
+    builder = open_builder(repository)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         builder.build(tree)
@@ -1258,7 +1258,7 @@ def cmd_convert_cql2(args: argparse.Namespace) -> int:
         return ExitCode.INVALID
 
     repository = ModelRepository([Path(d) for d in args.repo]) if args.repo else None
-    builder = _open_builder(repository)
+    builder = open_builder(repository)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         builder.build(tree)

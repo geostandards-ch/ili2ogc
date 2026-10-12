@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from interlis.builder.repository import ModelRepository
-from interlis.cli import _open_builder, main
+from interlis.cli import main, open_builder
 from interlis.runtime.parse import meta_attribute_comments_in_file, parse_file
 
 _TWO_MODEL_BASE = """INTERLIS 2.4;
@@ -60,7 +60,7 @@ def repo_dir(tmp_path: Path) -> Path:
 
 def test_sibling_models_of_one_file_share_its_symbol_table(repo_dir: Path):
     repository = ModelRepository([repo_dir])
-    builder = _open_builder(repository)
+    builder = open_builder(repository)
     derived = repo_dir / "Derived.ili"
     tree, _ = parse_file(derived)
     builder.build(tree, meta_attributes=meta_attribute_comments_in_file(derived))
