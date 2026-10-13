@@ -33,6 +33,7 @@ from interlis.xtf.schema import (
     ResolvedAttribute,
     attributes_of,
     coord_axes,
+    home_symbol_table,
     reference_external_status,
     resolve_attribute,
     restriction_candidates,
@@ -147,7 +148,8 @@ class _JsonFgValidator:
             return cached
         key = self.keys[id(cls)]
         qualified = self._qualified(cls)
-        members = {name: resolve_attribute(attr) for name, attr in schema_members_of(cls, self.symbol_table).items()}
+        home = home_symbol_table(qualified, symbol_table=self.symbol_table, repository=self.repository)
+        members = {name: resolve_attribute(attr) for name, attr in schema_members_of(cls, home).items()}
         geometry = [
             _GeometryAttr(name, types, bool(resolved.mandatory), geometry_coord_type(resolved))
             for name, resolved in members.items()
@@ -155,12 +157,15 @@ class _JsonFgValidator:
         ]
         properties = self.schema["$defs"][key].get("properties", {})
         references = {
-            name: members[name]
-            for name, prop in properties.items()
-            if name in members
-            and ("x-reference-target" in prop or "x-reference-target" in (prop.get("items") or {}))
-            and reference_external_status(members[name]) is not None
-            and len(restriction_candidates(members[name])) < 2
+            name: resolved
+            for name, resolved in members.items()
+            if (
+                name not in properties  # an embedded role the schema does not list (declared by an extended topic)
+                or "x-reference-target" in properties[name]
+                or "x-reference-target" in (properties[name].get("items") or {})
+            )
+            and reference_external_status(resolved) is not None
+            and len(restriction_candidates(resolved)) < 2
         }
         info = _ClassInfo(
             qualified=qualified,

@@ -37,7 +37,14 @@ from interlis.convert.constraint_eval import (
 from interlis.convert.jsonfg import _raw_node_value
 from interlis.metamodel.instance import MetaInstance
 from interlis.xtf.parse import RawNode, XtfBasket, XtfObject, XtfTransfer
-from interlis.xtf.schema import inheritance_chain, resolve_class
+from interlis.xtf.schema import (
+    association_embedding,
+    association_roles,
+    home_symbol_table,
+    inheritance_chain,
+    resolve_attribute,
+    resolve_class,
+)
 from interlis.xtf.validate import ValidationIssue, _build_tid_index, _extract_reference, _group_by_tag
 
 _UNDEFINED = object()
@@ -315,14 +322,14 @@ class _Population:
         self._repository = repository
         self._chains: dict[str, set[int]] = {}
 
-    def _chain_ids(self, qualified_class: str) -> set[int]:
+    def chain_ids(self, qualified_class: str) -> set[int]:
         if qualified_class not in self._chains:
             cls = resolve_class(qualified_class, symbol_table=self._symbol_table, repository=self._repository)
             self._chains[qualified_class] = set() if cls is None else {id(level) for level in inheritance_chain(cls)}
         return self._chains[qualified_class]
 
     def objects_of(self, cls: MetaInstance) -> list[XtfObject]:
-        return [obj for obj in self._objects if id(cls) in self._chain_ids(obj.qualified_class)]
+        return [obj for obj in self._objects if id(cls) in self.chain_ids(obj.qualified_class)]
 
 
 def _check_existence(
@@ -362,6 +369,125 @@ def _check_existence(
                         f"{label} is violated: {value!r} does not exist in the required attribute",
                     )
                 )
+
+
+def _role_bounds(role: MetaInstance) -> tuple[int, float]:
+    """The `(min, max)` cardinality of a role; no clause means `{0..*}`, except a composition role, `{0..1}`."""
+    mult = getattr(role, "Multiplicity", None)
+    if not isinstance(mult, MetaInstance):
+        return (0, 1) if getattr(role, "Strongness", None) == "Comp" else (0, float("inf"))
+    low, high = getattr(mult, "Min", None), getattr(mult, "Max", None)
+    if high == "same_as_Min":
+        high = low
+    minimum = int(low) if isinstance(low, str) and low.isdigit() else 0
+    maximum = float("inf") if high == "*" else int(high) if isinstance(high, str) and high.isdigit() else float("inf")
+    return minimum, maximum
+
+
+def _association_links(
+    assoc: MetaInstance,
+    roles: list[MetaInstance],
+    population: _Population,
+    by_tid: dict[str, XtfObject],
+) -> tuple[list[tuple[str, str]], list[int]] | None:
+    """The `(tid at role 0, tid at role 1)` links of an association present in the population.
+
+    The second value lists the roles whose cardinality the data can show: for an embedded association, only the
+    role whose target class carries the reference (the embedded role's own cardinality is an attribute check).
+    """
+    links: list[tuple[str, str]] = []
+    embedding = association_embedding(assoc)
+    if embedding is not None:
+        embed_on, embedded_role = embedding
+        if embedded_role not in roles:
+            return None
+        embedded_index = roles.index(embedded_role)
+        for obj in population.objects_of(embed_on):
+            for node in obj.attributes.get(embedded_role.Name, []):
+                target = _extract_reference(node)
+                if obj.tid is not None and target is not None:
+                    ends = ["", ""]
+                    ends[embedded_index], ends[1 - embedded_index] = target, obj.tid
+                    links.append((ends[0], ends[1]))
+        return links, [1 - embedded_index]
+    for obj in population.objects_of(assoc):
+        refs = [[_extract_reference(n) for n in obj.attributes.get(role.Name, [])] for role in roles]
+        if all(len(r) == 1 and r[0] is not None for r in refs):
+            links.append((refs[0][0], refs[1][0]))  # type: ignore[arg-type]
+    return links, [0, 1]
+
+
+def _check_role_cardinalities(
+    transfer: XtfTransfer,
+    catalogs: list[XtfTransfer] | None,
+    symbol_table: SymbolTable,
+    repository: ModelRepository | None,
+    by_tid: dict[str, XtfObject],
+    report: _Report,
+) -> None:
+    """Report an object linked to too few or too many objects through an association role."""
+    tables: dict[int, SymbolTable] = {}
+    for basket in transfer.baskets:
+        for qualified in {obj.qualified_class for obj in basket.objects}:
+            table = home_symbol_table(qualified, symbol_table=symbol_table, repository=repository)
+            tables[id(table)] = table
+    associations: dict[int, MetaInstance] = {}
+    for table in tables.values():
+        for inst in table.all_registered():
+            if (
+                isinstance(inst, MetaInstance)
+                and inst._qualified_class.rsplit(".", 1)[-1] == "Class"
+                and getattr(inst, "Kind", None) == "Association"
+            ):
+                associations[id(inst)] = inst
+    population = _Population(transfer, catalogs, symbol_table, repository)
+    # An association a topic inherits through TOPIC EXTENDS exists once per topic, while a JSON-FG `featureType`
+    # does not say which topic an object belongs to: the copies are counted as one association.
+    merged: dict[tuple[str, ...], dict[str, Any]] = {}
+    for assoc in associations.values():
+        roles = [r for r in association_roles(assoc) if isinstance(r, MetaInstance) and getattr(r, "Name", None)]
+        targets = [resolve_attribute(r).type_instance for r in roles]
+        if len(roles) != 2 or any(t is None for t in targets):
+            continue
+        found = _association_links(assoc, roles, population, by_tid)
+        if found is None:
+            continue
+        entry = merged.setdefault(
+            (str(assoc.Name), *(r.Name for r in roles)),
+            {"roles": roles, "links": [], "checked": found[1], "targets": [[], []]},
+        )
+        entry["links"].extend(found[0])
+        for index in (0, 1):
+            entry["targets"][index].append(targets[index])
+    for entry in merged.values():
+        roles, links, targets = entry["roles"], entry["links"], entry["targets"]
+        for index in entry["checked"]:
+            minimum, maximum = _role_bounds(roles[index])
+            if minimum == 0 and maximum == float("inf"):
+                continue
+            counts: dict[str, int] = {}
+            for link in links:
+                counts[link[1 - index]] = counts.get(link[1 - index], 0) + 1
+            subject_ids = {id(t) for t in targets[1 - index]}
+            for basket in transfer.baskets:
+                for obj in basket.objects:
+                    if obj.tid is None or not subject_ids & population.chain_ids(obj.qualified_class):
+                        continue
+                    count = counts.get(obj.tid, 0)
+                    if minimum <= count <= maximum:
+                        continue
+                    high = "*" if maximum == float("inf") else int(maximum)
+                    report.issues.append(
+                        ValidationIssue(
+                            "error",
+                            basket.bid,
+                            obj.tid,
+                            obj.qualified_class,
+                            roles[index].Name,
+                            f"{roles[index].Name} should associate {minimum} to {high} target objects "
+                            f"(instead of {count})",
+                        )
+                    )
 
 
 def _plausibility_issue(entry: _Plausibility) -> ValidationIssue | None:
@@ -420,6 +546,7 @@ def check_transfer_constraints(
         population = _Population(transfer, catalogs, symbol_table, repository)
         for constraint, members in existence_members.values():
             _check_existence(constraint, members, by_tid, population, report)
+    _check_role_cardinalities(transfer, catalogs, symbol_table, repository, by_tid, report)
     report.issues.extend(issue for entry in plausibility.values() if (issue := _plausibility_issue(entry)))
     report.issues.extend(report.not_evaluated.values())
     return report.issues
