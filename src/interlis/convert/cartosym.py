@@ -884,7 +884,11 @@ def _polyline_sign_kwargs(library: SignLibrary, obj: XtfObject) -> dict[str, Any
 
 
 def _surface_sign_kwargs(library: SignLibrary, obj: XtfObject) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {"fill": surface_sign_object_to_fill(library, obj)}
+    kwargs: dict[str, Any] = {}
+    fill = surface_sign_object_to_fill(library, obj)
+    # A border-only surface carries no fill at all: an empty `se:Fill` would be read as the default grey fill.
+    if fill.color is not None or fill.pattern is not None:
+        kwargs["fill"] = fill
     stroke = surface_sign_object_border_to_stroke(library, obj)
     if stroke is not None:
         kwargs["stroke"] = stroke

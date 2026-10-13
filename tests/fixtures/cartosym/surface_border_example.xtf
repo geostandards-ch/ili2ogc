@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- Synthetic SIGN BASKET data for surface_border_example.ili: a red dashed border sign used by a surface
+     sign without fill color (OutlineOnly) and by one with a yellow fill (OutlineAndFill). -->
+
+<ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS"
+  xmlns="http://www.interlis.ch/xtf/2.4/SurfaceBorderExample">
+   <ili:headersection>
+      <ili:models>
+         <ili:model>SurfaceBorderExample</ili:model>
+      </ili:models>
+      <ili:sender>ili2ogc test fixture</ili:sender>
+   </ili:headersection>
+   <ili:datasection>
+      <T ili:bid="SurfaceBorderExample">
+         <Color ili:tid="1"><!-- #e2001a -->
+            <Name>red</Name>
+            <L>47.2993</L>
+            <C>90.3128</C>
+            <H>35.6661</H>
+         </Color>
+         <Color ili:tid="2"><!-- #ffed00 -->
+            <Name>yellow</Name>
+            <L>92.4973</L>
+            <C>92.0191</C>
+            <H>98.0447</H>
+         </Color>
+         <PolylineAttrs ili:tid="10">
+            <Width>4</Width>
+         </PolylineAttrs>
+         <LineStyle_Solid ili:tid="20">
+            <LineAttrs ili:ref="10"></LineAttrs>
+         </LineStyle_Solid>
+         <PolylineSign ili:tid="100">
+            <ili:Name>RedBorder</ili:Name>
+            <Color ili:ref="1"></Color>
+            <Style ili:ref="20"></Style>
+         </PolylineSign>
+         <SurfaceSign ili:tid="200">
+            <ili:Name>OutlineOnly</ili:Name>
+            <Border ili:ref="100"></Border>
+         </SurfaceSign>
+         <SurfaceSign ili:tid="201">
+            <ili:Name>OutlineAndFill</ili:Name>
+            <FillColor ili:ref="2"></FillColor>
+            <Border ili:ref="100"></Border>
+         </SurfaceSign>
+      </T>
+   </ili:datasection>
+</ili:transfer>

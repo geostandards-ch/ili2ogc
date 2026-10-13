@@ -1,0 +1,43 @@
+INTERLIS 2.4;
+
+!! Drawing rules for a surface sign that has a border and no fill color, next to one that has both.
+!! Synthetic; resolves StandardSymbology from tests/fixtures/cartosym/scale_repo.
+
+MODEL SurfaceBorderExample (en)
+AT "https://example.org/models/" VERSION "2026-10-13" =
+  IMPORTS StandardSymbology;
+
+  DOMAIN
+    Coord2 = COORD 2460000.000 .. 2870000.000 [INTERLIS.m], 1045000.000 .. 1310000.000 [INTERLIS.m], ROTATION 2 -> 1;
+    Area = SURFACE WITH (STRAIGHTS) VERTEX Coord2 WITHOUT OVERLAPS > 0.001;
+
+  TOPIC T =
+    DEPENDS ON StandardSymbology.StandardSigns;
+
+    CLASS Zone =
+      Geometry : Area;
+    END Zone;
+
+    SIGN BASKET Signs ~ StandardSymbology.StandardSigns
+      OBJECTS OF PolylineSign: RedBorder
+      OBJECTS OF SurfaceSign: OutlineOnly, OutlineAndFill;
+
+    GRAPHIC Zone_Outline BASED ON Zone =
+      ZoneRule OF StandardSymbology.StandardSigns.SurfaceSign: (
+          Sign := {OutlineOnly};
+          Geometry := Geometry;
+          Priority := 1
+        );
+    END Zone_Outline;
+
+    GRAPHIC Zone_Filled BASED ON Zone =
+      ZoneRule OF StandardSymbology.StandardSigns.SurfaceSign: (
+          Sign := {OutlineAndFill};
+          Geometry := Geometry;
+          Priority := 1
+        );
+    END Zone_Filled;
+
+  END T;
+
+END SurfaceBorderExample.
