@@ -370,3 +370,48 @@ def test_a_reference_inside_a_list_of_structures_is_checked(nested_table):
     parcel = _nested_parcel(Shares=[{"Percent": 10, "Holder": "o1"}, {"Percent": 90, "Holder": "nobody"}])
     [(_, attribute, _)] = _problems(nested_table, owner, parcel)
     assert attribute == "Shares[1].Holder"
+
+
+_CATALOGUE_MODEL = """INTERLIS 2.4;
+MODEL Cat AT "http://x" VERSION "1" =
+  TOPIC T =
+    CLASS Entry =
+      Code : MANDATORY TEXT*10;
+    END Entry;
+    STRUCTURE EntryRef =
+      Reference : MANDATORY REFERENCE TO (EXTERNAL) Entry;
+    END EntryRef;
+    STRUCTURE CodeA =
+      A : (x, y);
+    END CodeA;
+    STRUCTURE CodeB =
+      B : TEXT*5;
+    END CodeB;
+    DOMAIN
+      Either = CLASS RESTRICTION ( CodeA; CodeB );
+    CLASS Item =
+      Entries : BAG {0..*} OF EntryRef;
+      Kind : Either;
+    END Item;
+  END T;
+END Cat.
+"""
+
+
+@pytest.fixture(scope="module")
+def catalogue_table():
+    return build_from_text(_CATALOGUE_MODEL, meta_attributes=meta_attribute_comments(_CATALOGUE_MODEL)).symbol_table
+
+
+def _item(**properties):
+    return {"type": "Feature", "id": "i1", "featureType": "Item", "geometry": None, "properties": properties}
+
+
+def test_a_list_of_catalogue_references_is_checked(catalogue_table):
+    [(severity, attribute, message)] = _problems(catalogue_table, _item(Entries=["missing"]))
+    assert (severity, attribute) == ("warning", "Entries")
+    assert "EXTERNAL" in message
+
+
+def test_a_class_restriction_value_is_not_a_reference(catalogue_table):
+    assert _problems(catalogue_table, _item(Kind="x")) == []

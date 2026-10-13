@@ -35,6 +35,7 @@ from interlis.xtf.schema import (
     coord_axes,
     reference_external_status,
     resolve_attribute,
+    restriction_candidates,
     schema_members_of,
 )
 from interlis.xtf.validate import ValidationIssue, _build_tid_index, unresolved_reference_detail
@@ -159,6 +160,7 @@ class _JsonFgValidator:
             if name in members
             and ("x-reference-target" in prop or "x-reference-target" in (prop.get("items") or {}))
             and reference_external_status(members[name]) is not None
+            and len(restriction_candidates(members[name])) < 2
         }
         info = _ClassInfo(
             qualified=qualified,
@@ -412,6 +414,11 @@ class _JsonFgValidator:
         return [replace(issue, message=f"[constraints] {issue.message}") for issue in found]
 
 
+def _is_reference(resolved: ResolvedAttribute) -> bool:
+    """Whether a string value of `resolved` is a reference (a `CLASS RESTRICTION` value is bare text instead)."""
+    return reference_external_status(resolved) is not None and len(restriction_candidates(resolved)) < 2
+
+
 def _nested_references(
     resolved: ResolvedAttribute, value: Any, path: str, depth: int = 0
 ) -> list[tuple[str, ResolvedAttribute, Any]]:
@@ -419,6 +426,10 @@ def _nested_references(
     structure = resolved.type_instance
     if resolved.type_kind == "MultiValue":
         structure = getattr(structure, "BaseType", None)
+        if isinstance(structure, MetaInstance) and _is_structure(structure) and depth <= _MAX_NESTING:
+            element = ResolvedAttribute(attr=resolved.attr, type_instance=structure, type_kind="Class", mandatory=False)
+            if _is_reference(element):  # a list of catalogue references, written as a list of strings
+                return [(path, element, value)]
     elif resolved.type_kind != "Class":
         return []
     if not isinstance(structure, MetaInstance) or not _is_structure(structure) or depth > _MAX_NESTING:
@@ -433,7 +444,7 @@ def _nested_references(
             member_value = element.get(name)
             if member_value is None:
                 continue
-            if reference_external_status(member) is not None:
+            if _is_reference(member):
                 found.append((f"{element_path}.{name}", member, member_value))
             else:
                 found.extend(_nested_references(member, member_value, f"{element_path}.{name}", depth + 1))
