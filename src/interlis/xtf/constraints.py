@@ -11,7 +11,7 @@ A constraint that cannot be computed because a value is undefined counts
 as satisfied (manual, section 3.12); an object with an undefined `UNIQUE`
 key takes no part in the check. `EXISTENCE` constraints are checked against
 the objects of the transfer and of the given catalogues (when none of the
-required class is present, the constraint is reported as not evaluated).
+required class is present, the constraint is reported once per class as a warning, not evaluated).
 `SET` constraints, and any expression outside the evaluator's subset, are
 reported once per class as `info` issues rather than skipped silently.
 
@@ -98,12 +98,14 @@ class _Report:
     not_evaluated: dict[tuple[str, str, str], ValidationIssue] = field(default_factory=dict)
     skipped: set[int] = field(default_factory=set)
 
-    def skip(self, constraint: MetaInstance, qualified_class: str, label: str, reason: str) -> None:
+    def skip(
+        self, constraint: MetaInstance, qualified_class: str, label: str, reason: str, severity: str = "info"
+    ) -> None:
         self.skipped.add(id(constraint))
         key = (qualified_class, label, reason)
         if key not in self.not_evaluated:
             self.not_evaluated[key] = ValidationIssue(
-                "info", "", None, qualified_class, None, f"{label} not evaluated: {reason}"
+                severity, "", None, qualified_class, None, f"{label} not evaluated: {reason}"
             )
 
 
@@ -354,7 +356,13 @@ def _check_existence(
         for obj in objects:
             allowed.update(_attribute_values(obj, path, by_tid))
     if not present:
-        report.skip(constraint, first_class, label, "no object of the required class is in the transfer or catalogues")
+        report.skip(
+            constraint,
+            first_class,
+            label,
+            "no object of the required class is in the transfer or catalogues (pass the catalogue with --catalog)",
+            severity="warning",
+        )
         return
     for basket, obj in members:
         for value in _attribute_values(obj, attr_path, by_tid):

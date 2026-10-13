@@ -192,7 +192,8 @@ def test_existence_constraint_requires_the_value_in_one_of_the_classes(builder):
 def test_existence_constraint_is_not_evaluated_without_the_required_objects(builder):
     issues = _check(builder, [_obj("Consumer", "c0", Own="Z")])
     assert _by_severity(issues, "error") == []
-    assert any("EXISTENCE CONSTRAINT" in i.message and "not evaluated" in i.message for i in issues)
+    [warning] = [i for i in _by_severity(issues, "warning") if "EXISTENCE CONSTRAINT" in i.message]
+    assert "not evaluated" in warning.message and "--catalog" in warning.message
 
 
 def test_boolean_attributes_read_from_a_transfer_are_booleans(builder):
