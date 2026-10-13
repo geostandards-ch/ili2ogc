@@ -89,13 +89,17 @@ class RawNode:
     """Raw XML subtree for ONE attribute (or one of its descendants).
 
     The INTERLIS namespace is stripped from the tag, text is trimmed
-    (None if empty/absent).
+    (None if empty/absent). An element with no text whose value sits in its
+    `OID` XML attribute (an attribute of an OID domain) reads that value as
+    its text. `blank` holds the text of a childless element made of whitespace only, a
+    non-empty TEXT value that trimming turns into `None`.
     """
 
     tag: str
     text: str | None
     attrib: dict[str, str]
     children: list["RawNode"] = field(default_factory=list)
+    blank: str = ""
 
 
 @dataclass
@@ -139,11 +143,14 @@ class XtfTransfer:
 
 def _to_raw_node(elem: ET.Element) -> RawNode:
     text = elem.text.strip() if elem.text and elem.text.strip() else None
+    if text is None and len(elem) == 0 and elem.get("OID"):
+        text = elem.get("OID")
     return RawNode(
         tag=_strip_ns(elem.tag),
         text=text,
         attrib=dict(elem.attrib),
         children=[_to_raw_node(c) for c in elem],
+        blank=elem.text if elem.text and not elem.text.strip() and len(elem) == 0 else "",
     )
 
 

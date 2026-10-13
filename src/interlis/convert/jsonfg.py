@@ -150,9 +150,9 @@ def _scalar_value(resolved: ResolvedAttribute, node: RawNode) -> Any:
     stance of surfacing rather than hiding.
     """
     text = node.text
-    if text is None:
-        return None
     kind = resolved.type_kind
+    if text is None:
+        return node.blank if node.blank and kind == "TextType" else None
     # FormattedType (an ISO date/time string on the wire) and BlackboxType
     # (the inner XML/base64 text) both pass through verbatim - matches the
     # `type: string` their own JSON Schema `$defs` entry declares.
