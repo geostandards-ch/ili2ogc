@@ -63,13 +63,13 @@ def test_an_unknown_class_is_a_key_error(schema):
 def test_the_cli_writes_one_class(tmp_path, capsys):
     model = tmp_path / "col.ili"
     model.write_text(_MODEL, encoding="utf-8")
-    assert main(["convert", str(model), "--collection", "Owner", "--schema-id", "http://x/s"]) == ExitCode.OK
+    assert main(["convert-jsonschema", str(model), "--collection", "Owner", "--schema-id", "http://x/s"]) == ExitCode.OK
     assert json.loads(capsys.readouterr().out)["$id"] == "http://x/s"
 
 
 def test_the_cli_refuses_an_unknown_class_and_a_lone_schema_id(tmp_path, capsys):
     model = tmp_path / "col.ili"
     model.write_text(_MODEL, encoding="utf-8")
-    assert main(["convert", str(model), "--collection", "Nope"]) == ExitCode.NOT_FOUND
-    assert main(["convert", str(model), "--schema-id", "http://x/s"]) == ExitCode.INVALID
+    assert main(["convert-jsonschema", str(model), "--collection", "Nope"]) == ExitCode.NOT_FOUND
+    assert main(["convert-jsonschema", str(model), "--schema-id", "http://x/s"]) == ExitCode.INVALID
     assert "available: Owner, Share, Parcel" in capsys.readouterr().err

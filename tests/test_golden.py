@@ -25,13 +25,21 @@ GOLDEN = Path(__file__).resolve().parent / "golden"
 # (id, [argv for `interlis`], golden filename). `-o <path>` is appended by
 # the test, so each command writes its primary output to a file.
 CASES: list[tuple[str, list[str], str]] = [
-    ("minimal-jsonschema", ["convert", str(FIX / "minimal_model.ili")], "minimal_model.jsonschema.json"),
+    ("minimal-jsonschema", ["convert-jsonschema", str(FIX / "minimal_model.ili")], "minimal_model.jsonschema.json"),
     ("minimal-sql", ["convert-sql", str(FIX / "minimal_model.ili")], "minimal_model.sql"),
-    ("oid-jsonschema", ["convert", str(FIX / "oid_model.ili")], "oid_model.jsonschema.json"),
+    ("oid-jsonschema", ["convert-jsonschema", str(FIX / "oid_model.ili")], "oid_model.jsonschema.json"),
     ("oid-sql", ["convert-sql", str(FIX / "oid_model.ili")], "oid_model.sql"),
-    ("geometry-jsonschema", ["convert", str(FIX / "xtf/geometry_model.ili")], "geometry_model.jsonschema.json"),
+    (
+        "geometry-jsonschema",
+        ["convert-jsonschema", str(FIX / "xtf/geometry_model.ili")],
+        "geometry_model.jsonschema.json",
+    ),
     ("geometry-sql", ["convert-sql", str(FIX / "xtf/geometry_model.ili")], "geometry_model.sql"),
-    ("view-jsonschema", ["convert", str(FIX / "dmav_view_pattern.ili")], "dmav_view_pattern.jsonschema.json"),
+    (
+        "view-jsonschema",
+        ["convert-jsonschema", str(FIX / "dmav_view_pattern.ili")],
+        "dmav_view_pattern.jsonschema.json",
+    ),
     ("view-sql", ["convert-sql", str(FIX / "dmav_view_pattern.ili")], "dmav_view_pattern.sql"),
     (
         "view-jsonfg",
@@ -40,7 +48,7 @@ CASES: list[tuple[str, list[str], str]] = [
     ),
     (
         "translation-jsonschema",
-        ["convert", str(FIX / "translation/Wanderwege_V1.ili"), "--repo", str(FIX / "translation")],
+        ["convert-jsonschema", str(FIX / "translation/Wanderwege_V1.ili"), "--repo", str(FIX / "translation")],
         "Wanderwege_V1.jsonschema.json",
     ),
     (
@@ -55,7 +63,7 @@ CASES: list[tuple[str, list[str], str]] = [
     ),
     (
         "dmav-jsonschema",
-        ["convert", str(FIX / "dmav/DMAV_Grundstuecke_V1_1.ili"), "--repo", str(FIX / "dmav")],
+        ["convert-jsonschema", str(FIX / "dmav/DMAV_Grundstuecke_V1_1.ili"), "--repo", str(FIX / "dmav")],
         "DMAV_Grundstuecke_V1_1.jsonschema.json",
     ),
     (

@@ -65,7 +65,7 @@ def test_alternative_targets_get_one_column_each(tmp_path: Path):
 def _validate(tmp_path: Path, ref: str, capsys) -> str:
     (tmp_path / "M.ili").write_text(_MODEL, encoding="utf-8")
     (tmp_path / "data.xtf").write_text(_TRANSFER.format(ref=ref), encoding="utf-8")
-    main(["validate", str(tmp_path / "data.xtf"), "--model", str(tmp_path / "M.ili"), "--repo", str(tmp_path)])
+    main(["validate-xtf", str(tmp_path / "data.xtf"), "--model", str(tmp_path / "M.ili"), "--repo", str(tmp_path)])
     captured = capsys.readouterr()
     return captured.out + captured.err
 

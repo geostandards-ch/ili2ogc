@@ -935,7 +935,7 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
     eCH-0117 `!!@CRS` meta-attribute; `"geometry"` (the WGS84 GeoJSON
     fallback) always stays `null`. Schema resolution: see
     `_resolve_schema_model_path` (same `--model`/`--repo` rule as
-    `interlis validate`).
+    `interlis validate-xtf`).
 
     Backlog item 8: every `VIEW` is evaluated into Features -
     `PROJECTION`/`JOIN`/`UNION`/`AGGREGATION`/`INSPECTION`
@@ -949,7 +949,7 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
     a function call).
 
     `--feature-schema-url`, when given, wires "featureSchema" (JSON-FG
-    clause 13) to the companion JSON Schema `interlis convert` would
+    clause 13) to the companion JSON Schema `interlis convert-jsonschema` would
     produce for the SAME `.ili` model - this runtime has no schema-hosting
     story of its own, so the URL is always user-supplied (same stance as
     `--repo`/`--model`), never derived automatically.
@@ -1297,6 +1297,10 @@ def cmd_convert_cql2(args: argparse.Namespace) -> int:
     return ExitCode.OK
 
 
+# Former command names, still accepted for one release; the value is the name to use instead.
+_DEPRECATED_COMMANDS = {"convert": "convert-jsonschema", "import": "import-xtf", "validate": "validate-xtf"}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="interlis", description="Pure-Python INTERLIS runtime.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1315,8 +1319,9 @@ def main(argv: list[str] | None = None) -> int:
     build_parser.set_defaults(func=cmd_build)
 
     convert_parser = subparsers.add_parser(
-        "convert",
-        help="Convert an .ili model to JSON Schema.",
+        "convert-jsonschema",
+        aliases=["convert"],
+        help="Convert an .ili model to JSON Schema (the name `convert` is deprecated).",
     )
     convert_parser.add_argument("file", help="Path to the .ili file to convert.")
     convert_parser.add_argument(
@@ -1422,9 +1427,11 @@ def main(argv: list[str] | None = None) -> int:
     fetch_models_parser.set_defaults(func=cmd_fetch_models)
 
     import_parser = subparsers.add_parser(
-        "import",
+        "import-xtf",
+        aliases=["import"],
         help="Write the objects of XTF transfers as PostgreSQL INSERTs into the schema `convert-sql MODEL` "
-        "creates (ili2db layout: dataset, baskets, TIDs, references by t_id), as one dataset.",
+        "creates (ili2db layout: dataset, baskets, TIDs, references by t_id), as one dataset "
+        "(the name `import` is deprecated).",
     )
     import_parser.add_argument(
         "xtf", nargs="+", help="Transfer(s), e.g. data and its catalogues: references across them resolve."
@@ -1440,8 +1447,9 @@ def main(argv: list[str] | None = None) -> int:
     import_parser.set_defaults(func=cmd_import)
 
     validate_parser = subparsers.add_parser(
-        "validate",
-        help="Validate an .xtf file against an .ili file's schema.",
+        "validate-xtf",
+        aliases=["validate"],
+        help="Validate an .xtf file against an .ili file's schema (the name `validate` is deprecated).",
     )
     validate_parser.add_argument("xtf", help="Path to the .xtf file to validate.")
     validate_parser.add_argument(
@@ -1552,7 +1560,7 @@ def main(argv: list[str] | None = None) -> int:
         "--feature-schema-url",
         default=None,
         metavar="URL",
-        help="URL/path of the companion 'interlis convert' JSON Schema output for the same .ili model - "
+        help="URL/path of the companion 'interlis convert-jsonschema' JSON Schema output for the same .ili model - "
         "when given, populates the JSON-FG 'featureSchema' member (clause 13). "
         "Omitted: 'featureSchema' is not emitted.",
     )
@@ -1677,6 +1685,11 @@ def main(argv: list[str] | None = None) -> int:
     convert_cql2_parser.set_defaults(func=cmd_convert_cql2)
 
     args = parser.parse_args(argv)
+    if args.command in _DEPRECATED_COMMANDS:
+        print(
+            f"warning: 'interlis {args.command}' is deprecated, use 'interlis {_DEPRECATED_COMMANDS[args.command]}'",
+            file=sys.stderr,
+        )
     return args.func(args)
 
 

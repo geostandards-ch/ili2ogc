@@ -60,7 +60,7 @@ class ValidationIssue:
     message: str
 
     def to_diagnostic(self, *, file: str | None = None):
-        """Return this finding as a shared `Diagnostic` - feeds `interlis validate --output-format sarif`.
+        """Return this finding as a shared `Diagnostic` - feeds `interlis validate-xtf --output-format sarif`.
 
         `info` (an unresolved-but-legitimate external reference) maps to
         the SARIF `note` level; the rule id is the generic

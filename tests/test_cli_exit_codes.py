@@ -23,14 +23,14 @@ END Foo.
 
 
 def test_convert_missing_file_exits_not_found(tmp_path, capsys):
-    assert main(["convert", str(tmp_path / "nope.ili")]) == ExitCode.NOT_FOUND
+    assert main(["convert-jsonschema", str(tmp_path / "nope.ili")]) == ExitCode.NOT_FOUND
     assert capsys.readouterr().err.startswith("error: file not found:")
 
 
 def test_convert_syntax_error_exits_invalid(tmp_path, capsys):
     bad = tmp_path / "bad.ili"
     bad.write_text("not ili at all", encoding="utf-8")
-    assert main(["convert", str(bad)]) == ExitCode.INVALID
+    assert main(["convert-jsonschema", str(bad)]) == ExitCode.INVALID
     assert "syntax error" in capsys.readouterr().err
 
 
@@ -48,7 +48,7 @@ def test_validate_without_model_or_repo_exits_usage(tmp_path, capsys):
         "<HEADERSECTION SENDER='t' VERSION='2.3'/><DATASECTION/></TRANSFER>",
         encoding="utf-8",
     )
-    assert main(["validate", str(xtf)]) == ExitCode.USAGE
+    assert main(["validate-xtf", str(xtf)]) == ExitCode.USAGE
     assert "--repo is required" in capsys.readouterr().err
 
 
@@ -88,3 +88,25 @@ def test_error_writes_to_sys_stderr_looked_up_at_call_time(capsys):
     """Regression: a default param bound to `sys.stderr` at import time would miss `capsys`'s later swap."""
     error("boom")
     assert capsys.readouterr().err == "error: boom\n"
+
+
+def test_former_convert_name_still_runs_and_warns(tmp_path, capsys):
+    """The former command names stay accepted for one release and point to the new name on stderr."""
+    assert main(["convert", str(tmp_path / "nope.ili")]) == ExitCode.NOT_FOUND
+    assert "'interlis convert' is deprecated, use 'interlis convert-jsonschema'" in capsys.readouterr().err
+
+
+def test_former_validate_name_still_runs_and_warns(tmp_path, capsys):
+    assert main(["validate", str(tmp_path / "nope.xtf")]) != ExitCode.OK
+    assert "'interlis validate' is deprecated, use 'interlis validate-xtf'" in capsys.readouterr().err
+
+
+def test_former_import_name_still_runs_and_warns(tmp_path, capsys):
+    assert main(["import", str(tmp_path / "nope.xtf"), "--model", str(tmp_path / "nope.ili")]) != ExitCode.OK
+    assert "'interlis import' is deprecated, use 'interlis import-xtf'" in capsys.readouterr().err
+
+
+def test_new_command_names_do_not_warn(tmp_path, capsys):
+    main(["convert-jsonschema", str(tmp_path / "nope.ili")])
+    main(["validate-xtf", str(tmp_path / "nope.xtf")])
+    assert "deprecated" not in capsys.readouterr().err

@@ -21,10 +21,10 @@ so no grammar build step is needed.
 ```sh
 interlis fetch-models model.ili transfer.xtf -o models/                 # download the models they import
 interlis build model.ili --repo models/                                 # parse + print the built model
-interlis validate transfer.xtf --repo models/                           # check .xtf against its .ili schema
-interlis convert model.ili -o model.schema.json                         # .ili -> JSON Schema
+interlis validate-xtf transfer.xtf --repo models/                       # check .xtf against its .ili schema
+interlis convert-jsonschema model.ili -o model.schema.json             # .ili -> JSON Schema
 interlis convert-sql model.ili --dialect postgresql -o model.sql        # .ili -> SQL DDL
-interlis import transfer.xtf --model model.ili --repo models/ -o data.sql # .xtf -> INSERTs into that schema
+interlis import-xtf transfer.xtf --model model.ili --repo models/ -o data.sql # .xtf -> INSERTs into that schema
 interlis convert-jsonfg transfer.xtf --repo models/ -o out.jsonfg.json   # .xtf -> OGC JSON-FG
 interlis validate-jsonfg out.jsonfg.json --model m.ili --repo models/ # check a JSON-FG file against the model
 interlis convert-cql2 model.ili -o model.cql2.json                      # CONSTRAINT -> CQL2-JSON filters
@@ -35,6 +35,8 @@ interlis write-xtf view-model.ili source.xtf -o view.xtf                # VIEW T
 `--repo DIR` (repeatable) resolves `IMPORTS`/schema references against a
 directory of `.ili` files; `fetch-models` is the only command that goes
 online, to fill such a directory. Run `interlis <command> --help` for every option.
+The former names `convert`, `validate` and `import` still work in this release and print a
+deprecation notice; they will be removed later.
 
 ## Python API
 

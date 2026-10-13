@@ -1,7 +1,7 @@
 """Validation of a JSON-FG document against its INTERLIS model, in three layers.
 
-1. `[properties]`: each feature's `properties` against the JSON Schema `interlis convert` writes for its class,
-   geometry left out (it travels in `place`).
+1. `[properties]`: each feature's `properties` against the JSON Schema `interlis convert-jsonschema` writes for
+   its class, geometry left out (it travels in `place`).
 2. `[geometry]`: the geometry against the model - presence, JSON-FG type, dimension, `coordRefSys` and
    coordinate domain - read from the built model, not from the schema.
 3. `[constraints]` / `[references]`: what a JSON Schema cannot say - the model's constraints, evaluated by the
@@ -73,7 +73,7 @@ class _Checked:
 
 
 def _is_tolerated(error: Any) -> bool:
-    """A schema violation that `interlis validate` does not raise on the XTF: reported as a warning only.
+    """A schema violation that `interlis validate-xtf` does not raise on the XTF: reported as a warning only.
 
     A decimal value in an integer domain, and an empty list where the model wants at least one element.
     """

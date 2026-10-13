@@ -141,7 +141,7 @@ class ModelRepository:
         """Register an already-built model in the resolution cache.
 
         Same cache as `resolve_external`/`availability`. For a model built
-        elsewhere (the root model of `interlis validate`, built directly by
+        elsewhere (the root model of `interlis validate-xtf`, built directly by
         the main builder via its own `parse_file`+`build()`, not via
         `_get_table`) - avoids re-parsing/rebuilding it a second time
         during the header completeness check (`availability` below).
@@ -154,7 +154,7 @@ class ModelRepository:
 
         One of 'builtin' | 'available' | 'indexed_but_failed' | 'missing' -
         for the PROACTIVE header-vs-resolved completeness check used by
-        `interlis validate` (see
+        `interlis validate-xtf` (see
         xtf/model_resolution.py:header_completeness), independent of what
         a DATASECTION actually exercises (`resolve_external` only loads
         what's actually REFERENCED). Reuses `_get_table` (same cache as

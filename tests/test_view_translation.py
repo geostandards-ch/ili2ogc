@@ -62,7 +62,7 @@ def test_load_translation_finds_it_by_language_in_the_repo():
 
 
 def test_convert_lang_renames_defs_properties_required_and_view(capsys):
-    assert main(["convert", str(FIX / "Wanderwege_V1.ili"), "--lang", "fr", "--repo", str(FIX)]) == 0
+    assert main(["convert-jsonschema", str(FIX / "Wanderwege_V1.ili"), "--lang", "fr", "--repo", str(FIX)]) == 0
     schema = json.loads(capsys.readouterr().out)
     assert {"TronconChemin", "Indicateur", "TronconChemin_AvecIndicateur"} <= set(schema["$defs"])
     troncon = schema["$defs"]["TronconChemin"]
@@ -120,5 +120,8 @@ def test_convert_jsonfg_lang_renames_featuretype_and_property_keys_but_not_the_w
 
 
 def test_convert_lang_with_no_translation_is_a_clear_error(capsys):
-    assert main(["convert", str(FIX / "Wanderwege_V1.ili"), "--lang", "it", "--repo", str(FIX)]) == ExitCode.NOT_FOUND
+    assert (
+        main(["convert-jsonschema", str(FIX / "Wanderwege_V1.ili"), "--lang", "it", "--repo", str(FIX)])
+        == ExitCode.NOT_FOUND
+    )
     assert "no TRANSLATION OF 'Wanderwege_V1' for 'it'" in capsys.readouterr().err

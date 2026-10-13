@@ -49,7 +49,9 @@ _TRANSFER = """<?xml version="1.0" encoding="UTF-8"?>
 def _validate(tmp_path: Path, ref: str, capsys) -> tuple[int, str]:
     (tmp_path / "M.ili").write_text(_MODEL, encoding="utf-8")
     (tmp_path / "data.xtf").write_text(_TRANSFER.format(ref=ref), encoding="utf-8")
-    code = main(["validate", str(tmp_path / "data.xtf"), "--model", str(tmp_path / "M.ili"), "--repo", str(tmp_path)])
+    code = main(
+        ["validate-xtf", str(tmp_path / "data.xtf"), "--model", str(tmp_path / "M.ili"), "--repo", str(tmp_path)]
+    )
     captured = capsys.readouterr()
     return code, captured.out + captured.err
 

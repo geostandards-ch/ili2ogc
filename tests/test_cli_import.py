@@ -64,7 +64,7 @@ def _import(tmp_path: Path, capsys) -> str:
     (tmp_path / "M.ili").write_text(_MODEL, encoding="utf-8")
     (tmp_path / "data.xtf").write_text(_XTF, encoding="utf-8")
     capsys.readouterr()
-    assert main(["import", str(tmp_path / "data.xtf"), "--model", str(tmp_path / "M.ili")]) == 0
+    assert main(["import-xtf", str(tmp_path / "data.xtf"), "--model", str(tmp_path / "M.ili")]) == 0
     return capsys.readouterr().out
 
 

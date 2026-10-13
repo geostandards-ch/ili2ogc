@@ -40,7 +40,7 @@ def test_convert_surfaces_model_level_meta_attributes_as_x_meta(tmp_path, capsys
     ili_path = tmp_path / "Foo.ili"
     ili_path.write_text(_MODEL_WITH_META, encoding="utf-8")
 
-    assert main(["convert", str(ili_path)]) == 0
+    assert main(["convert-jsonschema", str(ili_path)]) == 0
     schema = json.loads(capsys.readouterr().out)
     assert schema["x-meta"] == {"technicalContact": "mailto:test@example.com", "IDGeoIV": "1.2.3"}
 

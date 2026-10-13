@@ -53,7 +53,7 @@ def _files(tmp_path: Path) -> tuple[str, str]:
 
 def test_validate_knows_the_inherited_role(tmp_path: Path, capsys):
     xtf, model = _files(tmp_path)
-    main(["validate", xtf, "--model", model, "--repo", str(tmp_path), "--verbose"])
+    main(["validate-xtf", xtf, "--model", model, "--repo", str(tmp_path), "--verbose"])
     assert "absent from schema" not in capsys.readouterr().out
 
 

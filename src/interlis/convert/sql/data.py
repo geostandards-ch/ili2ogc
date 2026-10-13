@@ -1,4 +1,4 @@
-"""`interlis import`: the objects of XTF transfers as PostgreSQL `INSERT`s into the schema `convert-sql` creates.
+"""`interlis import-xtf`: the objects of XTF transfers as PostgreSQL `INSERT`s into the schema `convert-sql` creates.
 
 ili2db's data layout: one `T_ILI2DB_DATASET` row, one `T_ILI2DB_BASKET` row per basket, each object in its class
 table with its basket and TID, references as the target's `t_id`, BAG/LIST elements (multilingual texts included)

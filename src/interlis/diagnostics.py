@@ -24,7 +24,7 @@ _SEVERITY_ORDER = {"note": 0, "warning": 1, "error": 2}
 
 # Rule ids that are NOT converter limitations (so not in
 # `diagnostic_ids.REGISTRY`, and not A/B/C-classed) but still flow through
-# the same Diagnostic/SARIF machinery - `interlis validate` data findings.
+# the same Diagnostic/SARIF machinery - `interlis validate-xtf` data findings.
 EXTRA_RULES: dict[str, str] = {
     "XTF-VALIDATION": "an .xtf value does not conform to its schema",
 }
