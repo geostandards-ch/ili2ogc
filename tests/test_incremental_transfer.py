@@ -58,11 +58,28 @@ def test_import_replays_post_put_delete(tmp_path: Path):
 
 def test_insert_only_transfer_still_creates_its_dataset(tmp_path: Path):
     xtf = _setup(tmp_path)
-    xtf.write_text(_XTF.replace(' OPERATION="UPDATE"', "").replace(' OPERATION="DELETE"', ""), encoding="utf-8")
+    xtf.write_text(
+        _XTF.replace(' OPERATION="UPDATE"', "").replace(' OPERATION="DELETE"', "").replace(' KIND="UPDATE"', ""),
+        encoding="utf-8",
+    )
     out = tmp_path / "o.sql"
     main(["import-xtf", str(xtf), "--model", str(tmp_path / "M.ili"), "-o", str(out)])
     sql = out.read_text(encoding="utf-8")
-    assert "INSERT INTO T_ILI2DB_DATASET" in sql and "409 Conflict" not in sql
+    assert "INSERT INTO T_ILI2DB_DATASET" in sql
+    assert "409 Conflict: dataset" in sql and "409 Conflict: INSERT" not in sql
+
+
+def test_update_basket_with_only_inserts_is_incremental(tmp_path: Path):
+    """A basket of KIND UPDATE is a POST on an existing dataset even when every object is an INSERT."""
+    xtf = _setup(tmp_path)
+    xtf.write_text(
+        _XTF.replace(' OPERATION="UPDATE"', "").replace(' OPERATION="DELETE"', ""),
+        encoding="utf-8",
+    )
+    out = tmp_path / "o.sql"
+    main(["import-xtf", str(xtf), "--model", str(tmp_path / "M.ili"), "--dataset", "ds", "-o", str(out)])
+    sql = out.read_text(encoding="utf-8")
+    assert "INSERT INTO T_ILI2DB_DATASET" not in sql and "404 Not Found: dataset ds" in sql
 
 
 def test_validate_skips_attribute_checks_of_a_delete(tmp_path: Path):
