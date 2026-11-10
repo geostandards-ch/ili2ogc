@@ -64,7 +64,7 @@ def test_example_1_polygon_fill_stroke():
         ],
     }
     xml = _write_rules([styling_rule])
-    assert "<se:PolygonSymbolizer>" in xml
+    assert '<se:PolygonSymbolizer uom="http://www.opengeospatial.org/se/units/metre">' in xml
     assert '"fill">#808080<' in xml
     assert '"fill-opacity">0.5<' in xml
     assert '"stroke">#202020<' in xml
@@ -79,7 +79,7 @@ def test_example_2_line_stroke_dash():
         rules[0], sign_library=_sign_library(), feature_type=graphic.Base.Name
     )
     xml = _write_rules([styling_rule])
-    assert "<se:LineSymbolizer>" in xml
+    assert '<se:LineSymbolizer uom="http://www.opengeospatial.org/se/units/metre">' in xml
     assert '"stroke">#a9a9a9<' in xml
     assert '"stroke-width">3<' in xml
     assert '"stroke-dasharray">4 2<' in xml
@@ -100,7 +100,7 @@ def test_example_4_text_label():
         rules[0], sign_library=_sign_library(), feature_type=graphic.Base.Name
     )
     xml = _write_rules([styling_rule])
-    assert "<se:TextSymbolizer>" in xml
+    assert '<se:TextSymbolizer uom="http://www.opengeospatial.org/se/units/metre">' in xml
     assert "<ogc:PropertyName>Name</ogc:PropertyName>" in xml
     assert '"font-family">Arial<' in xml
     assert '"font-size">12<' in xml
@@ -126,7 +126,7 @@ def test_example_3_point_dot_mark():
         rules[0], sign_library=_sign_library(), feature_type=graphic.Base.Name
     )
     xml = _write_rules([styling_rule])
-    assert xml.count("<se:PointSymbolizer>") == 2
+    assert xml.count('<se:PointSymbolizer uom="http://www.opengeospatial.org/se/units/metre">') == 2
     assert xml.count("<se:WellKnownName>circle</se:WellKnownName>") == 2
     assert '"fill">#ffffff<' in xml
     assert '"fill">#ffa500<' in xml
@@ -191,6 +191,6 @@ def test_example_7_multi_symbolizer_rule():
     assert '"fill">#90ee90<' in xml
     assert '"fill-opacity">0.6<' in xml
     assert '"stroke">#006400<' in xml
-    assert "<se:TextSymbolizer>" in xml
+    assert '<se:TextSymbolizer uom="http://www.opengeospatial.org/se/units/metre">' in xml
     assert "<ogc:PropertyName>FunctionTitle</ogc:PropertyName>" in xml
     assert '"font-family">Arial<' in xml

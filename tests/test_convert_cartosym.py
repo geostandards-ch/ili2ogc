@@ -38,7 +38,7 @@ def test_polyline_sign_solid_stroke_writes_valid_sld():
     black = color_to_rgb(0.0, 0.0, 0.0)
     stroke = polyline_sign_to_stroke(color=black, opacity=1.0, width=1.0, join="miter", cap="round")
     xml = _write(Symbolizer(stroke=stroke))
-    assert "<se:LineSymbolizer>" in xml
+    assert '<se:LineSymbolizer uom="http://www.opengeospatial.org/se/units/metre">' in xml
     assert '"stroke">#000000' in xml
     assert '"stroke-linejoin">miter' in xml
     assert '"stroke-linecap">round' in xml
@@ -64,7 +64,7 @@ def test_text_sign_label_from_roadsexgm2ien_streetname():
         text="Main Street", font_face="Arial", height=3.0, h_alignment="Center", v_alignment="Half"
     )
     xml = _write(Symbolizer(label=label))
-    assert "<se:TextSymbolizer>" in xml
+    assert '<se:TextSymbolizer uom="http://www.opengeospatial.org/se/units/metre">' in xml
     assert "<se:Label>Main Street</se:Label>" in xml
     assert "<se:AnchorPointX>0.5</se:AnchorPointX>" in xml
     assert "<se:AnchorPointY>0.5</se:AnchorPointY>" in xml
