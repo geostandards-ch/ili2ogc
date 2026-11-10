@@ -918,7 +918,7 @@ def cmd_import(args: argparse.Namespace) -> int:
         if not Path(xtf).exists():
             _error(f"file not found: {xtf}")
             return ExitCode.NOT_FOUND
-        transfers.append(parse_xtf(Path(xtf)))
+        transfers.append(Path(xtf) if args.stream else parse_xtf(Path(xtf)))
     names = schema.class_table_names
     by_qualified = {
         name: names[id(cls)]
@@ -936,17 +936,19 @@ def cmd_import(args: argparse.Namespace) -> int:
         table = names.get(id(cls)) or by_qualified.get(home.qualified_name_of(cls) or "")
         return (cls, table, home) if table else None
 
-    sql, counts, notes = transfer_inserts(
-        transfers,
-        schema.tables,
-        table_of,
-        dataset=args.dataset or Path(args.xtf[0]).stem,
-        attachment=", ".join(Path(x).name for x in args.xtf),
-    )
-    if args.output:
-        Path(args.output).write_text(sql, encoding="utf-8")
+    options = {
+        "dataset": args.dataset or Path(args.xtf[0]).stem,
+        "attachment": ", ".join(Path(x).name for x in args.xtf),
+    }
+    if args.stream:
+        with open(args.output, "w", encoding="utf-8") if args.output else contextlib.nullcontext(sys.stdout) as out:
+            _sql, counts, notes = transfer_inserts(transfers, schema.tables, table_of, out=out, **options)
     else:
-        sys.stdout.write(sql)
+        sql, counts, notes = transfer_inserts(transfers, schema.tables, table_of, **options)
+        if args.output:
+            Path(args.output).write_text(sql, encoding="utf-8")
+        else:
+            sys.stdout.write(sql)
     for note in notes:
         print(f"note {note}", file=sys.stderr)
     print(", ".join(f"{n} {t}" for t, n in counts.items()), file=sys.stderr)
@@ -1561,6 +1563,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     import_parser.add_argument(
         "xtf", nargs="+", help="Transfer(s), e.g. data and its catalogues: references across them resolve."
+    )
+    import_parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Read the transfers twice and write each statement as it is produced (flat memory, about twice the "
+        "time). The SQL is identical.",
     )
     import_parser.add_argument(
         "--crs",

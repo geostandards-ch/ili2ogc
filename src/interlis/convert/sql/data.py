@@ -9,13 +9,15 @@ foreign keys are DEFERRABLE, so rows go in any order inside the transaction.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from typing import Any
+from itertools import chain
+from pathlib import Path
+from typing import Any, TextIO
 
 from interlis.convert.jsonfg import members_value
 from interlis.metamodel.instance import MetaInstance
-from interlis.xtf.parse import XtfTransfer
+from interlis.xtf.parse import XtfTransfer, iter_events
 
 from .identifiers import BASKET_COLUMN, OID_COLUMN, SEQ_COLUMN, TID_COLUMN, _quote
 from .model import Column, Table
@@ -131,6 +133,21 @@ class _Row:
     operation: str = "INSERT"
 
 
+class _Sink:
+    """The `statements` list of a streamed import: each statement goes straight to the output file."""
+
+    def __init__(self, out: TextIO):
+        self._out = out
+
+    def append(self, statement: str) -> None:
+        self._out.write(statement + "\n")
+
+    def __iadd__(self, statements: list[str]) -> _Sink:
+        for statement in statements:
+            self.append(statement)
+        return self
+
+
 @dataclass
 class _DeleteAnywhere:
     """A `DeleteObject`: remove the object with this TID, whichever class table holds it."""
@@ -152,14 +169,18 @@ def _delete_anywhere(tables: list[Table], tid: str | None, scope: str) -> str:
 
 
 def transfer_inserts(
-    transfers: list[XtfTransfer],
+    transfers: list[XtfTransfer] | list[Path],
     tables: list[Table],
     table_of: Callable[[str], tuple[MetaInstance, str, Any] | None],
     *,
     dataset: str,
     attachment: str,
+    out: TextIO | None = None,
 ) -> tuple[str, dict[str, int], list[str]]:
     """Return `(sql, rows per table, notes)` for every object of `transfers`, as one dataset.
+
+    `transfers` are parsed transfers, or paths read in two passes (flat memory: one pass numbers the objects and
+    indexes their TIDs, the second renders each statement straight into `out`, which then gets the SQL, not `sql`).
 
     A transfer holding `UPDATE`/`DELETE` objects, or a basket of KIND `UPDATE`/`INCREMENTAL`, is incremental and is
     replayed like a sequence of REST calls on an EXISTING dataset (`dataset` must name it): `INSERT` = POST (409 if
@@ -170,55 +191,82 @@ def transfer_inserts(
     embedded association roles), `None` when that class has no table here.
     A reference to an object absent from the transfers stays NULL (noted).
     """
+    if transfers and isinstance(transfers[0], Path) and out is None:
+        raise ValueError("reading paths requires an `out` stream")
+
+    def events() -> Iterator[tuple[str, Any]]:
+        if out is not None:
+            yield from chain.from_iterable(iter_events(path) for path in transfers)
+            return
+        for transfer in transfers:
+            for basket in transfer.baskets:
+                yield "basket", basket
+                for obj in basket.objects:
+                    yield "object", (basket, obj)
+
     by_name = {t.name: t for t in tables}
     children_of: dict[str, list[Table]] = {}
     for t in tables:
         if t.parent:
             children_of.setdefault(t.parent, []).append(t)
-    counter = 0
     notes: list[str] = []
     skipped: dict[str, int] = {}
-
-    def next_id() -> int:
-        nonlocal counter
-        counter += 1
-        return counter
-
-    dataset_id = next_id()
+    dataset_id = 1
     basket_rows: list[tuple[int, str, str]] = []
-    rows: list[_Row | _DeleteAnywhere] = []
     located: dict[str, tuple[str, int]] = {}  # TID -> (table, t_id)
-    incremental = any(
-        (b.kind or "").upper() in ("UPDATE", "INCREMENTAL")
-        or any(o.operation in ("UPDATE", "DELETE") for o in b.objects)
-        for t in transfers
-        for b in t.baskets
-    )
-    for transfer in transfers:
-        for basket in transfer.baskets:
-            basket_id = next_id()
-            basket_rows.append((basket_id, basket.qualified_topic, basket.bid))
-            for obj in basket.objects:
-                if obj.operation == "DELETE" and not obj.qualified_class:
-                    rows.append(_DeleteAnywhere(obj.tid))  # a DeleteObject: the class is unknown, search every table
-                    continue
-                found = table_of(obj.qualified_class)
-                if found is None or found[1] not in by_name:
-                    skipped[obj.qualified_class] = skipped.get(obj.qualified_class, 0) + 1
-                    continue
-                cls, table_name, home_table = found
-                operation = obj.operation or "INSERT"
-                values = {} if operation == "DELETE" else members_value(cls, obj.attributes, symbol_table=home_table)
-                row = _Row(by_name[table_name], next_id(), basket_id, values, tid=obj.tid, operation=operation)
-                rows.append(row)
-                if obj.tid is not None and operation == "INSERT":
-                    located[obj.tid] = (table_name, row.t_id)
-                if operation != "DELETE":
-                    _add_children(row, children_of, next_id)
+    incremental = False
+    counter = 0
+
+    def walk() -> Iterator[_Row | _DeleteAnywhere]:
+        """Every row of the transfers in order, numbered as a single pass would: the same on each call."""
+        nonlocal counter, incremental
+        counter = dataset_id
+        basket_rows.clear()
+        skipped.clear()
+
+        def next_id() -> int:
+            nonlocal counter
+            counter += 1
+            return counter
+
+        basket_id = dataset_id
+        for kind, payload in events():
+            if kind == "basket":
+                basket = payload
+                basket_id = next_id()
+                basket_rows.append((basket_id, basket.qualified_topic, basket.bid))
+                incremental = incremental or (basket.kind or "").upper() in ("UPDATE", "INCREMENTAL")
+                continue
+            _basket, obj = payload
+            if obj.operation == "DELETE" and not obj.qualified_class:
+                incremental = True
+                yield _DeleteAnywhere(obj.tid)  # a DeleteObject: the class is unknown, search every table
+                continue
+            found = table_of(obj.qualified_class)
+            if found is None or found[1] not in by_name:
+                skipped[obj.qualified_class] = skipped.get(obj.qualified_class, 0) + 1
+                continue
+            cls, table_name, home_table = found
+            operation = obj.operation or "INSERT"
+            incremental = incremental or operation in ("UPDATE", "DELETE")
+            values = {} if operation == "DELETE" else members_value(cls, obj.attributes, symbol_table=home_table)
+            row = _Row(by_name[table_name], next_id(), basket_id, values, tid=obj.tid, operation=operation)
+            if obj.tid is not None and operation == "INSERT":
+                located[obj.tid] = (table_name, row.t_id)
+            if operation != "DELETE":
+                _add_children(row, children_of, next_id)
+            yield row
+
+    if out is None:
+        rows = list(walk())
+    else:
+        for _row in walk():  # first pass: numbering and TID index only, no row kept
+            pass
     for qualified_class, count in sorted(skipped.items()):
         notes.append(f"{count} {qualified_class} object(s) skipped: no table for that class in this schema")
 
-    statements = [
+    statements: Any = _Sink(out) if out is not None else []
+    statements += [
         "BEGIN;",
         "CREATE TEMP TABLE _ili_import ON COMMIT DROP AS SELECT nextval('t_ili2db_seq') AS base;",
         f"SELECT setval('t_ili2db_seq', {_BASE} + {counter});",
@@ -343,7 +391,7 @@ def transfer_inserts(
                 insert(child, basket)
         counts[row.table.name] = counts.get(row.table.name, 0) + 1
 
-    for row in rows:
+    for row in rows if out is None else walk():
         if isinstance(row, _DeleteAnywhere):
             if row.tid is None:
                 notes.append("a DeleteObject without a TID was skipped")
@@ -355,7 +403,7 @@ def transfer_inserts(
     statements.append("COMMIT;")
     if unresolved:
         notes.append(f"{unresolved} reference(s) to an object not in these transfers left NULL")
-    return "\n".join(statements) + "\n", counts, notes
+    return ("" if out is not None else "\n".join(statements) + "\n"), counts, notes
 
 
 def _add_children(row: _Row, children_of: dict[str, list[Table]], next_id: Callable[[], int]) -> None:
