@@ -38,3 +38,18 @@ def test_numeric_range_check_and_precision(tmp_path: Path):
 
 def test_binary_blackbox_is_bytea(tmp_path: Path):
     assert '"data" bytea' in _table(tmp_path)
+
+
+def test_structured_domain_sits_next_to_the_check_string(tmp_path: Path):
+    from conftest import build_from_text
+
+    from interlis.builder.repository import ModelRepository
+    from interlis.convert.sql.tables import build_tables
+    from interlis.xtf.schema import resolve_class
+
+    builder = build_from_text(_MODEL)
+    cls = resolve_class("M.T.A", symbol_table=builder.symbol_table, repository=ModelRepository([tmp_path]))
+    columns = {c.name: c for c in build_tables([cls], symbol_table=builder.symbol_table)[0].columns}
+    assert columns["kind"].domain.enum_values == ("high", "high.extreme", "high.very", "low")
+    assert (columns["width"].domain.minimum, columns["width"].domain.maximum) == ("0.00", "1000.00")
+    assert columns["data"].domain is None

@@ -22,6 +22,8 @@ from interlis.xtf.schema import (
     line_coord_type,
 )
 
+from .model import ColumnDomain
+
 _REPOSITORY: ContextVar[ModelRepository | None] = ContextVar("_REPOSITORY", default=None)
 
 
@@ -135,6 +137,18 @@ def _decimal_precision(min_raw: str | None, max_raw: str | None) -> tuple[int, i
     scale = max(len(frac) for _, _, frac in parts)
     integer_digits = max(len(whole.lstrip("0")) or 1 for whole, _, _ in parts)
     return integer_digits + scale, scale
+
+
+def _column_domain(resolved: ResolvedAttribute) -> ColumnDomain | None:
+    """The structured twin of `_domain_check`: same enumeration paths / numeric bounds, nothing rendered."""
+    inst = resolved.type_instance
+    if resolved.type_kind == "NumType" and inst is not None:
+        low, high = _numeric_bound(getattr(inst, "Min", None)), _numeric_bound(getattr(inst, "Max", None))
+        return ColumnDomain(minimum=low, maximum=high) if low is not None and high is not None else None
+    if resolved.type_kind == "EnumType" and inst is not None:
+        values = enum_values(inst)
+        return ColumnDomain(enum_values=tuple(sorted(values))) if values else None
+    return None
 
 
 def _domain_check(resolved: ResolvedAttribute) -> str | None:
