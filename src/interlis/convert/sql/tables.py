@@ -8,6 +8,7 @@ UNIQUE/CHECK/FOREIGN KEY constraints.
 from __future__ import annotations
 
 from interlis.builder.forward_refs import SymbolTable
+from interlis.builder.repository import ModelRepository
 from interlis.convert.geometry_kinds import GEOMETRY_KINDS
 from interlis.diagnostic_ids import note as _diag
 from interlis.metamodel.instance import MetaInstance
@@ -31,7 +32,7 @@ from interlis.xtf.schema import (
 from .expressions import _MAX_STRUCT_FLATTEN_DEPTH, _expression_to_sql, _UnsupportedCheckExpression
 from .identifiers import OID_COLUMN, RESERVED_COLUMNS, SEQ_COLUMN, _dedup_name, _sql_identifier, _truncate_identifier
 from .model import CheckConstraint, Column, ForeignKey, Table, UniqueConstraint
-from .types import _domain_check, _geometry_column_info, _scalar_sql_type
+from .types import GeometryColumnInfo, _domain_check, _geometry_column_info, _scalar_sql_type, crs_repository
 
 
 def _avoid_identity_collision(columns: list[Column]) -> dict[str, str]:
@@ -55,6 +56,14 @@ def _avoid_identity_collision(columns: list[Column]) -> dict[str, str]:
         renamed[column.name] = new_name
         column.name = new_name
     return renamed
+
+
+def _geometry_notes(label: str, info: GeometryColumnInfo) -> list[str]:
+    """The `-- NOTE`s for one geometry attribute: why it has no column, and any CRS-annotation finding."""
+    findings = list(info.warnings)
+    if info.problem is not None:
+        findings.insert(0, info.problem)
+    return [_diag(rule, f"{label}: {message}") for rule, message in findings]
 
 
 def _columns_for_class(
@@ -147,12 +156,11 @@ def _columns_for_class(
             # is one Multi* column, not a child table of single parts.
             multi_geometry = multi_geometry_element(resolved.type_instance)
             if multi_geometry is not None:
-                sfa_type, srid, reason = _geometry_column_info(multi_geometry)
-                if sfa_type is None:
-                    notes.append(
-                        _diag("SQL-GEOM-NO-CRS", f"{label}: {reason} - provide the geometry base model via --repo")
-                    )
+                info = _geometry_column_info(multi_geometry, symbol_table)
+                notes.extend(_geometry_notes(label, info))
+                if info.sfa_type is None:
                     continue
+                sfa_type, srid = info.sfa_type, info.srid
                 if not sfa_type.startswith("Multi"):
                     sfa_type = f"Multi{sfa_type}"
                 if multi_geometry.type_kind == "LineType" and line_allows_arcs(multi_geometry.type_instance):
@@ -251,12 +259,11 @@ def _columns_for_class(
             continue
 
         if resolved.type_kind in GEOMETRY_KINDS:
-            sfa_type, srid, reason = _geometry_column_info(resolved)
-            if sfa_type is None:
-                notes.append(
-                    _diag("SQL-GEOM-NO-CRS", f"{label}: {reason} - provide the geometry base model via --repo")
-                )
+            info = _geometry_column_info(resolved, symbol_table)
+            notes.extend(_geometry_notes(label, info))
+            if info.sfa_type is None:
                 continue
+            sfa_type, srid = info.sfa_type, info.srid
             if resolved.type_kind == "LineType" and line_allows_arcs(resolved.type_instance):
                 notes.append(_arcs_note(label))
             columns.append(
@@ -369,10 +376,10 @@ def _build_child_table(
         )
     elif base_kind in GEOMETRY_KINDS:
         synthetic = ResolvedAttribute(attr=base_type, type_instance=base_type, type_kind=base_kind, mandatory=True)
-        sfa_type, srid, reason = _geometry_column_info(synthetic)
-        if sfa_type is None:
-            return None, {}, reason, []
-        columns.append(Column("value", sql_type="", nullable=False, geometry_type=sfa_type, srid=srid))
+        info = _geometry_column_info(synthetic, symbol_table)
+        if info.sfa_type is None:
+            return None, {}, info.problem[1] if info.problem else "no geometry column", []
+        columns.append(Column("value", sql_type="", nullable=False, geometry_type=info.sfa_type, srid=info.srid))
     else:
         synthetic = ResolvedAttribute(attr=base_type, type_instance=base_type, type_kind=base_kind, mandatory=True)
         scalar_type = _scalar_sql_type(synthetic)
@@ -806,6 +813,26 @@ def _split_polymorphic_fk(
 
 
 def build_tables(
+    classes: list[MetaInstance],
+    symbol_table: SymbolTable | None = None,
+    *,
+    class_symbol_tables: dict[int, SymbolTable] | None = None,
+    class_table_names: dict[int, str] | None = None,
+    name_tables: tuple[SymbolTable, ...] = (),
+    repository: ModelRepository | None = None,
+) -> list[Table]:
+    """`_build_tables` with `repository` (whose imported models' `CONTEXT`s bind generic geometry domains) in scope."""
+    with crs_repository(repository):
+        return _build_tables(
+            classes,
+            symbol_table,
+            class_symbol_tables=class_symbol_tables,
+            class_table_names=class_table_names,
+            name_tables=name_tables,
+        )
+
+
+def _build_tables(
     classes: list[MetaInstance],
     symbol_table: SymbolTable | None = None,
     *,

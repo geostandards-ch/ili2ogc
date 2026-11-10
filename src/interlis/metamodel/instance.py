@@ -47,6 +47,9 @@ class MetaInstance(BaseModel):
     # attribute path of the REQUIRED IN clause (None when it is not a plain
     # `Name->Name` path) - IlisMeta16 itself carries the required classes but
     # not this path.
+    # MetaAttribute case only: source lines between the `!!@Name=Value` comment and the construct it was attached to
+    # (1 = directly above it).
+    _line_gap: int | None = PrivateAttr(default=None)
     _required_attribute_paths: "list[list[str] | None]" = PrivateAttr(default_factory=list)
 
     def __repr__(self) -> str:

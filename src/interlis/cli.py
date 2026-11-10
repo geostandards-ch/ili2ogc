@@ -565,6 +565,7 @@ def _sql_schema(args: argparse.Namespace, bag: DiagnosticBag) -> SimpleNamespace
         class_symbol_tables=class_symbol_tables,
         class_table_names=class_table_names,
         name_tables=tuple({id(t): t for t in (repository.loaded_models() if repository else {}).values()}.values()),
+        repository=repository,
     )
     return SimpleNamespace(
         path=path,

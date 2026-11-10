@@ -23,7 +23,6 @@ def test_h1_xtf_objects_can_be_streamed():
     assert hasattr(xtf_parse, "iter_objects")
 
 
-@pytest.mark.xfail(strict=True, reason="H2: SQL ignores the CONTEXT rebinding that JSON-FG follows to a CRS")
 def test_h2_sql_follows_the_same_context_crs_as_jsonfg(tmp_path: Path):
     d = FIX / "solid3d"
     out = tmp_path / "o.sql"
@@ -58,7 +57,7 @@ def test_h3_coord_domain_without_crs_is_never_guessed(tmp_path: Path):
     )
     out = tmp_path / "o.sql"
     main(["convert-sql", str(tmp_path / "M.ili"), "--repo", str(tmp_path), "-o", str(out)])
-    assert "SQL-GEOM-NO-CRS" in out.read_text(encoding="utf-8")
+    assert "SQL-GEOM-CRS-UNDECLARED" in out.read_text(encoding="utf-8")
 
 
 def test_h4_arc_geometry_is_stroked_on_load_not_dropped():

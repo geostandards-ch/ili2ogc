@@ -73,8 +73,10 @@ from interlis.convert.view_formation import (
     inspection_reading,
     is_standard_count_call,
 )
+from interlis.diagnostic_ids import REGISTRY
 from interlis.metamodel.instance import MetaInstance
 from interlis.runtime.parse import unquote_interlis_string
+from interlis.xtf.crs import reason_rule, resolve_crs
 from interlis.xtf.parse import RawNode, XtfObject, XtfTransfer
 from interlis.xtf.schema import (
     ResolvedAttribute,
@@ -83,7 +85,6 @@ from interlis.xtf.schema import (
     is_class_compatible,
     is_integer_range,
     line_coord_type,
-    meta_value,
     resolve_attribute,
     resolve_class,
     schema_members_of,
@@ -106,7 +107,6 @@ CONF_CORE = f"http://www.opengis.net/spec/json-fg-1/{JSON_FG_VERSION}/conf/core"
 CONF_TYPES_SCHEMAS = f"http://www.opengis.net/spec/json-fg-1/{JSON_FG_VERSION}/conf/types-schemas"
 CONF_CIRCULAR_ARCS = f"http://www.opengis.net/spec/json-fg-1/{JSON_FG_VERSION}/conf/circular-arcs"
 CONF_POLYHEDRA = f"http://www.opengis.net/spec/json-fg-1/{JSON_FG_VERSION}/conf/polyhedra"
-CRS_URI_PREFIX = "http://www.opengis.net/def/crs/EPSG/0/"
 
 _SCALAR_KINDS = {"NumType", "TextType", "EnumType", "BooleanType", "FormattedType", "BlackboxType"}
 # JSON-FG Part 1 Core §7.5 (conformance class "circular-arcs") - geometry
@@ -193,6 +193,9 @@ _UNMAPPED: ContextVar[list[UnmappedValue] | None] = ContextVar("_UNMAPPED", defa
 _FEATURE: ContextVar[tuple[str, str | None]] = ContextVar("_FEATURE", default=("?", None))
 
 
+_CRS_SEEN: ContextVar[set[tuple[str, str]] | None] = ContextVar("_CRS_SEEN", default=None)
+
+
 def _record(rule: str, attr: MetaInstance, detail: str) -> None:
     sink = _UNMAPPED.get()
     if sink is not None:
@@ -212,9 +215,11 @@ def _feature_scope(feature_type: str, tid: str | None) -> Iterator[None]:
 @contextlib.contextmanager
 def _recording(sink: list[UnmappedValue] | None) -> Iterator[None]:
     token = _UNMAPPED.set(sink)
+    seen_token = _CRS_SEEN.set(set())
     try:
         yield
     finally:
+        _CRS_SEEN.reset(seen_token)
         _UNMAPPED.reset(token)
 
 
@@ -718,109 +723,25 @@ def _line_geometry(resolved: ResolvedAttribute, node: RawNode) -> dict[str, Any]
     return {"type": multi_type, "coordinates": values}
 
 
-def _context_instances(symbol_table: SymbolTable | None, repository: ModelRepository | None) -> list[MetaInstance]:
-    """Every `Context` (`CONTEXT <Name> = ...;`) declared directly in a MODEL actually IMPORTed, deduplicated.
-
-    Scoped to `Model.Element` of the SPECIFIC model each name in
-    `repository.loaded_models()` was resolved through (never a blanket
-    scan of every instance in that model's file) - a file can declare
-    SEVERAL sibling `MODEL`s sharing one symbol table (e.g. swisstopo's
-    `CHBase_Part7_CONTEXT_V2.ili`: `ContextCH_V2`/`ContextCHLV03_V2`/
-    `ContextCHLV95_V2` in one file), and only the model actually named in
-    an `IMPORTS` clause should contribute its `CONTEXT` rebindings - an
-    unrelated sibling's (possibly ambiguous, `OR`-joined) rebinding for
-    the SAME generic domain must never shadow it.
-    """
-    models: list[MetaInstance] = []
-    if symbol_table is not None:
-        models.extend(
-            inst
-            for inst in symbol_table.all_registered()
-            if isinstance(inst, MetaInstance) and inst._qualified_class == "IlisMeta16.ModelData.Model"
-        )
-    if repository is not None:
-        for model_name, table in repository.loaded_models().items():
-            if table is None:
-                continue
-            model = table.resolve(model_name, kind_hint="Model")
-            if isinstance(model, MetaInstance):
-                models.append(model)
-    seen: set[int] = set()
-    contexts: list[MetaInstance] = []
-    for model in models:
-        for element in getattr(model, "Element", None) or []:
-            if (
-                isinstance(element, MetaInstance)
-                and element._qualified_class == "IlisMeta16.ModelData.Context"
-                and id(element) not in seen
-            ):
-                seen.add(id(element))
-                contexts.append(element)
-    return contexts
-
-
-def _context_concrete_domain(
-    coord_type: MetaInstance | None, symbol_table: SymbolTable | None, repository: ModelRepository | None
-) -> MetaInstance | None:
-    """Rebind a GENERIC domain (e.g. `Geometry_V2.Coord3`) via a `CONTEXT default = Generic=Concrete;` clause.
-
-    `None` (never a guessed default) when `coord_type` is not the
-    `GenericDomain` of any built `Context`, or its pair-group offers
-    several OR-ed concrete alternatives (ambiguous, e.g. `ContextCH_V2`'s
-    `Coord3=GeometryCHLV03_V2.Coord3 OR GeometryCHLV95_V2.Coord3`) - same
-    no-default policy as `_crs_uri` itself.
-    """
-    if coord_type is None:
-        return None
-    for context in _context_instances(symbol_table, repository):
-        for generic_def in getattr(context, "GenericDef", None) or []:
-            domains = getattr(generic_def, "GenericDomain", None) or []
-            if not domains or domains[0] is not coord_type:
-                continue
-            links = getattr(generic_def, "ConcreteForGeneric", None) or []
-            concretes = [
-                c
-                for link in links
-                for c in (getattr(link, "ConcreteDomain", None) or [])
-                if isinstance(c, MetaInstance)
-            ]
-            return concretes[0] if len(concretes) == 1 else None
-    return None
-
-
-def _crs_uri(
+def _resolved_crs_uri(
     coord_type: MetaInstance | None,
+    attr: MetaInstance,
     *,
-    symbol_table: SymbolTable | None = None,
-    repository: ModelRepository | None = None,
-    _seen: set[int] | None = None,
+    symbol_table: SymbolTable | None,
+    repository: ModelRepository | None,
 ) -> str | None:
-    """Resolve a CoordType's `!!@CRS=EPSG:<code>` meta-attribute (eCH-0117) into a JSON-FG `coordRefSys` URI.
-
-    `None` (never a guessed default) when the meta-attribute is absent (and
-    no `CONTEXT` rebinding resolves it either - see
-    `_context_concrete_domain`) or not an `EPSG:<digits>` value - Swiss
-    data is never WGS84, so omitting `coordRefSys` would make a JSON-FG
-    reader assume CRS84/CRS84h by the spec's own default-CRS rule (a real
-    misrepresentation, not just a gap). Requires
-    `ModelRepository._get_table` to propagate `meta_attributes` into
-    imported models (builder/repository.py) - without that fix this
-    resolves to `None` for virtually every real Swiss geometry attribute,
-    since they import their CoordType rather than declaring it locally.
-    `_seen` guards against a `CONTEXT` rebinding cycle spanning more than
-    one hop (A -> B -> A) - not just the direct A -> A case.
-    """
-    raw = meta_value(coord_type, "CRS")
-    if raw is None:
-        concrete = _context_concrete_domain(coord_type, symbol_table, repository)
-        seen = _seen or set()
-        if concrete is None or concrete is coord_type or id(concrete) in seen:
-            return None
-        return _crs_uri(concrete, symbol_table=symbol_table, repository=repository, _seen=seen | {id(coord_type)})
-    scheme, _, code = raw.partition(":")
-    if scheme.strip().upper() != "EPSG" or not code.strip().isdigit():
-        return None
-    return f"{CRS_URI_PREFIX}{code.strip()}"
+    """The `coordRefSys` URI of `coord_type`, recording once per attribute why it has none (or what looked odd)."""
+    resolution = resolve_crs(coord_type, symbol_table=symbol_table, repository=repository)
+    findings = list(resolution.warnings)
+    if resolution.reason is not None:
+        findings.append((reason_rule(resolution.reason, "JSONFG"), resolution.detail))
+    seen = _CRS_SEEN.get()
+    for rule, detail in findings:
+        key = (rule, f"{getattr(attr, 'Name', '?')}:{detail}")
+        if seen is not None and key not in seen:
+            seen.add(key)
+            _record(rule, attr, detail)
+    return resolution.uri
 
 
 def _place_and_crs(
@@ -841,7 +762,7 @@ def _place_and_crs(
         return None
     if geometry is None:
         return None
-    crs = _crs_uri(coord_type, symbol_table=symbol_table, repository=repository)
+    crs = _resolved_crs_uri(coord_type, resolved.attr, symbol_table=symbol_table, repository=repository)
     return None if crs is None else (geometry, crs)
 
 
@@ -882,7 +803,9 @@ def _place_and_crs_via(
     ) -> tuple[dict[str, Any], str] | None:
         if not isinstance(resolved.type_instance, MetaInstance) or not isinstance(value, dict):
             return None
-        crs = _crs_uri(coord_type_fn(resolved.type_instance), symbol_table=symbol_table, repository=repository)
+        crs = _resolved_crs_uri(
+            coord_type_fn(resolved.type_instance), resolved.attr, symbol_table=symbol_table, repository=repository
+        )
         if crs is None:
             return None
         geometry = geometry_fn(resolved.type_instance, value)
@@ -2659,6 +2582,9 @@ def incremental_diagnostic(transfer: XtfTransfer, *, file: str | None = None):
     )
 
 
+_REPO_HELP = frozenset({"JSONFG-MULTIVALUE-UNRESOLVED", "JSONFG-GEOM-NO-CRS"})
+
+
 def collect_diagnostics(unmapped: list[UnmappedValue], *, file: str | None = None):
     """One `Diagnostic` per value `transfer_to_feature_collection` recorded in its `unmapped` list.
 
@@ -2668,14 +2594,14 @@ def collect_diagnostics(unmapped: list[UnmappedValue], *, file: str | None = Non
 
     out: list[Diagnostic] = []
     for event in unmapped:
-        resolvable = event.rule == "JSONFG-MULTIVALUE-UNRESOLVED"
+        resolvable = REGISTRY[event.rule][0] == "C"
         out.append(
             Diagnostic(
                 "warning" if resolvable else "note",
                 event.rule,
                 f"{event.element_path}: {event.detail}",
                 Location(file=file, element_path=event.element_path, tid=event.tid),
-                help="pass its model's directory to --repo" if resolvable else None,
+                help="pass its model's directory to --repo" if event.rule in _REPO_HELP else None,
             )
         )
     return out
