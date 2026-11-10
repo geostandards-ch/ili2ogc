@@ -21,10 +21,10 @@ so no grammar build step is needed.
 ```sh
 interlis fetch-models model.ili transfer.xtf -o models/                 # download the models they import
 interlis build model.ili --repo models/                                 # parse + print the built model
-interlis validate-xtf transfer.xtf --repo models/                       # check .xtf against its .ili schema
+interlis validate-xtf transfer.xtf --repo models/                       # check .xtf against its .ili schema (--stream: flat memory)
 interlis convert-jsonschema model.ili -o model.schema.json             # .ili -> JSON Schema
 interlis convert-sql model.ili --dialect postgresql -o model.sql        # .ili -> SQL DDL
-interlis import-xtf transfer.xtf --model model.ili --repo models/ -o data.sql # .xtf -> INSERTs (an incremental transfer: POST/PUT/DELETE on an existing --dataset)
+interlis import-xtf transfer.xtf --model model.ili --repo models/ -o data.sql # .xtf -> INSERTs (--stream: flat memory; an incremental transfer: POST/PUT/DELETE on an existing --dataset)
 interlis convert-jsonfg transfer.xtf --repo models/ -o out.jsonfg.json   # .xtf -> OGC JSON-FG (--stream: flat memory)
 interlis validate-jsonfg out.jsonfg.json --model m.ili --repo models/ # check a JSON-FG file against the model
 interlis convert-cql2 model.ili -o model.cql2.json                      # CONSTRAINT -> CQL2-JSON filters
