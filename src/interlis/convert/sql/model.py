@@ -10,6 +10,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
+@dataclass(frozen=True)
+class ColumnDomain:
+    """A column's value domain: the closed enumeration paths, or the numeric bounds (as written in the model)."""
+
+    enum_values: tuple[str, ...] | None = None
+    minimum: str | None = None
+    maximum: str | None = None
+
+
 @dataclass
 class Column:
     name: str
@@ -29,6 +38,8 @@ class Column:
     check: str | None = None
     """A value-domain CHECK on this column alone, `{col}` standing for its quoted name (filled at render time, so a
     later rename still applies)."""
+    domain: ColumnDomain | None = None
+    """The same value domain as `check`, structured: what a consumer other than the SQL renderer reads."""
     source: tuple[str, ...] = ()
     """The attribute path this column holds, from its table's class (or BAG element): `("ModInfo", "ValidFrom")` for a
     flattened STRUCTURE, empty for a technical column or a BAG element's own value - what `import` reads data from."""

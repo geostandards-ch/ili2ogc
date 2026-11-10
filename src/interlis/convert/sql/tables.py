@@ -32,7 +32,14 @@ from interlis.xtf.schema import (
 from .expressions import _MAX_STRUCT_FLATTEN_DEPTH, _expression_to_sql, _UnsupportedCheckExpression
 from .identifiers import OID_COLUMN, RESERVED_COLUMNS, SEQ_COLUMN, _dedup_name, _sql_identifier, _truncate_identifier
 from .model import CheckConstraint, Column, ForeignKey, Table, UniqueConstraint
-from .types import GeometryColumnInfo, _domain_check, _geometry_column_info, _scalar_sql_type, crs_repository
+from .types import (
+    GeometryColumnInfo,
+    _column_domain,
+    _domain_check,
+    _geometry_column_info,
+    _scalar_sql_type,
+    crs_repository,
+)
 
 
 def _avoid_identity_collision(columns: list[Column]) -> dict[str, str]:
@@ -287,6 +294,7 @@ def _columns_for_class(
                     scalar_type,
                     nullable=not resolved.mandatory,
                     check=_domain_check(resolved),
+                    domain=_column_domain(resolved),
                     ili_name=ili_name(attr),
                     source=here,
                 )
@@ -385,7 +393,11 @@ def _build_child_table(
         scalar_type = _scalar_sql_type(synthetic)
         if scalar_type is None:
             return None, {}, f"unsupported element type {base_kind!r}", []
-        columns.append(Column("value", scalar_type, nullable=False, check=_domain_check(synthetic)))
+        columns.append(
+            Column(
+                "value", scalar_type, nullable=False, check=_domain_check(synthetic), domain=_column_domain(synthetic)
+            )
+        )
 
     renamed = _avoid_identity_collision(columns)
     checks: list[CheckConstraint] = []
