@@ -200,3 +200,15 @@ def test_convert_jsonfg_geojson_request_bodies(tmp_path: Path):
         "geometry": {"type": "Point", "coordinates": [2600000.0, 1200000.0]},
         "properties": {"name": "n"},
     }
+
+
+def test_convert_sql_basket_trigger_is_opt_in_and_postgresql_only(tmp_path: Path):
+    (tmp_path / "M.ili").write_text(_MODEL, encoding="utf-8")
+    plain, triggered = tmp_path / "p.sql", tmp_path / "t.sql"
+    main(["convert-sql", str(tmp_path / "M.ili"), "-o", str(plain)])
+    main(["convert-sql", str(tmp_path / "M.ili"), "--basket-trigger", "-o", str(triggered)])
+    assert "t_ili2db_default_basket" not in plain.read_text(encoding="utf-8")
+    sql = triggered.read_text(encoding="utf-8")
+    assert 'BEFORE INSERT ON "a"' in sql
+    assert "t_ili2db_default_basket('M.T')" in sql
+    assert main(["convert-sql", str(tmp_path / "M.ili"), "--dialect", "gpkg", "--basket-trigger"]) != 0

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from interlis.runtime.parse import read_ili_text
 
-from .identifiers import OID_COLUMN, SEQUENCE
+from .identifiers import BASKET_COLUMN, OID_COLUMN, SEQUENCE, _truncate_identifier
 from .model import Table
 
 # (name, PostgreSQL body, GeoPackage body) - ili2pg 5.5 / ili2gpkg definitions.
@@ -136,6 +136,32 @@ def meta_table_ddl(*, gpkg: bool) -> list[str]:
             "REFERENCES T_ILI2DB_DATASET DEFERRABLE INITIALLY DEFERRED;"
         )
     statements.append("CREATE INDEX T_ILI2DB_BASKET_dataset_idx ON T_ILI2DB_BASKET (dataset);")
+    return statements
+
+
+def basket_trigger_ddl(tables: list[Table]) -> list[str]:
+    """A `BEFORE INSERT` trigger per class table filling a NULL `t_basket` with the newest basket of its topic.
+
+    A client that cannot name the basket (an OGC API Features POST) still lands in the right one; with no basket
+    for the topic the insert fails with a message saying so, instead of a bare NOT NULL violation.
+    """
+    topic_tables = [(t, t.ili_name.rsplit(".", 1)[0]) for t in tables if t.ili_name and t.ili_name.count(".") >= 2]
+    if not topic_tables:
+        return []
+    statements = [
+        "CREATE FUNCTION t_ili2db_default_basket() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+        f"IF NEW.{BASKET_COLUMN} IS NULL THEN "
+        f"SELECT t_id INTO NEW.{BASKET_COLUMN} FROM T_ILI2DB_BASKET "
+        "WHERE topic = TG_ARGV[0] ORDER BY t_id DESC LIMIT 1; "
+        f"IF NEW.{BASKET_COLUMN} IS NULL THEN RAISE EXCEPTION 'no basket for topic %', TG_ARGV[0]; END IF; "
+        "END IF; RETURN NEW; END $$;"
+    ]
+    for table, topic in topic_tables:
+        trigger = _truncate_identifier(f"{table.name}_t_basket_trg")
+        statements.append(
+            f'CREATE TRIGGER {trigger} BEFORE INSERT ON "{table.name}" FOR EACH ROW '
+            f"EXECUTE FUNCTION t_ili2db_default_basket({_literal(topic)});"
+        )
     return statements
 
 

@@ -19,7 +19,7 @@ from .identifiers import (
     _sql_identifier,
     _truncate_identifier,
 )
-from .ili2db import Ili2dbMeta, basket_column_ddl, meta_rows, meta_table_ddl
+from .ili2db import Ili2dbMeta, basket_column_ddl, basket_trigger_ddl, meta_rows, meta_table_ddl
 from .model import Column, ForeignKey, SqlView, Table, UniqueConstraint
 from .views import (
     _render_view_unique_triggers_gpkg,
@@ -29,13 +29,19 @@ from .views import (
 )
 
 
-def render_postgresql(tables: list[Table], views: tuple[SqlView, ...] = (), meta: Ili2dbMeta | None = None) -> str:
+def render_postgresql(
+    tables: list[Table],
+    views: tuple[SqlView, ...] = (),
+    meta: Ili2dbMeta | None = None,
+    *,
+    basket_trigger: bool = False,
+) -> str:
     """Render `tables` as PostgreSQL DDL text - `CREATE TABLE` (with inline `UNIQUE`) then `ALTER TABLE ... ADD
     CONSTRAINT ... FOREIGN KEY`.
 
     FKs are added via a separate `ALTER TABLE` pass after every `CREATE
     TABLE` - sidesteps forward-reference ordering entirely instead of
-    topologically sorting.
+    topologically sorting. `basket_trigger` adds a trigger per class table that fills a missing `t_basket`.
     """
     statements: list[str] = meta_table_ddl(gpkg=False)
     union_views = [t for t in tables if t.union_of]
@@ -82,6 +88,8 @@ def render_postgresql(tables: list[Table], views: tuple[SqlView, ...] = (), meta
     statements += [f"CREATE VIEW {_quote(v.name)} AS {_union_select(v)};" for v in union_views]
     statements += _render_views(views)
     statements += _render_view_unique_triggers_postgresql(views)
+    if basket_trigger:
+        statements += basket_trigger_ddl(tables)
     statements += meta_rows(tables, meta or Ili2dbMeta(), gpkg=False)
     return "\n".join(statements) + "\n"
 

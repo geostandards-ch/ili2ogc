@@ -665,7 +665,14 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
     )
     bag.extend(_sql_mod.collect_diagnostics(tables, sql_views, file=str(path), dialect=args.dialect))
     meta = _ili2db_meta(path, repository, classes, builder.symbol_table, class_symbol_tables)
-    ddl = render_gpkg(tables, sql_views, meta) if args.dialect == "gpkg" else render_postgresql(tables, sql_views, meta)
+    if args.basket_trigger and args.dialect == "gpkg":
+        _error("--basket-trigger is PostgreSQL only.")
+        return ExitCode.USAGE
+    ddl = (
+        render_gpkg(tables, sql_views, meta)
+        if args.dialect == "gpkg"
+        else render_postgresql(tables, sql_views, meta, basket_trigger=args.basket_trigger)
+    )
     if args.lang:
         root_names = (
             builder.symbol_table.root_model_names() if hasattr(builder.symbol_table, "root_model_names") else []
@@ -1579,6 +1586,13 @@ def main(argv: list[str] | None = None) -> int:
         "actually depends on (a VIEW's JOIN OF/PROJECTION OF base classes, or a cross-model REFERENCE TO "
         "target) is folded into the output as CREATE TABLEs automatically when found here, so its CREATE "
         "VIEW / FOREIGN KEY can be generated without also listing it via --catalog.",
+    )
+    convert_sql_parser.add_argument(
+        "--basket-trigger",
+        action="store_true",
+        help="PostgreSQL only: add a BEFORE INSERT trigger per class table that fills a NULL t_basket with the newest "
+        "basket of the table's topic. For a client that cannot name the basket (an OGC API Features POST); an "
+        "insert naming one, as import-xtf does, is untouched.",
     )
     convert_sql_parser.add_argument(
         "--crs",
