@@ -1012,7 +1012,9 @@ def _stream_feature_collection(
         out.write("\n  ]\n}\n")
 
 
-def _write_change_requests(objects, output: str | None, *, symbol_table, repository, unmapped: list) -> list[str]:
+def _write_change_requests(
+    objects, output: str | None, *, symbol_table, repository, unmapped: list, body_profile: str
+) -> list[str]:
     """Write `{"requests": [...]}`, one OGC API Features Part 4 request per object, as they are produced.
 
     Returns the TIDs of the `DeleteObject`s that had no collection to be addressed to.
@@ -1022,7 +1024,12 @@ def _write_change_requests(objects, output: str | None, *, symbol_table, reposit
         out.write('{\n  "requests": [')
         first = True
         for request in _jsonfg_mod.iter_change_requests(
-            objects, symbol_table=symbol_table, repository=repository, unmapped=unmapped, skipped=skipped
+            objects,
+            symbol_table=symbol_table,
+            repository=repository,
+            unmapped=unmapped,
+            skipped=skipped,
+            body_profile=body_profile,
         ):
             out.write(("" if first else ",") + "\n" + json.dumps(request, ensure_ascii=False))
             first = False
@@ -1107,7 +1114,12 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
             (o for _b, o in iter_objects(xtf_path)) if args.stream else (o for b in transfer.baskets for o in b.objects)
         )
         skipped = _write_change_requests(
-            objects, args.output, symbol_table=builder.symbol_table, repository=repository, unmapped=unmapped
+            objects,
+            args.output,
+            symbol_table=builder.symbol_table,
+            repository=repository,
+            unmapped=unmapped,
+            body_profile=args.request_body,
         )
         bag.extend(_jsonfg_mod.change_diagnostics(skipped, file=str(xtf_path)))
         bag.extend(_jsonfg_mod.collect_diagnostics(unmapped, file=str(xtf_path)))
@@ -1708,6 +1720,14 @@ def main(argv: list[str] | None = None) -> int:
         'is written as {"requests": [...]}: OGC API Features Part 4 requests in file order (INSERT = POST '
         "/collections/{class}/items, UPDATE = PUT .../items/{tid}, DELETE = DELETE .../items/{tid}), each POST/PUT "
         "carrying its JSON-FG Feature.",
+    )
+    convert_jsonfg_parser.add_argument(
+        "--request-body",
+        choices=("jsonfg", "geojson"),
+        default="jsonfg",
+        help="Body of the POST/PUT requests written for an incremental transfer. 'jsonfg' (default): the JSON-FG "
+        "Feature (application/vnd.ogc.fg+json, geometry in `place`). 'geojson': a plain GeoJSON Feature "
+        "(application/geo+json, `place` as `geometry`, its CRS in a Content-Crs header) - what pygeoapi accepts.",
     )
     convert_jsonfg_parser.add_argument(
         "--crs",

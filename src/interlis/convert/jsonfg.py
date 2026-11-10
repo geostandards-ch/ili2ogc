@@ -2602,7 +2602,28 @@ def view_skip_diagnostic(view: MetaInstance, *, file: str | None = None):
 
 FG_MEDIA_TYPE = "application/vnd.ogc.fg+json"
 
+GEOJSON_MEDIA_TYPE = "application/geo+json"
+_GEOJSON_TYPES = frozenset({"Point", "LineString", "Polygon", "MultiPoint", "MultiLineString", "MultiPolygon"})
 _METHOD_OF = {"INSERT": "POST", "UPDATE": "PUT"}
+
+
+def _geojson_request_body(feature: dict[str, Any]) -> tuple[dict[str, str], dict[str, Any]]:
+    """`(headers, body)` of a request a plain GeoJSON server takes: `place` becomes `geometry`, in its own CRS.
+
+    The CRS travels in the `Content-Crs` header of OGC API Features Part 4. A `place` GeoJSON cannot hold
+    (arcs, solids, ...) leaves `geometry` null.
+    """
+    place = feature.get("place")
+    usable = place is not None and place_type_names(place) <= _GEOJSON_TYPES
+    headers = {"Content-Type": GEOJSON_MEDIA_TYPE}
+    if usable and feature.get("coordRefSys"):
+        headers["Content-Crs"] = f"<{feature['coordRefSys']}>"
+    body: dict[str, Any] = {"type": "Feature"}
+    if "id" in feature:
+        body["id"] = feature["id"]
+    body["geometry"] = place if usable else None
+    body["properties"] = feature.get("properties", {})
+    return headers, body
 
 
 def iter_change_requests(
@@ -2612,12 +2633,14 @@ def iter_change_requests(
     repository: ModelRepository | None = None,
     unmapped: list[UnmappedValue] | None = None,
     skipped: list[str] | None = None,
+    body_profile: str = "jsonfg",
 ) -> Iterator[dict[str, Any]]:
     """The objects of an incremental transfer as OGC API Features Part 4 requests, in file order, one at a time.
 
     INSERT = `POST /collections/{class}/items` (the Feature as body), UPDATE = `PUT .../items/{tid}` (the whole
     Feature replaces the stored one), DELETE = `DELETE .../items/{tid}`; `{class}` is the Feature's `featureType`.
     A `DeleteObject` names no class, so no collection: its TID goes to `skipped` and no request is written.
+    `body_profile` `"geojson"` writes plain GeoJSON bodies (see `_geojson_request_body`) instead of JSON-FG ones.
     """
     seen: set[tuple[str, str]] = set()
     for obj in objects:
@@ -2639,11 +2662,14 @@ def iter_change_requests(
             )
         if feature is None:
             continue
+        headers, body = (
+            _geojson_request_body(feature) if body_profile == "geojson" else ({"Content-Type": FG_MEDIA_TYPE}, feature)
+        )
         yield {
             "method": _METHOD_OF[operation],
             "href": items if operation == "INSERT" else f"{items}/{obj.tid}",
-            "headers": {"Content-Type": FG_MEDIA_TYPE},
-            "body": feature,
+            "headers": headers,
+            "body": body,
         }
 
 

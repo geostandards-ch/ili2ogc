@@ -170,3 +170,33 @@ def test_convert_jsonfg_leaves_out_a_delete_object_with_a_note(tmp_path: Path, c
     requests = json.loads(out.read_text(encoding="utf-8"))["requests"]
     assert [r["method"] for r in requests] == ["POST"]
     assert "JSONFG-DELETEOBJECT-NO-COLLECTION" in capsys.readouterr().err
+
+
+def test_convert_jsonfg_geojson_request_bodies(tmp_path: Path):
+    (tmp_path / "M.ili").write_text(
+        _MODEL.replace("Name : MANDATORY TEXT*20;", "Name : MANDATORY TEXT*20;\n      Pos : C2;").replace(
+            "TOPIC T",
+            "!!@CRS=EPSG:2056\n  DOMAIN C2 = COORD 2460000.000 .. 2870000.000, 1045000.000 .. 1310000.000;\n  TOPIC T",
+        ),
+        encoding="utf-8",
+    )
+    xtf = tmp_path / "g.xtf"
+    xtf.write_text(
+        _XTF.replace(
+            "<Name>n</Name>", "<Name>n</Name><Pos><COORD><C1>2600000.000</C1><C2>1200000.000</C2></COORD></Pos>"
+        ),
+        encoding="utf-8",
+    )
+    out = tmp_path / "o.json"
+    main(["convert-jsonfg", str(xtf), "--model", str(tmp_path / "M.ili"), "--request-body", "geojson", "-o", str(out)])
+    post = json.loads(out.read_text(encoding="utf-8"))["requests"][0]
+    assert post["headers"] == {
+        "Content-Type": "application/geo+json",
+        "Content-Crs": "<http://www.opengis.net/def/crs/EPSG/0/2056>",
+    }
+    assert post["body"] == {
+        "type": "Feature",
+        "id": "new",
+        "geometry": {"type": "Point", "coordinates": [2600000.0, 1200000.0]},
+        "properties": {"Name": "n"},
+    }
