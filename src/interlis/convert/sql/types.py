@@ -6,17 +6,22 @@ of this package needed to build it.
 
 from __future__ import annotations
 
-from interlis.convert.jsonfg import _meta_value
-from interlis.convert.jsonschema import _is_integer_range
 from interlis.metamodel.instance import MetaInstance
-from interlis.xtf.schema import ResolvedAttribute, coord_axes, enum_values, line_coord_type
+from interlis.xtf.schema import (
+    ResolvedAttribute,
+    coord_axes,
+    enum_values,
+    is_integer_range,
+    line_coord_type,
+    meta_value,
+)
 
 
 def _srid(coord_type: MetaInstance | None) -> str | None:
     """Return the bare numeric EPSG code (e.g. `"2056"`) from a CoordType's `!!@CRS=EPSG:<code>` meta-attribute, or
     `None` (never guessed) if absent/malformed.
     """
-    raw = _meta_value(coord_type, "CRS")
+    raw = meta_value(coord_type, "CRS")
     if raw is None:
         return None
     scheme, _, code = raw.partition(":")
@@ -56,7 +61,7 @@ def _scalar_sql_type(resolved: ResolvedAttribute) -> str | None:
     kind = resolved.type_kind
     inst = resolved.type_instance
     if kind == "NumType" and inst is not None:
-        if _is_integer_range(getattr(inst, "Min", None), getattr(inst, "Max", None)):
+        if is_integer_range(getattr(inst, "Min", None), getattr(inst, "Max", None)):
             return "integer"
         precision = _decimal_precision(getattr(inst, "Min", None), getattr(inst, "Max", None))
         return f"numeric({precision[0]},{precision[1]})" if precision else "numeric"

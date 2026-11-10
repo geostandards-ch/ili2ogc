@@ -156,7 +156,7 @@ def test_projection_with_renamed_attribute_reads_the_base_wire_value():
 
     Regression for a real bug found via item 13's VIEW-corpus pipeline
     (`docs/fgdm4gs-view-strategy.md`) against real `xtf_corpus/geoadmin`
-    data: `object_to_feature`/`_members_value` look up each property by
+    data: `object_to_feature`/`members_value` look up each property by
     the VIEW's OWN schema attribute name against the base object's RAW
     wire attribute names - correct only when they match (`ALL OF`, or a
     same-name reassignment like DMAV's `NBIdent := NBIdent`), silently

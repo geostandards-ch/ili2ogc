@@ -48,11 +48,11 @@ from interlis.builder.forward_refs import SymbolTable
 from interlis.builder.repository import ModelRepository
 from interlis.convert.color import lch_to_srgb
 from interlis.convert.cql2 import to_cql2
-from interlis.convert.jsonfg import _read_arc, _read_coord
+from interlis.convert.jsonfg import read_arc, read_coord
 from interlis.metamodel.instance import MetaInstance
 from interlis.xtf.parse import RawNode, XtfBasket, XtfObject
 from interlis.xtf.schema import attributes_of, schema_members_of
-from interlis.xtf.validate import _BOUNDARY_TAGS, _extract_reference, _find_child, _geom_tag
+from interlis.xtf.validate import BOUNDARY_TAGS, extract_reference, find_child, geom_tag
 
 _SE_NS = "http://www.opengis.net/se"
 _OGC_NS = "http://www.opengis.net/ogc"
@@ -210,7 +210,7 @@ class SignLibrary:
         nodes = obj.attributes.get(attr)
         if not nodes:
             return None
-        tid = _extract_reference(nodes[0])
+        tid = extract_reference(nodes[0])
         return self.by_tid.get(tid) if tid else None
 
     def resolve_color(self, obj: XtfObject, attr: str) -> tuple[RGBColor | None, float | None]:
@@ -220,7 +220,7 @@ class SignLibrary:
 
     def _color_from_ref_node(self, ref_node: RawNode) -> tuple[RGBColor | None, float | None]:
         """Resolve a raw REFERENCE-attribute node (top-level or nested in a structure) to `(RGBColor, opacity)`."""
-        tid = _extract_reference(ref_node)
+        tid = extract_reference(ref_node)
         color_obj = self.by_tid.get(tid) if tid else None
         if color_obj is None:
             return None, None
@@ -262,16 +262,16 @@ def _circle_radius_from_surface(node: RawNode) -> float | None:
     points (no `<R>` on the wire) has no real corpus example and returns
     `None` here.
     """
-    surface = _find_child(node, "SURFACE")
-    boundary = _find_child(surface, "BOUNDARY") if surface is not None else None
-    polyline = _find_child(boundary, "POLYLINE") if boundary is not None else None
-    if polyline is None or len(polyline.children) < 2 or _geom_tag(polyline.children[0]) != "COORD":
+    surface = find_child(node, "SURFACE")
+    boundary = find_child(surface, "BOUNDARY") if surface is not None else None
+    polyline = find_child(boundary, "POLYLINE") if boundary is not None else None
+    if polyline is None or len(polyline.children) < 2 or geom_tag(polyline.children[0]) != "COORD":
         return None
     radii: list[float] = []
     for arc in polyline.children[1:]:
-        if _geom_tag(arc) != "ARC":
+        if geom_tag(arc) != "ARC":
             return None
-        r_node = _find_child(arc, "R")
+        r_node = find_child(arc, "R")
         if r_node is None or r_node.text is None:
             return None
         radii.append(float(r_node.text))
@@ -310,16 +310,16 @@ def _boundary_ring(node: RawNode) -> list[tuple[float, float]] | None:
     POLYLINE - an ARC segment, a hole, or a custom LINE FORM is not a
     polygon ring this way.
     """
-    surface = _find_child(node, "SURFACE")
-    boundaries = [c for c in surface.children if _geom_tag(c) in _BOUNDARY_TAGS] if surface is not None else []
+    surface = find_child(node, "SURFACE")
+    boundaries = [c for c in surface.children if geom_tag(c) in BOUNDARY_TAGS] if surface is not None else []
     if len(boundaries) != 1:
         return None
-    polyline = _find_child(boundaries[0], "POLYLINE")
+    polyline = find_child(boundaries[0], "POLYLINE")
     if polyline is None or not polyline.children:
         return None
     ring: list[tuple[float, float]] = []
     for segment in polyline.children:
-        position = _read_coord(segment)
+        position = read_coord(segment)
         if position is None:
             return None
         ring.append((position[0], position[1]))
@@ -330,12 +330,12 @@ def _boundary_ring(node: RawNode) -> list[tuple[float, float]] | None:
 
 def _closed_polyline_ring(node: RawNode) -> list[tuple[float, float]] | None:
     """Read an all-COORD `SS_Polyline` that closes on itself as a ring, without the repeated closing vertex."""
-    polyline = _find_child(node, "POLYLINE")
+    polyline = find_child(node, "POLYLINE")
     if polyline is None or not polyline.children:
         return None
     ring: list[tuple[float, float]] = []
     for segment in polyline.children:
-        position = _read_coord(segment)
+        position = read_coord(segment)
         if position is None:
             return None
         ring.append((position[0], position[1]))
@@ -570,26 +570,26 @@ def _svg_path_d(node: RawNode) -> str | None:
     only ever sees already-flipped points, so its own flag derivation
     stays entirely within SVG's coordinate convention.
     """
-    if _geom_tag(node) != "POLYLINE" or not node.children:
+    if geom_tag(node) != "POLYLINE" or not node.children:
         return None
     segments = node.children
-    if _geom_tag(segments[0]) != "COORD":
+    if geom_tag(segments[0]) != "COORD":
         return None
-    start = _read_coord(segments[0])
+    start = read_coord(segments[0])
     if start is None:
         return None
     current = (start[0], -start[1])
     parts = [f"M {current[0]:.6g} {current[1]:.6g}"]
     for seg in segments[1:]:
-        tag = _geom_tag(seg)
+        tag = geom_tag(seg)
         if tag == "COORD":
-            pos = _read_coord(seg)
+            pos = read_coord(seg)
             if pos is None:
                 return None
             current = (pos[0], -pos[1])
             parts.append(f"L {current[0]:.6g} {current[1]:.6g}")
         elif tag == "ARC":
-            arc = _read_arc(seg)
+            arc = read_arc(seg)
             if arc is None:
                 return None
             mid = (arc[0][0], -arc[0][1])
@@ -606,7 +606,7 @@ def _svg_path_d(node: RawNode) -> str | None:
 
 def _svg_boundary_path_d(node: RawNode) -> str | None:
     """Like `_svg_path_d`, for a BOUNDARY/EXTERIOR/INTERIOR wrapping a single POLYLINE, closed with `Z`."""
-    polyline = _find_child(node, "POLYLINE")
+    polyline = find_child(node, "POLYLINE")
     if polyline is None:
         return None
     d = _svg_path_d(polyline)
@@ -642,7 +642,7 @@ def font_symbol_geometry_to_svg_data_uri(library: SignLibrary, symbol_obj: XtfOb
         if geometry_node is None:
             return None
         if structure_node.tag.endswith("FontSymbol_Polyline"):
-            polyline_node = _find_child(geometry_node, "POLYLINE")
+            polyline_node = find_child(geometry_node, "POLYLINE")
             d = _svg_path_d(polyline_node) if polyline_node is not None else None
             if d is None:
                 return None
@@ -650,8 +650,8 @@ def font_symbol_geometry_to_svg_data_uri(library: SignLibrary, symbol_obj: XtfOb
             color, _opacity = library._color_from_ref_node(color_node) if color_node is not None else (None, None)
             layers.append(f'<path d="{d}" fill="none" stroke="{_rgb_to_hex(color)}"/>')
         elif structure_node.tag.endswith("FontSymbol_Surface"):
-            surface_node = _find_child(geometry_node, "SURFACE")
-            boundaries = [c for c in surface_node.children if _geom_tag(c) in _BOUNDARY_TAGS] if surface_node else []
+            surface_node = find_child(geometry_node, "SURFACE")
+            boundaries = [c for c in surface_node.children if geom_tag(c) in BOUNDARY_TAGS] if surface_node else []
             if not boundaries:
                 return None
             boundary_ds = [_svg_boundary_path_d(b) for b in boundaries]
@@ -856,7 +856,7 @@ def _pattern_stroke(library: SignLibrary, style_obj: XtfObject) -> Stroke:
     symbol_node = occurrence.children[0] if occurrence is not None and occurrence.children else None
     fields = {c.tag: c for c in symbol_node.children} if symbol_node is not None else {}
     font_ref = fields.get("FontSymbRef")
-    tid = _extract_reference(font_ref) if font_ref is not None else None
+    tid = extract_reference(font_ref) if font_ref is not None else None
     font_symbol = library.by_tid.get(tid) if tid else None
     if font_symbol is None:
         return Stroke()

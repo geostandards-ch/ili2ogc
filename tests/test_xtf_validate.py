@@ -142,7 +142,7 @@ def ref_builder():
 def _ref_attr(name: str, target_tid: str) -> tuple[str, list[RawNode]]:
     """Real-world form "bare REF on the role node" (confirmed on
     rMeasurementLocation) - the simplest of the 3 forms, sufficient to
-    exercise _extract_reference (already tested structurally elsewhere)."""
+    exercise extract_reference (already tested structurally elsewhere)."""
     return name, [RawNode(tag=name, text=None, attrib={"REF": target_tid}, children=[])]
 
 
@@ -163,7 +163,7 @@ def test_reference_resolved_within_same_basket_has_no_issue(ref_builder):
 
 def test_reference_resolved_across_different_baskets_has_no_issue(ref_builder):
     """A reference can target an object in a DIFFERENT basket of the same
-    transfer (confirmed real case, see _build_tid_index's docstring) -
+    transfer (confirmed real case, see build_tid_index's docstring) -
     the index must cover ALL baskets, not just the source object's own."""
     location = XtfObject(tid="loc-1", qualified_class=LOCATION_CLASS, attributes=dict([_text_attr("Name", "Bern")]))
     indicator = XtfObject(

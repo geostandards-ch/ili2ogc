@@ -917,7 +917,7 @@ def test_catalog_reference_structure_becomes_string_oid():
 
     Real corpus pattern, RoadTrafficAccidentLocation_V2's AccidentType/
     RoadType/... attributes - the REF is findable 2 levels deep, same
-    _extract_reference search as a plain REFERENCE TO, no special-casing
+    extract_reference search as a plain REFERENCE TO, no special-casing
     needed.
     """
     builder = _build(_REF_MODEL)

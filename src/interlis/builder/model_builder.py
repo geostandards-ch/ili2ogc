@@ -34,7 +34,7 @@ from interlis.builder.view_mixin import _ViewBuildingMixin
 from interlis.metamodel.instance import MetaInstance
 from interlis.metamodel.registry import MetamodelRegistry
 from interlis.metamodel.uml_schema import MetamodelSchema
-from interlis.runtime.parse import _unquote_interlis_string
+from interlis.runtime.parse import unquote_interlis_string
 from interlis.spec.models import Parent, SpecEntry
 from interlis.spec.spec_index import load_spec
 
@@ -923,8 +923,8 @@ class InterlisModelBuilder(
         if len(strings) != 2:
             return None
         instance = self.registry.new_instance("IlisMeta16.ModelData.FormattedType")
-        instance.Min = _unquote_interlis_string(strings[0].getText())
-        instance.Max = _unquote_interlis_string(strings[1].getText())
+        instance.Min = unquote_interlis_string(strings[0].getText())
+        instance.Max = unquote_interlis_string(strings[1].getText())
         return instance
 
     def _build_control_points_ref(self, ctx: ParserRuleContext, rule_name: str) -> ForwardRef | None:

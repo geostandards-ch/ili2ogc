@@ -682,3 +682,57 @@ def wrapped_reference(structure: MetaInstance | None) -> ResolvedAttribute | Non
         resolved.type_kind == "Class" and getattr(resolved.type_instance, "Kind", None) != "Structure"
     )
     return resolved if is_reference and resolved.type_instance is not None else None
+
+
+def meta_value(instance: MetaInstance | None, name: str) -> str | None:
+    if instance is None:
+        return None
+    for meta in getattr(instance, "MetaAttribute", None) or []:
+        if getattr(meta, "Name", None) == name:
+            return meta.Value
+    return None
+
+
+def is_integer_range(min_raw: str | None, max_raw: str | None) -> bool:
+    """True if both bounds are present and neither has a decimal point.
+
+    Same shape heuristic already used (read-only, not duplicated) by
+    xtf/validate.py's `_decimal_places` for range-tolerance rounding.
+    """
+    return min_raw is not None and max_raw is not None and "." not in min_raw and "." not in max_raw
+
+
+def is_structure(type_instance: MetaInstance | None) -> bool:
+    """True if a `type_kind == "Class"` resolution is genuine STRUCTURE nesting.
+
+    `resolve_attribute` resolves BOTH a `Class(Kind=Structure)` attribute
+    AND an embedded association role
+    (`xtf.schema.embedded_roles_of` - always `Kind == "Class"`, a role
+    points at a real class instance, never a structure) to the SAME
+    `type_kind == "Class"`. `Kind` is the only signal that tells them
+    apart - confirmed by `xtf/validate.py`'s own `_validate_resolved_attr`
+    dispatch (`Kind == "Structure"` recurses into inline content;
+    anything else expects a `REF`/OID, same as a plain `REFERENCE TO`).
+    """
+    return type_instance is not None and getattr(type_instance, "Kind", None) == "Structure"
+
+
+def nested_class(resolved: ResolvedAttribute) -> MetaInstance | None:
+    """Return the Class a structure/BAG/LIST-of-structure attribute points to, else None.
+
+    Only genuine STRUCTURE nesting counts as "reachable" for `$defs`
+    discovery (`is_structure`) - an embedded association role's target
+    is a REFERENCE, not containment, same as a plain `REFERENCE TO`
+    target (also never added to `$defs` by this discovery).
+    """
+    if resolved.type_kind == "Class" and is_structure(resolved.type_instance):
+        return resolved.type_instance
+    if resolved.type_kind == "MultiValue" and resolved.type_instance is not None:
+        base = getattr(resolved.type_instance, "BaseType", None)
+        if (
+            isinstance(base, MetaInstance)
+            and base._qualified_class.rsplit(".", 1)[-1] == "Class"
+            and is_structure(base)
+        ):
+            return base
+    return None

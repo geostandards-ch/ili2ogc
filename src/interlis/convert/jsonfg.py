@@ -9,7 +9,7 @@ XtfTransfer into one FeatureCollection. Both conform to the "core" and
 polygon geometry -> "place" (never "geometry", which stays `null` - no
 WGS84 reprojection, see module docs); a plain REFERENCE TO, an embedded
 association role, or a 1-own-attribute STRUCTURE wrapping a REFERENCE TO
-(all 3 real wire shapes, unified via the SAME `_extract_reference` search
+(all 3 real wire shapes, unified via the SAME `extract_reference` search
 already proven by xtf/validate.py) -> the referenced object's OID as a
 plain string; a genuine STRUCTURE (no findable REF) -> a nested JSON
 object, `BAG`/`LIST OF X` -> a JSON array, both recursively (same
@@ -32,7 +32,7 @@ corpus evidence yet) becomes a `Polyhedron` the same way; a
 RULE #7 exception, same matching approach). Reuses the schema resolution
 already proven by
 xtf/validate.py (resolve_attribute/attributes_of/coord_axes/
-line_coord_type) AND its wire-tag helpers (_geom_tag/_find_child/
+line_coord_type) AND its wire-tag helpers (geom_tag/find_child/
 _axis_components/the BOUNDARY/SURFACE/LINE_KIND tag sets) rather than a
 second parallel implementation of the same COORD/POLYLINE/SURFACE/AREA/
 MULTI* wire conventions - convert() stays a decoupled stage from
@@ -61,7 +61,6 @@ from interlis.convert.geometry_kinds import (
     is_pointcloud3d,
     is_solid3d,
 )
-from interlis.convert.jsonschema import _is_integer_range
 from interlis.convert.view_formation import (
     LINE_GEOMETRY,
     LINE_SEGMENT,
@@ -75,29 +74,31 @@ from interlis.convert.view_formation import (
     is_standard_count_call,
 )
 from interlis.metamodel.instance import MetaInstance
-from interlis.runtime.parse import _unquote_interlis_string
+from interlis.runtime.parse import unquote_interlis_string
 from interlis.xtf.parse import RawNode, XtfObject, XtfTransfer
 from interlis.xtf.schema import (
     ResolvedAttribute,
     attributes_of,
     home_symbol_table,
     is_class_compatible,
+    is_integer_range,
     line_coord_type,
+    meta_value,
     resolve_attribute,
     resolve_class,
     schema_members_of,
     wrapped_reference,
 )
 from interlis.xtf.validate import (
-    _BOUNDARY_TAGS,
     _LINE_KIND_MULTI_TAGS,
     _LINE_KIND_TAGS,
     _REFERENCE_TYPE_KINDS,
     _SURFACE_TAGS,
+    BOUNDARY_TAGS,
     _axis_components,
-    _extract_reference,
-    _geom_tag,
-    _group_by_tag,
+    extract_reference,
+    geom_tag,
+    group_by_tag,
 )
 
 JSON_FG_VERSION = "1.0"
@@ -161,7 +162,7 @@ def _scalar_value(resolved: ResolvedAttribute, node: RawNode) -> Any:
         # attribute's JSON Schema (convert/jsonschema.py) - keeps a
         # Feature's property values consistent with the type its own
         # $defs entry declares, rather than a second independent guess.
-        as_int = _is_integer_range(
+        as_int = is_integer_range(
             getattr(resolved.type_instance, "Min", None), getattr(resolved.type_instance, "Max", None)
         )
         try:
@@ -224,11 +225,11 @@ def _raw_value(node: RawNode, *, unwrap: bool) -> Any:
     element down to the structure's content wrapper), only untyped: numbers stay strings.
     """
     if not node.children:
-        return node.text if node.text is not None else _extract_reference(node)
+        return node.text if node.text is not None else extract_reference(node)
     content = node.children[0] if unwrap and len(node.children) == 1 and node.children[0].children else node
     if all(not c.children and c.text is None for c in content.children):
-        return _extract_reference(content)
-    grouped = _group_by_tag(content.children)
+        return extract_reference(content)
+    grouped = group_by_tag(content.children)
     return {
         tag: _raw_value(nodes[0], unwrap=True) if len(nodes) == 1 else [_raw_value(n, unwrap=False) for n in nodes]
         for tag, nodes in grouped.items()
@@ -268,13 +269,13 @@ def _attribute_value(
         # pattern, real corpus example: RoadTrafficAccidentLocation_V2's
         # AccidentType/AccidentSeverityCategory/RoadType/AccidentWeekDay)
         # is ALSO transferred with a findable REF, several levels deep -
-        # _extract_reference searches the whole subtree regardless of which
+        # extract_reference searches the whole subtree regardless of which
         # of these 3 real wire shapes produced it, so all 3 are handled by
         # this ONE lookup, never 3 separate cases.
         is_structure = kind == "Class" and getattr(resolved.type_instance, "Kind", None) == "Structure"
         if is_structure and wrapped_reference(resolved.type_instance) is None:
             return _structure_value(resolved, raw_nodes, symbol_table=symbol_table, already_unwrapped=already_unwrapped)
-        ref = _extract_reference(raw_nodes[0]) if raw_nodes else None
+        ref = extract_reference(raw_nodes[0]) if raw_nodes else None
         if ref is not None:
             return ref
         # A GENUINE STRUCTURE occurrence (Kind=Structure, no REF anywhere -
@@ -330,7 +331,7 @@ def _structure_value(
     wrapper = node if already_unwrapped else (node.children[0] if node.children else None)
     if wrapper is None or not isinstance(resolved.type_instance, MetaInstance):
         return {}
-    return _members_value(resolved.type_instance, _group_by_tag(wrapper.children), symbol_table=symbol_table)
+    return members_value(resolved.type_instance, group_by_tag(wrapper.children), symbol_table=symbol_table)
 
 
 def _multi_value(resolved: ResolvedAttribute, raw_nodes: list[RawNode], *, symbol_table: SymbolTable | None) -> Any:
@@ -368,7 +369,7 @@ def _multi_value(resolved: ResolvedAttribute, raw_nodes: list[RawNode], *, symbo
 
 def _sql_identifier(name: str) -> str:
     """Lowercase - matches `convert/sql.py`'s `_sql_identifier` EXACTLY (kept manually in sync, not imported:
-    `convert/sql.py` already imports FROM this module, `_meta_value`, so importing back would be circular).
+    `convert/sql.py` already imports FROM this module, so importing back would be circular).
 
     Only correct as long as both copies stay identical - the one real,
     documented limitation this creates: a child table
@@ -457,7 +458,7 @@ def _child_row_features(obj: XtfObject, cls: MetaInstance, *, symbol_table: Symb
     return features
 
 
-def _members_value(
+def members_value(
     cls: MetaInstance, attrs: dict[str, list[RawNode]], *, symbol_table: SymbolTable | None
 ) -> dict[str, Any]:
     """Convert every attribute present in `attrs` against `cls`'s own schema into a plain dict.
@@ -516,13 +517,13 @@ def _positions_from(node: RawNode, prefix: str) -> list[float] | None:
         return None
 
 
-def _read_coord(node: RawNode) -> list[float] | None:
-    if _geom_tag(node) != "COORD":
+def read_coord(node: RawNode) -> list[float] | None:
+    if geom_tag(node) != "COORD":
         return None
     return _positions_from(node, "C")
 
 
-def _read_arc(node: RawNode) -> tuple[list[float], list[float]] | None:
+def read_arc(node: RawNode) -> tuple[list[float], list[float]] | None:
     """Read an ArcSegment (eCH-0031 V2.1.0 SS4.3.11.14): `(intermediate point, end point)`.
 
     The intermediate point (A1/A2) is always 2D - INTERLIS never carries a
@@ -531,7 +532,7 @@ def _read_arc(node: RawNode) -> tuple[list[float], list[float]] | None:
     (R) is redundant with the 3 points a `CircularString` arc needs and is
     not read here.
     """
-    if _geom_tag(node) != "ARC":
+    if geom_tag(node) != "ARC":
         return None
     end = _positions_from(node, "C")
     mid = _positions_from(node, "A")
@@ -556,21 +557,21 @@ def _read_polyline(node: RawNode) -> list[list[float]] | dict[str, Any] | None:
     (JSON-FG Part 1 Core SS7.5.2 - each item's first position equals the
     previous item's last, exactly how runs are chained here).
     """
-    if _geom_tag(node) != "POLYLINE" or not node.children:
+    if geom_tag(node) != "POLYLINE" or not node.children:
         return None
     segments = node.children
-    if _geom_tag(segments[0]) != "COORD":
+    if geom_tag(segments[0]) != "COORD":
         return None
-    start = _read_coord(segments[0])
+    start = read_coord(segments[0])
     if start is None:
         return None
     parts: list[dict[str, Any]] = []
     kind = "line"
     points: list[list[float]] = [start]
     for seg in segments[1:]:
-        tag = _geom_tag(seg)
+        tag = geom_tag(seg)
         if tag == "COORD":
-            pos = _read_coord(seg)
+            pos = read_coord(seg)
             if pos is None:
                 return None
             if kind == "arc":
@@ -579,7 +580,7 @@ def _read_polyline(node: RawNode) -> list[list[float]] | dict[str, Any] | None:
                 points = [points[-1]]
             points.append(pos)
         elif tag == "ARC":
-            arc = _read_arc(seg)
+            arc = read_arc(seg)
             if arc is None:
                 return None
             mid, end = arc
@@ -600,10 +601,10 @@ def _read_polyline(node: RawNode) -> list[list[float]] | dict[str, Any] | None:
 
 def _read_boundary(node: RawNode) -> list[list[float]] | dict[str, Any] | None:
     """Read one BOUNDARY: its consecutive POLYLINE pieces (Randlinien) joined into a single closed line."""
-    if _geom_tag(node) not in _BOUNDARY_TAGS:
+    if geom_tag(node) not in BOUNDARY_TAGS:
         return None
     pieces: list[dict[str, Any]] = []
-    for polyline in (c for c in node.children if _geom_tag(c) == "POLYLINE"):
+    for polyline in (c for c in node.children if geom_tag(c) == "POLYLINE"):
         value = _read_polyline(polyline)
         if value is None:
             return None
@@ -624,9 +625,9 @@ def _read_surface(node: RawNode) -> list[list[list[float]]] | dict[str, Any] | N
     where rings stay bare position lists (`_read_boundary`'s straight-only
     return shape, unchanged).
     """
-    if _geom_tag(node) not in _SURFACE_TAGS:
+    if geom_tag(node) not in _SURFACE_TAGS:
         return None
-    boundaries = [c for c in node.children if _geom_tag(c) in _BOUNDARY_TAGS]
+    boundaries = [c for c in node.children if geom_tag(c) in BOUNDARY_TAGS]
     if not boundaries:
         return None
     rings: list[list[list[float]] | dict[str, Any]] = []
@@ -650,14 +651,14 @@ def _coord_geometry(resolved: ResolvedAttribute, node: RawNode) -> dict[str, Any
     multi = bool(getattr(coord_type, "Multi", False))
     expected = "MULTICOORD" if multi else "COORD"
     child = node.children[0] if node.children else None
-    if child is None or _geom_tag(child) != expected:
+    if child is None or geom_tag(child) != expected:
         return None
     if not multi:
-        pos = _read_coord(child)
+        pos = read_coord(child)
         return None if pos is None else {"type": "Point", "coordinates": pos}
     positions: list[list[float]] = []
-    for c in (c for c in child.children if _geom_tag(c) == "COORD"):
-        pos = _read_coord(c)
+    for c in (c for c in child.children if geom_tag(c) == "COORD"):
+        pos = read_coord(c)
         if pos is None:
             return None
         positions.append(pos)
@@ -688,7 +689,7 @@ def _line_geometry(resolved: ResolvedAttribute, node: RawNode) -> dict[str, Any]
         return None
     expected_tags = _LINE_KIND_MULTI_TAGS[kind] if multi else single_tags
     child = node.children[0] if node.children else None
-    if child is None or _geom_tag(child) not in expected_tags:
+    if child is None or geom_tag(child) not in expected_tags:
         return None
     is_polyline = single_tags == frozenset({"POLYLINE"})
     reader = _read_polyline if is_polyline else _read_surface
@@ -702,7 +703,7 @@ def _line_geometry(resolved: ResolvedAttribute, node: RawNode) -> dict[str, Any]
         return value if isinstance(value, dict) else {"type": single_type, "coordinates": value}
     values = []
     any_curved = False
-    for part in (c for c in child.children if _geom_tag(c) in single_tags):
+    for part in (c for c in child.children if geom_tag(c) in single_tags):
         value = reader(part)
         if value is None:
             return None
@@ -715,15 +716,6 @@ def _line_geometry(resolved: ResolvedAttribute, node: RawNode) -> dict[str, Any]
         geometries = [v if isinstance(v, dict) else {"type": single_type, "coordinates": v} for v in values]
         return {"type": curved_multi_type, "geometries": geometries}
     return {"type": multi_type, "coordinates": values}
-
-
-def _meta_value(instance: MetaInstance | None, name: str) -> str | None:
-    if instance is None:
-        return None
-    for meta in getattr(instance, "MetaAttribute", None) or []:
-        if getattr(meta, "Name", None) == name:
-            return meta.Value
-    return None
 
 
 def _context_instances(symbol_table: SymbolTable | None, repository: ModelRepository | None) -> list[MetaInstance]:
@@ -818,7 +810,7 @@ def _crs_uri(
     `_seen` guards against a `CONTEXT` rebinding cycle spanning more than
     one hop (A -> B -> A) - not just the direct A -> A case.
     """
-    raw = _meta_value(coord_type, "CRS")
+    raw = meta_value(coord_type, "CRS")
     if raw is None:
         concrete = _context_concrete_domain(coord_type, symbol_table, repository)
         seen = _seen or set()
@@ -968,7 +960,7 @@ def _solid3d_polyhedron(value: dict[str, Any]) -> dict[str, Any] | None:
 
 
 # `value` in each `_place_and_crs_via`-built function below is the attribute's
-# already-decoded `properties` value (built once by `_members_value`/
+# already-decoded `properties` value (built once by `members_value`/
 # `_structure_value` for every attribute, geometry or not) - reused here
 # rather than re-decoding the same raw wire nodes a second time.
 _solid3d_place_and_crs = _place_and_crs_via(
@@ -1289,7 +1281,7 @@ def _object_to_feature(
     """Body of `object_to_feature`, within its feature scope."""
     schema_attrs = schema_members_of(cls, symbol_table) if symbol_table is not None else attributes_of(cls)
     resolved_attrs = {name: resolve_attribute(attr) for name, attr in schema_attrs.items()}
-    properties = _members_value(cls, obj.attributes, symbol_table=symbol_table)
+    properties = members_value(cls, obj.attributes, symbol_table=symbol_table)
     if omit_multivalue:
         for name, resolved in resolved_attrs.items():
             if resolved.type_kind == "MultiValue":
@@ -1434,18 +1426,18 @@ def _view_alias(base: MetaInstance) -> str | None:
     return getattr(base, "Name", None) or getattr(getattr(base, "BaseView", None), "Name", None)
 
 
-def _raw_node_value(node: RawNode) -> Any:
+def raw_node_value(node: RawNode) -> Any:
     """One attribute occurrence -> a comparable value.
 
     A referenced OID, a nested dict, or a (numeric-coerced) scalar.
     """
-    ref_tid = _extract_reference(node)
+    ref_tid = extract_reference(node)
     if ref_tid is not None:
         return ref_tid
     if node.children:  # a STRUCTURE occurrence - navigable one more hop
         nested: dict[str, Any] = {}
         for child in node.children:
-            nested.setdefault(child.tag, _raw_node_value(child))
+            nested.setdefault(child.tag, raw_node_value(child))
         return nested
     return _try_number(node.text, node.text) if node.text is not None else None
 
@@ -1467,7 +1459,7 @@ def _obj_view(obj: XtfObject, by_tid: dict[str, XtfObject], seen: frozenset[str]
     for name, nodes in obj.attributes.items():
         if not nodes:
             continue
-        value = _raw_node_value(nodes[0])
+        value = raw_node_value(nodes[0])
         if isinstance(value, str) and value in by_tid:
             attrs[name] = _obj_view(by_tid[value], by_tid, next_seen)
         else:
@@ -1595,7 +1587,7 @@ def _join_combinations(
 def _project_object_under_view_names(view: MetaInstance, obj: XtfObject) -> XtfObject:
     """Re-key `obj`'s wire attributes under `view`'s own `ClassAttribute` names.
 
-    `object_to_feature`/`_members_value` look up each property by the
+    `object_to_feature`/`members_value` look up each property by the
     Class's OWN schema attribute name - correct for a plain Class, and for
     an `ALL OF` view attribute (its synthetic identity `Derivates` is
     `<base> -> <attr>` with `attr == Name`, a no-op here: `source ==
@@ -1816,7 +1808,7 @@ def _factor_nodes(factor: MetaInstance, alias: str, obj: XtfObject, by_tid: dict
         nodes = current.attributes.get(name) or []
         if i == len(refs) - 1:
             return list(nodes)
-        target = _extract_reference(nodes[0]) if nodes else None
+        target = extract_reference(nodes[0]) if nodes else None
         current = by_tid.get(target) if target else None
     return []
 
@@ -1825,7 +1817,7 @@ def _constant_nodes(factor: MetaInstance, name: str) -> list[RawNode]:
     value = getattr(factor, "Value", None)
     if value is None:
         return []
-    text = _unquote_interlis_string(value) if getattr(factor, "Type", None) == "Text" else str(value)
+    text = unquote_interlis_string(value) if getattr(factor, "Type", None) == "Text" else str(value)
     return [RawNode(name, text, {}, [])]
 
 
@@ -2144,12 +2136,12 @@ def _join_pieces(pieces: list[dict[str, Any]]) -> dict[str, Any]:
 def _surface_boundaries(attr_node: RawNode) -> list[list[dict[str, Any]]] | None:
     """Each BOUNDARY of a SURFACE/AREA attribute value as its POLYLINE pieces (line geometries), or `None`."""
     surface = attr_node.children[0] if attr_node.children else None
-    if surface is None or _geom_tag(surface) not in _SURFACE_TAGS:
+    if surface is None or geom_tag(surface) not in _SURFACE_TAGS:
         return None
     boundaries: list[list[dict[str, Any]]] = []
-    for boundary in (c for c in surface.children if _geom_tag(c) in _BOUNDARY_TAGS):
+    for boundary in (c for c in surface.children if geom_tag(c) in BOUNDARY_TAGS):
         pieces: list[dict[str, Any]] = []
-        for polyline in (c for c in boundary.children if _geom_tag(c) == "POLYLINE"):
+        for polyline in (c for c in boundary.children if geom_tag(c) == "POLYLINE"):
             value = _read_polyline(polyline)
             if value is None:
                 return None
@@ -2171,18 +2163,18 @@ def _boundary_geometry(edges: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _line_segments(polyline: RawNode) -> list[tuple[list[float], list[float] | None]] | None:
     """`(end point, arc point)` of every segment of a POLYLINE; the first is the `StartSegment` (length 0)."""
-    if _geom_tag(polyline) != "POLYLINE" or not polyline.children or _geom_tag(polyline.children[0]) != "COORD":
+    if geom_tag(polyline) != "POLYLINE" or not polyline.children or geom_tag(polyline.children[0]) != "COORD":
         return None
     segments: list[tuple[list[float], list[float] | None]] = []
     for node in polyline.children:
-        tag = _geom_tag(node)
+        tag = geom_tag(node)
         if tag == "COORD":
-            end = _read_coord(node)
+            end = read_coord(node)
             if end is None:
                 return None
             segments.append((end, None))
         elif tag == "ARC":
-            arc = _read_arc(node)
+            arc = read_arc(node)
             if arc is None:
                 return None
             segments.append((arc[1], arc[0]))
@@ -2407,7 +2399,7 @@ def _inspection_elements(
             holders = [c for node in nodes for c in node.children] if previous_was_multi else nodes
             nodes, owners = [], []
             for holder in holders:
-                holder_attrs = _group_by_tag(holder.children)
+                holder_attrs = group_by_tag(holder.children)
                 for gc in holder.children:
                     if gc.tag == hop:
                         nodes.append(gc)

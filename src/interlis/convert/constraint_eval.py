@@ -30,7 +30,7 @@ import re
 from typing import Any
 
 from interlis.metamodel.instance import MetaInstance
-from interlis.runtime.parse import _unquote_interlis_string as _unquote_text
+from interlis.runtime.parse import unquote_interlis_string
 
 _RELATIONAL_SYMBOLS = {
     "Equal": "==",
@@ -219,7 +219,7 @@ def _evaluate_constant(expr: MetaInstance) -> Any:
     if type_ == "Numeric":
         return _try_number(value, value)
     if type_ == "Text":
-        return _unquote_text(value)
+        return unquote_interlis_string(value)
     if type_ == "Enumeration":
         return value
     raise UnsupportedExpressionError(f"constant of type {type_!r} is not supported")
