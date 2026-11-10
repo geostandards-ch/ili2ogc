@@ -124,3 +124,36 @@ def test_sql_tells_a_missing_base_model_from_an_undeclared_crs(tmp_path: Path, c
     main(["convert-sql", str(tmp_path / "N.ili"), "--repo", str(BASE), "-o", str(tmp_path / "o2.sql")])
     err = capsys.readouterr().err
     assert "SQL-GEOM-NO-CRS" in err and "a CONTEXT" in err
+
+
+_UNDECLARED = """INTERLIS 2.4;
+MODEL U AT "http://x" VERSION "1" =
+  DOMAIN C2 = COORD 2460000.000 .. 2870000.000, 1045000.000 .. 1310000.000;
+  TOPIC T =
+    CLASS P =
+      Pos : C2;
+    END P;
+  END T;
+END U.
+"""
+
+
+def test_crs_option_fills_only_an_undeclared_domain(tmp_path, capsys):
+    from interlis.cli import main
+
+    (tmp_path / "U.ili").write_text(_UNDECLARED, encoding="utf-8")
+    plain, given = tmp_path / "plain.sql", tmp_path / "given.sql"
+    main(["convert-sql", str(tmp_path / "U.ili"), "-o", str(plain)])
+    main(["convert-sql", str(tmp_path / "U.ili"), "--crs", "EPSG:2056", "-o", str(given)])
+    assert "geometry(" not in plain.read_text(encoding="utf-8")
+    assert "geometry(Point, 2056)" in given.read_text(encoding="utf-8")
+    assert "CRS-DEFAULT-APPLIED" in capsys.readouterr().err
+
+
+def test_crs_option_rejects_a_non_epsg_value(tmp_path):
+    import pytest
+
+    from interlis.cli import main
+
+    with pytest.raises(SystemExit):
+        main(["convert-sql", str(tmp_path / "U.ili"), "--crs", "LV95"])
