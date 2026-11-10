@@ -33,6 +33,9 @@ def _strip_ns(tag: str) -> str:
     return tag.rsplit("}", 1)[-1] if tag.startswith("{") else tag
 
 
+_DELETE_OBJECT_TAG = "{http://www.interlis.ch/xtf/2.4/INTERLIS}delete"
+
+
 def _model_name_from_tag(tag: str) -> str | None:
     """Recover a namespaced XTF 2.4 data tag's declaring MODEL name, or `None` for a bare (XTF 2.3) tag.
 
@@ -109,7 +112,7 @@ class XtfObject:
     Both are encoded identically on the transfer side (§4.3.9.2).
     `qualified_class` is the full tag name as written in the file (e.g.
     'RoadTrafficCensus_V1_1.RoadTrafficCensus.MeasurementLocation'), not
-    yet resolved against a schema.
+    yet resolved against a schema; empty for a `DeleteObject` (`<ili:delete ili:tid=...>`), which names no class.
     """
 
     tid: str | None
@@ -231,11 +234,14 @@ def parse_xtf(path: Path) -> XtfTransfer:
                 model_name = _model_name_from_tag(elem.tag)
                 basket_topic = current_basket.qualified_topic.rsplit(".", 1)[-1]
                 qualified_class = f"{model_name}.{basket_topic}.{tag}" if model_name else tag
+                operation = (_get_attr_ci(elem, "OPERATION") or "").upper() or None
+                if elem.tag == _DELETE_OBJECT_TAG:  # `DeleteObject`: names a TID only, never its class
+                    qualified_class, operation = "", "DELETE"
                 current_object = XtfObject(
                     tid=_get_attr_ci(elem, "TID"),
                     qualified_class=qualified_class,
                     attributes={},
-                    operation=(_get_attr_ci(elem, "OPERATION") or "").upper() or None,
+                    operation=operation,
                 )
             elif parent_role == "object":
                 role = "attribute"
