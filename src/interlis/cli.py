@@ -57,7 +57,7 @@ from interlis.xtf.crs import fallback_crs
 from interlis.xtf.jsonfg_validate import validate_jsonfg
 from interlis.xtf.model_resolution import header_completeness, header_model_lookup, root_model_names
 from interlis.xtf.parse import iter_objects, parse_xtf, read_skeleton
-from interlis.xtf.validate import validate_transfer
+from interlis.xtf.validate import validate_stream, validate_transfer
 
 _DEV_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -740,7 +740,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         _error(f".xtf file not found: {xtf_path}")
         return ExitCode.NOT_FOUND
 
-    transfer = parse_xtf(xtf_path)
+    transfer = read_skeleton(xtf_path) if args.stream else parse_xtf(xtf_path)
     repository = ModelRepository([Path(d) for d in args.repo]) if args.repo else None
 
     resolved = _resolve_schema_model_path(xtf_path, transfer, args, repository)
@@ -788,13 +788,18 @@ def cmd_validate(args: argparse.Namespace) -> int:
         print()
 
     catalogs = [parse_xtf(Path(c)) for c in args.catalog]
-    issues = validate_transfer(
-        transfer,
-        symbol_table=builder.symbol_table,
-        repository=repository,
-        catalogs=catalogs,
-        check_constraints=not args.no_constraints,
-    )
+    if args.stream:
+        if not args.no_constraints:
+            _warn("--stream: the model's CONSTRAINTs need whole populations and are not evaluated.")
+        issues = validate_stream(xtf_path, symbol_table=builder.symbol_table, repository=repository, catalogs=catalogs)
+    else:
+        issues = validate_transfer(
+            transfer,
+            symbol_table=builder.symbol_table,
+            repository=repository,
+            catalogs=catalogs,
+            check_constraints=not args.no_constraints,
+        )
 
     header_suffix = (
         f" - {len(header_status) - len(incomplete)}/{len(header_status)} header models resolved"
@@ -1613,6 +1618,12 @@ def main(argv: list[str] | None = None) -> int:
         "--no-constraints",
         action="store_true",
         help="Skip the model's CONSTRAINTs (MANDATORY, plausibility, UNIQUE); by default they are evaluated.",
+    )
+    validate_parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Read the transfer twice and hold one object at a time (flat memory). The model's CONSTRAINTs are "
+        "not evaluated: they need whole populations.",
     )
     validate_parser.add_argument("-q", "--quiet", action="store_true", help="Only print the final summary.")
     validate_parser.add_argument(

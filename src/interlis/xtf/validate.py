@@ -20,12 +20,14 @@ surfaced as an `info` issue rather than silently dropped - no confirmed
 real-world tag encoding exists to validate its content against).
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 
 from interlis.builder.forward_refs import SymbolTable
 from interlis.builder.repository import ModelRepository
 from interlis.metamodel.instance import MetaInstance
-from interlis.xtf.parse import RawNode, XtfBasket, XtfObject, XtfTransfer
+from interlis.xtf.parse import RawNode, XtfBasket, XtfObject, XtfTransfer, iter_objects
 from interlis.xtf.schema import (
     ResolvedAttribute,
     coord_axes,
@@ -1172,5 +1174,54 @@ def validate_transfer(
 
         issues.extend(
             check_transfer_constraints(transfer, symbol_table=symbol_table, repository=repository, catalogs=catalogs)
+        )
+    return issues
+
+
+def validate_stream(
+    path: Path,
+    *,
+    symbol_table: SymbolTable,
+    repository: ModelRepository | None = None,
+    catalogs: Iterable[XtfTransfer] = (),
+) -> list[ValidationIssue]:
+    """`validate_transfer` without its CONSTRAINTs, reading `path` twice so only one object is held at a time.
+
+    The first pass keeps a stub (TID and class) per object to resolve references and spot a duplicated TID; the
+    second validates each object against the schema. A CONSTRAINT looks at whole populations, so none is evaluated.
+    """
+    tid_index: dict[str, XtfObject] = {}
+    first_seen: dict[str, str] = {}
+    issues: list[ValidationIssue] = []
+    for basket, obj in iter_objects(path):
+        if obj.tid is None:
+            continue
+        tid_index.setdefault(obj.tid, XtfObject(obj.tid, obj.qualified_class, {}))
+        if basket.kind == "UPDATE":
+            continue
+        if obj.tid in first_seen:
+            message = f"TID {obj.tid!r} already used by {first_seen[obj.tid]}"
+            issues.append(ValidationIssue("error", basket.bid, obj.tid, obj.qualified_class, None, message))
+        else:
+            first_seen[obj.tid] = obj.qualified_class
+    for catalog in catalogs:
+        for basket in catalog.baskets:
+            for obj in basket.objects:
+                if obj.tid is not None:
+                    tid_index.setdefault(obj.tid, obj)
+    del first_seen
+    schema_cache: dict[int, dict[str, ResolvedAttribute]] = {}
+    for basket, obj in iter_objects(path):
+        if obj.operation == "DELETE":
+            continue
+        issues.extend(
+            _validate_object(
+                obj,
+                basket,
+                symbol_table=symbol_table,
+                repository=repository,
+                tid_index=tid_index,
+                schema_cache=schema_cache,
+            )
         )
     return issues
