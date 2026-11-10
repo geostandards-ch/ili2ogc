@@ -72,3 +72,23 @@ def test_stream_option_refuses_what_needs_the_whole_collection(tmp_path: Path):
     xtf = _xtf(tmp_path / "a.xtf", 1)
     args = ["convert-jsonfg", str(xtf), "--model", str(tmp_path / "M.ili"), "--stream"]
     assert main([*args, "--feature-schema-url", "x.json"]) != 0
+
+
+def test_validate_stream_reports_what_validate_reports(tmp_path: Path, capsys):
+    (tmp_path / "M.ili").write_text(_MODEL, encoding="utf-8")
+    xtf = _xtf(tmp_path / "a.xtf", 3)
+    xtf.write_text(
+        xtf.read_text(encoding="utf-8").replace("<Name>n1</Name>", "").replace('TID="o2"', 'TID="o0"'), encoding="utf-8"
+    )
+    base = ["validate-xtf", str(xtf), "--model", str(tmp_path / "M.ili"), "--no-constraints"]
+    main(base)
+    whole = capsys.readouterr().out
+    main([*base, "--stream"])
+    streamed = capsys.readouterr().out
+    assert whole == streamed and "already used by" in whole and "MANDATORY" in whole.upper()
+
+
+def test_validate_stream_says_constraints_are_skipped(tmp_path: Path, capsys):
+    (tmp_path / "M.ili").write_text(_MODEL, encoding="utf-8")
+    main(["validate-xtf", str(_xtf(tmp_path / "a.xtf", 1)), "--model", str(tmp_path / "M.ili"), "--stream"])
+    assert "CONSTRAINTs" in capsys.readouterr().err
