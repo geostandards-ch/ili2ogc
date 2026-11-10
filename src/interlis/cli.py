@@ -1206,7 +1206,8 @@ def cmd_convert_sld(args: argparse.Namespace) -> int:
             refused += 1
             continue
         try:
-            rendered[name] = _cartosym_mod.write_sld(_cartosym_mod.graphic_to_style(graphic, sign_library))
+            with _cartosym_mod.paper_as_pixels(args.dpi or None):
+                rendered[name] = _cartosym_mod.write_sld(_cartosym_mod.graphic_to_style(graphic, sign_library))
         except (NotImplementedError, _cartosym_mod.ScaleRangeError) as exc:
             _warn(f"GRAPHIC {name!r}: {exc} - skipped")
     if refused and not rendered:
@@ -1661,6 +1662,15 @@ def main(argv: list[str] | None = None) -> int:
         metavar="FILE_OR_DIR",
         help="Write to FILE when exactly one GRAPHIC is converted (stdout if omitted), or to DIR "
         "(one <GraphicName>.sld per GRAPHIC) when more than one is - required in that case.",
+    )
+    convert_sld_parser.add_argument(
+        "--dpi",
+        type=float,
+        default=0.0,
+        metavar="N",
+        help="For a symbology whose lengths are metres on paper at scale 1.0 (0.0002 = a 0.2 mm line): write them as "
+        "pixels at this resolution (96: 0.2 mm = 0.756 px; dashes become DLength x width): an SLD number has no unit "
+        "and the raw metres draw nothing. Default 0 keeps the raw numbers (right for models that give ground metres).",
     )
     convert_sld_parser.set_defaults(func=cmd_convert_sld)
 

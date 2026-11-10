@@ -28,7 +28,7 @@ interlis import-xtf transfer.xtf --model model.ili --repo models/ -o data.sql # 
 interlis convert-jsonfg transfer.xtf --repo models/ -o out.jsonfg.json   # .xtf -> OGC JSON-FG
 interlis validate-jsonfg out.jsonfg.json --model m.ili --repo models/ # check a JSON-FG file against the model
 interlis convert-cql2 model.ili -o model.cql2.json                      # CONSTRAINT -> CQL2-JSON filters
-interlis convert-sld symbology.ili --sign-xtf signs.xtf -o styles/      # GRAPHIC -> OGC SLD/SE
+interlis convert-sld symbology.ili --sign-xtf signs.xtf -o styles/      # GRAPHIC -> OGC SLD/SE (--dpi 96 for paper-metre symbologies)
 interlis write-xtf view-model.ili source.xtf -o view.xtf                # VIEW TOPIC data -> .xtf
 ```
 

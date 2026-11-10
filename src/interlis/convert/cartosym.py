@@ -18,6 +18,7 @@ ever be written out.
 import base64
 import math
 from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from lxml import etree
@@ -81,12 +82,44 @@ def color_to_rgb(lum: float, c: float, h: float) -> RGBColor:
     return RGBColor(r=r, g=g, b=b)
 
 
+_PX_PER_M: float | None = None
+
+
+@contextmanager
+def paper_as_pixels(dpi: float | None) -> Iterator[None]:
+    """Write every `StandardSymbology` length as pixels at `dpi`, inside the block (`None`: keep paper metres).
+
+    StandardSymbology sizes are metres on paper at scale 1.0 (a 0.2 mm line is `0.0002`). pycartosym's SLD writer
+    drops the unit, and an SLD number without `uom` is a pixel, so the raw metres draw nothing (0.0002 px). Converting
+    at the output resolution (`px = m / 0.0254 * dpi`, 96 dpi: 0.2 mm = 0.756 px) keeps the printed size, independent
+    of the map scale, which is what a paper symbology means. `DashRec.DLength` is relative to the line width, so a
+    dash becomes `DLength * width` in pixels instead of `round(DLength)`.
+    """
+    global _PX_PER_M
+    previous, _PX_PER_M = _PX_PER_M, (dpi / 0.0254 if dpi else None)
+    try:
+        yield
+    finally:
+        _PX_PER_M = previous
+
+
 def meters(value: float | None) -> UnitValue | None:
-    return None if value is None else UnitValue(value=value, unit=UnitType.METERS)
+    if value is None:
+        return None
+    if _PX_PER_M:
+        return UnitValue(value=value * _PX_PER_M, unit=UnitType.PIXELS)
+    return UnitValue(value=value, unit=UnitType.METERS)
 
 
 def degrees(value: float | None) -> Angle | None:
     return None if value is None else Angle(value=value, unit=AngleUnit.DEGREES)
+
+
+def _dash_pixels(dash_pattern: list[float], width: float | None) -> list[int]:
+    """Dash lengths as integers: `DLength` x width in pixels under `paper_as_pixels`, else rounded as is."""
+    if _PX_PER_M and width:
+        return [max(1, round(d * width * _PX_PER_M)) for d in dash_pattern]
+    return [round(d) for d in dash_pattern]
 
 
 def polyline_sign_to_stroke(
@@ -124,7 +157,7 @@ def polyline_sign_to_stroke(
         width=meters(width),
         join=join,
         cap=cap,
-        dash_pattern=[round(d) for d in dash_pattern] if dash_pattern else None,
+        dash_pattern=_dash_pixels(dash_pattern, width) if dash_pattern else None,
     )
 
 
