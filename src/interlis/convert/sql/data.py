@@ -161,10 +161,11 @@ def transfer_inserts(
 ) -> tuple[str, dict[str, int], list[str]]:
     """Return `(sql, rows per table, notes)` for every object of `transfers`, as one dataset.
 
-    A transfer holding `UPDATE`/`DELETE` objects is incremental and is replayed like a sequence of REST calls on an
-    EXISTING dataset (`dataset` must name it): `INSERT` = POST (409 if the TID is already there), `UPDATE` = PUT (the
-    object is replaced in place, 404 if absent), `DELETE` = DELETE (404 if absent). A failing call aborts and rolls
-    back the whole transaction.
+    A transfer holding `UPDATE`/`DELETE` objects, or a basket of KIND `UPDATE`/`INCREMENTAL`, is incremental and is
+    replayed like a sequence of REST calls on an EXISTING dataset (`dataset` must name it): `INSERT` = POST (409 if
+    the TID is already there), `UPDATE` = PUT (the object is replaced in place, 404 if absent), `DELETE` = DELETE
+    (404 if absent). A failing call aborts and rolls back the whole transaction. A full transfer is a POST of a
+    new dataset: 409 if `dataset` already exists.
     `table_of(qualified_class)` gives an object's class, its table and the symbol table declaring the class (for its
     embedded association roles), `None` when that class has no table here.
     A reference to an object absent from the transfers stays NULL (noted).
@@ -187,7 +188,12 @@ def transfer_inserts(
     basket_rows: list[tuple[int, str, str]] = []
     rows: list[_Row | _DeleteAnywhere] = []
     located: dict[str, tuple[str, int]] = {}  # TID -> (table, t_id)
-    incremental = any(o.operation in ("UPDATE", "DELETE") for t in transfers for b in t.baskets for o in b.objects)
+    incremental = any(
+        (b.kind or "").upper() in ("UPDATE", "INCREMENTAL")
+        or any(o.operation in ("UPDATE", "DELETE") for o in b.objects)
+        for t in transfers
+        for b in t.baskets
+    )
     for transfer in transfers:
         for basket in transfer.baskets:
             basket_id = next_id()
@@ -234,6 +240,12 @@ def transfer_inserts(
             for bid, topic, tid in basket_rows
         ]
     else:
+        statements.append(
+            _guard(
+                f"EXISTS (SELECT 1 FROM T_ILI2DB_DATASET WHERE datasetName = {_sql_literal(dataset)})",
+                f"409 Conflict: dataset {dataset} already exists",
+            )
+        )
         statements.append(
             "INSERT INTO T_ILI2DB_DATASET (T_Id, datasetName) "
             f"VALUES ({_BASE} + {dataset_id}, {_sql_literal(dataset)});"
