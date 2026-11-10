@@ -131,6 +131,26 @@ class _Row:
     operation: str = "INSERT"
 
 
+@dataclass
+class _DeleteAnywhere:
+    """A `DeleteObject`: remove the object with this TID, whichever class table holds it."""
+
+    tid: str | None
+
+
+def _delete_anywhere(tables: list[Table], tid: str | None, scope: str) -> str:
+    """One block deleting `tid` from every table of `tables`, aborting with a 404 when none held it."""
+    deletes = " ".join(
+        f"DELETE FROM {_quote(t.name)} WHERE {_quote(TID_COLUMN)} = {_sql_literal(tid)} AND {scope}; "
+        "GET DIAGNOSTICS c = ROW_COUNT; n := n + c;"
+        for t in tables
+    )
+    return (
+        f"DO $$ DECLARE n bigint := 0; c bigint; BEGIN {deletes} "
+        f"IF n = 0 THEN {_raise(f'404 Not Found: DeleteObject {tid}')} END IF; END $$;"
+    )
+
+
 def transfer_inserts(
     transfers: list[XtfTransfer],
     tables: list[Table],
@@ -165,7 +185,7 @@ def transfer_inserts(
 
     dataset_id = next_id()
     basket_rows: list[tuple[int, str, str]] = []
-    rows: list[_Row] = []
+    rows: list[_Row | _DeleteAnywhere] = []
     located: dict[str, tuple[str, int]] = {}  # TID -> (table, t_id)
     incremental = any(o.operation in ("UPDATE", "DELETE") for t in transfers for b in t.baskets for o in b.objects)
     for transfer in transfers:
@@ -173,6 +193,9 @@ def transfer_inserts(
             basket_id = next_id()
             basket_rows.append((basket_id, basket.qualified_topic, basket.bid))
             for obj in basket.objects:
+                if obj.operation == "DELETE" and not obj.qualified_class:
+                    rows.append(_DeleteAnywhere(obj.tid))  # a DeleteObject: the class is unknown, search every table
+                    continue
                 found = table_of(obj.qualified_class)
                 if found is None or found[1] not in by_name:
                     skipped[obj.qualified_class] = skipped.get(obj.qualified_class, 0) + 1
@@ -309,7 +332,14 @@ def transfer_inserts(
         counts[row.table.name] = counts.get(row.table.name, 0) + 1
 
     for row in rows:
+        if isinstance(row, _DeleteAnywhere):
+            if row.tid is None:
+                notes.append("a DeleteObject without a TID was skipped")
+            else:
+                statements.append(_delete_anywhere([t for t in tables if t.has_tid and not t.parent], row.tid, scope))
+            continue
         insert(row, row.basket or dataset_id)
+
     statements.append("COMMIT;")
     if unresolved:
         notes.append(f"{unresolved} reference(s) to an object not in these transfers left NULL")

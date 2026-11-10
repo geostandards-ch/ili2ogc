@@ -77,3 +77,38 @@ def test_convert_jsonfg_warns_that_operations_are_not_carried(tmp_path: Path, ca
     xtf = _setup(tmp_path)
     main(["convert-jsonfg", str(xtf), "--model", str(tmp_path / "M.ili"), "-o", str(tmp_path / "o.json")])
     assert "JSONFG-INCREMENTAL-UNSUPPORTED" in capsys.readouterr().err
+
+
+_XTF24 = """<?xml version="1.0" encoding="UTF-8"?>
+<ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS" xmlns="http://www.interlis.ch/xtf/2.4/M">
+<ili:headersection sender="x" version="2.4"><ili:models><ili:model>M</ili:model></ili:models></ili:headersection>
+<ili:datasection>
+<T ili:bid="b1" ili:kind="UPDATE">
+<A ili:tid="new"><Name>n</Name></A>
+<ili:delete ili:tid="gone"/>
+</T>
+</ili:datasection>
+</ili:transfer>
+"""
+
+
+def test_delete_object_names_a_tid_but_no_class(tmp_path: Path):
+    (tmp_path / "M.ili").write_text(_MODEL, encoding="utf-8")
+    xtf = tmp_path / "d.xtf"
+    xtf.write_text(_XTF24, encoding="utf-8")
+    objects = parse_xtf(xtf).baskets[0].objects
+    assert [(o.qualified_class, o.operation, o.tid) for o in objects] == [
+        ("M.T.A", None, "new"),
+        ("", "DELETE", "gone"),
+    ]
+
+
+def test_import_deletes_a_delete_object_from_whichever_table_holds_it(tmp_path: Path):
+    (tmp_path / "M.ili").write_text(_MODEL, encoding="utf-8")
+    xtf = tmp_path / "d.xtf"
+    xtf.write_text(_XTF24, encoding="utf-8")
+    out = tmp_path / "o.sql"
+    main(["import-xtf", str(xtf), "--model", str(tmp_path / "M.ili"), "--dataset", "ds", "-o", str(out)])
+    sql = out.read_text(encoding="utf-8")
+    assert """DELETE FROM "a" WHERE "t_ili_tid" = 'gone'""" in sql
+    assert "404 Not Found: DeleteObject gone" in sql
