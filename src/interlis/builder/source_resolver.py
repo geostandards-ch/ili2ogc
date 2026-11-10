@@ -25,7 +25,7 @@ from antlr4.tree.Tree import TerminalNode
 from interlis.builder import context_access as ca
 from interlis.builder.errors import BuildError
 from interlis.builder.forward_refs import ForwardRef
-from interlis.runtime.parse import _unquote_interlis_string
+from interlis.runtime.parse import unquote_interlis_string
 
 ALT_KINDS = {"alt_token", "alt_rule", "alt_token_or_rule", "alt_token_presence"}
 
@@ -381,7 +381,7 @@ def _resolve_source(
         raise BuildError(f"{field!r} missing (not optional) on {type(ctx).__name__}", rule=rule, ctx=ctx)
     value = _resolve_node(node, builder, rule)
     if source.get("unquote") and isinstance(value, str):
-        value = _unquote_interlis_string(value)
+        value = unquote_interlis_string(value)
     if rule_map is not None:
         return rule_map.get(value, value)
     return value

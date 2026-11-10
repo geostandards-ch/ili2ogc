@@ -8,7 +8,6 @@ translatable subset.
 from __future__ import annotations
 
 from interlis.builder.forward_refs import SymbolTable
-from interlis.convert.jsonschema import _is_structure
 from interlis.convert.view_formation import (
     AREA_EDGE,
     LINE_GEOMETRY,
@@ -29,6 +28,7 @@ from interlis.xtf.schema import (
     attributes_of,
     enum_values,
     is_class_compatible,
+    is_structure,
     reference_target_class,
     resolve_attribute,
     schema_members_of,
@@ -138,7 +138,7 @@ class _ViewResolver:
         itself, not a sub-field, only resolves when it flattens to
         EXACTLY one column (else ambiguous which one it means).
         """
-        if resolved.type_kind != "Class" or not _is_structure(resolved.type_instance):
+        if resolved.type_kind != "Class" or not is_structure(resolved.type_instance):
             return None
         if bool(getattr(resolved.type_instance, "Abstract", False)):
             return None
@@ -225,7 +225,7 @@ class _ViewResolver:
                 raise _UnsupportedView(f"{hop!r} is not an attribute/role of {getattr(cls, 'Name', None)!r}")
             resolved = resolve_attribute(attr)
             col = _sql_identifier(f"{prefix}{hop}")
-            if not is_last and resolved.type_kind == "Class" and _is_structure(resolved.type_instance):
+            if not is_last and resolved.type_kind == "Class" and is_structure(resolved.type_instance):
                 # Step into the flattened STRUCTURE (e.g. a catalogue reference wrapper).
                 cls, prefix = resolved.type_instance, f"{prefix}{hop}_"
                 continue

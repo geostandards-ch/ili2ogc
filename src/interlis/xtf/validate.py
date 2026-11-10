@@ -77,7 +77,7 @@ class ValidationIssue:
         )
 
 
-def _extract_reference(node: RawNode) -> str | None:
+def extract_reference(node: RawNode) -> str | None:
     """Find a reference attribute's target TID/OID, in one of 3 known forms.
 
     - spec form (canonical INTERLIS 2.4): an `ili:ref` XML attribute
@@ -99,7 +99,7 @@ def _extract_reference(node: RawNode) -> str | None:
         if key.rsplit("}", 1)[-1] == "ref":
             return val
     for child in node.children:
-        found = _extract_reference(child)
+        found = extract_reference(child)
         if found is not None:
             return found
     if "REF" in node.attrib:
@@ -220,7 +220,7 @@ def _validate_scalar(resolved: ResolvedAttribute, node: RawNode, ctx: str) -> li
 #   maps Kind=Area to "SURFACE" accordingly.
 #
 # Two real wire conventions exist for the SAME abstract geometry - both
-# accepted (see `_geom_tag`/`_find_child`, case-insensitive comparison):
+# accepted (see `geom_tag`/`find_child`, case-insensitive comparison):
 #
 # XTF 2.3 (every file in xtf_corpus/ and tests/fixtures/xtf/xtf23overlap/,
 # ili2pg/ili2gpkg-generated - the ONLY convention seen in real, currently-
@@ -248,7 +248,7 @@ def _validate_scalar(resolved: ResolvedAttribute, node: RawNode, ctx: str) -> li
 # by `xtf/parse.py`'s `_strip_ns`) and lowercase - `<AttrName><geom:coord>
 # <geom:c1>x</geom:c1>...</geom:coord></AttrName>`; boundaries are tagged
 # directly as `<geom:exterior>`/`<geom:interior>` (no BOUNDARY wrapper -
-# `_BOUNDARY_TAGS`), and Xtf24Reader accepts `<geom:area>`/`<geom:multiarea>`
+# `BOUNDARY_TAGS`), and Xtf24Reader accepts `<geom:area>`/`<geom:multiarea>`
 # as synonyms for `<geom:surface>`/`<geom:multisurface>` too (`_SURFACE_TAGS`).
 #
 # MULTICOORD/MULTIPOLYLINE/MULTISURFACE/MULTIAREA are structurally identical
@@ -263,7 +263,7 @@ def _validate_scalar(resolved: ResolvedAttribute, node: RawNode, ctx: str) -> li
 # never reported as "0 problems" while part of its geometry went unchecked.
 
 
-def _geom_tag(node: RawNode) -> str:
+def geom_tag(node: RawNode) -> str:
     """Normalize a geometry wire tag for comparison against a fixed keyword.
 
     Two real wire conventions exist for the SAME abstract geometry: XTF 2.3
@@ -282,8 +282,8 @@ def _geom_tag(node: RawNode) -> str:
     return node.tag.upper()
 
 
-def _find_child(node: RawNode, tag: str) -> RawNode | None:
-    """Case-insensitive lookup by a fixed geometry keyword - `tag` is UPPERCASE (see `_geom_tag`)."""
+def find_child(node: RawNode, tag: str) -> RawNode | None:
+    """Case-insensitive lookup by a fixed geometry keyword - `tag` is UPPERCASE (see `geom_tag`)."""
     return next((c for c in node.children if c.tag.upper() == tag), None)
 
 
@@ -323,7 +323,7 @@ def _axis_components(node: RawNode, prefix: str) -> list[RawNode]:
     out: list[RawNode] = []
     i = 1
     while True:
-        child = _find_child(node, f"{prefix}{i}")
+        child = find_child(node, f"{prefix}{i}")
         if child is None:
             break
         out.append(child)
@@ -358,7 +358,7 @@ def _validate_axis_values(components: list[RawNode], axes: list[MetaInstance], c
 
 
 def _validate_coord_node(node: RawNode, axes: list[MetaInstance], ctx: str) -> list[str]:
-    if _geom_tag(node) != "COORD":
+    if geom_tag(node) != "COORD":
         return [f"{ctx}: expected COORD geometry, found tag {node.tag!r}"]
     return _validate_axis_values(_axis_components(node, "C"), axes, ctx, label="C")
 
@@ -372,7 +372,7 @@ def _validate_arc_node(node: RawNode, axes: list[MetaInstance], ctx: str) -> lis
     (radius, optional): numeric PARSEABILITY only, never a range - no axis
     covers it (it's a derived length, not a coordinate).
     """
-    if _geom_tag(node) != "ARC":
+    if geom_tag(node) != "ARC":
         return [f"{ctx}: expected ARC geometry, found tag {node.tag!r}"]
     problems = _validate_axis_values(_axis_components(node, "C"), axes, ctx, label="C")
     mid = _axis_components(node, "A")
@@ -380,21 +380,21 @@ def _validate_arc_node(node: RawNode, axes: list[MetaInstance], ctx: str) -> lis
         problems.append(f"{ctx}: missing intermediate point A1/A2 (ARC)")
     else:
         problems.extend(_validate_axis_values(mid, axes[:2], ctx, label="A"))
-    r_node = _find_child(node, "R")
+    r_node = find_child(node, "R")
     if r_node is not None:
         problems.extend(_numeric_problems(r_node.text, None, None, f"{ctx}.R"))
     return problems
 
 
 def _validate_polyline_node(node: RawNode, axes: list[MetaInstance], ctx: str) -> list[str]:
-    if _geom_tag(node) != "POLYLINE":
+    if geom_tag(node) != "POLYLINE":
         return [f"{ctx}: expected POLYLINE geometry, found tag {node.tag!r}"]
     if not node.children:
         return [f"{ctx}: empty POLYLINE (no segment)"]
     problems: list[str] = []
     for i, seg in enumerate(node.children):
         seg_ctx = f"{ctx}[{i}]"
-        seg_tag = _geom_tag(seg)
+        seg_tag = geom_tag(seg)
         if seg_tag == "COORD":
             problems.extend(_validate_coord_node(seg, axes, seg_ctx))
         elif seg_tag == "ARC":
@@ -413,13 +413,13 @@ def _validate_polyline_node(node: RawNode, axes: list[MetaInstance], ctx: str) -
 # <exterior>/<interior> (Xtf24Reader.QNAME_GEOM_EXTERIOR/INTERIOR), no
 # separate wrapper - both directly contain exactly one POLYLINE, so the
 # same validation applies once the tag is accepted here.
-_BOUNDARY_TAGS = frozenset({"BOUNDARY", "EXTERIOR", "INTERIOR"})
+BOUNDARY_TAGS = frozenset({"BOUNDARY", "EXTERIOR", "INTERIOR"})
 
 
 def _validate_boundary_node(node: RawNode, axes: list[MetaInstance], ctx: str) -> list[str]:
-    if _geom_tag(node) not in _BOUNDARY_TAGS:
+    if geom_tag(node) not in BOUNDARY_TAGS:
         return [f"{ctx}: expected BOUNDARY geometry, found tag {node.tag!r}"]
-    polylines = [c for c in node.children if _geom_tag(c) == "POLYLINE"]
+    polylines = [c for c in node.children if geom_tag(c) == "POLYLINE"]
     if not polylines:
         return [f"{ctx}: BOUNDARY without POLYLINE"]
     problems: list[str] = []
@@ -437,9 +437,9 @@ _SURFACE_TAGS = frozenset({"SURFACE", "AREA"})
 
 def _validate_surface_node(node: RawNode, axes: list[MetaInstance], ctx: str) -> list[str]:
     """Validate a SURFACE/AREA node (also used for LineType Kind=Area - see `_LINE_KIND_TAGS`)."""
-    if _geom_tag(node) not in _SURFACE_TAGS:
+    if geom_tag(node) not in _SURFACE_TAGS:
         return [f"{ctx}: expected SURFACE geometry, found tag {node.tag!r}"]
-    boundaries = [c for c in node.children if _geom_tag(c) in _BOUNDARY_TAGS]
+    boundaries = [c for c in node.children if geom_tag(c) in BOUNDARY_TAGS]
     if not boundaries:
         return [f"{ctx}: SURFACE without any BOUNDARY"]
     problems: list[str] = []
@@ -460,12 +460,12 @@ def _validate_coord_attribute(resolved: ResolvedAttribute, node: RawNode, ctx: s
     axes = coord_axes(coord_type)
     expected_tag = "MULTICOORD" if multi else "COORD"
     child = node.children[0] if node.children else None
-    if child is None or _geom_tag(child) != expected_tag:
+    if child is None or geom_tag(child) != expected_tag:
         found = child.tag if child is not None else "(empty)"
         return [f"{ctx}: expected {expected_tag} geometry (Type=CoordType, Multi={multi}), found {found!r}"]
     if not multi:
         return _validate_coord_node(child, axes, ctx)
-    coords = [c for c in child.children if _geom_tag(c) == "COORD"]
+    coords = [c for c in child.children if geom_tag(c) == "COORD"]
     if not coords:
         return [f"{ctx}: MULTICOORD without any inner COORD"]
     problems: list[str] = []
@@ -480,7 +480,7 @@ def _validate_coord_attribute(resolved: ResolvedAttribute, node: RawNode, ctx: s
 # Kinds). Confirmed against a real file (iox-ili's Xtf23Overlap/AreaSimple.xtf,
 # `Kind=Area` attribute encoded as `<SURFACE><BOUNDARY>...`, never `<AREA>`).
 # Each value is the SET of tags accepted for that Kind (see `_SURFACE_TAGS`
-# above for why Surface/Area share both spellings) - `_geom_tag` handles the
+# above for why Surface/Area share both spellings) - `geom_tag` handles the
 # XTF 2.3/2.4 case difference, this only needs to handle the AREA synonym.
 _LINE_KIND_TAGS = {
     "Polyline": frozenset({"POLYLINE"}),
@@ -506,8 +506,8 @@ def _custom_line_form_tags(node: RawNode) -> set[str]:
     tags of its non-COORD/ARC segments, regardless of depth.
     """
     tags: set[str] = set()
-    if _geom_tag(node) == "POLYLINE":
-        tags.update(seg.tag for seg in node.children if _geom_tag(seg) not in ("COORD", "ARC"))
+    if geom_tag(node) == "POLYLINE":
+        tags.update(seg.tag for seg in node.children if geom_tag(seg) not in ("COORD", "ARC"))
     for child in node.children:
         tags |= _custom_line_form_tags(child)
     return tags
@@ -550,7 +550,7 @@ def _validate_line_attribute(resolved: ResolvedAttribute, node: RawNode, ctx: st
         return [], []  # Unresolved/unexpected Kind - nothing reliable to check
     expected_tags = _LINE_KIND_MULTI_TAGS[kind] if multi else single_tags
     child = node.children[0] if node.children else None
-    if child is None or _geom_tag(child) not in expected_tags:
+    if child is None or geom_tag(child) not in expected_tags:
         found = child.tag if child is not None else "(empty)"
         label = "/".join(sorted(expected_tags))
         return [f"{ctx}: expected {label} geometry (LineType Kind={kind!r}, Multi={multi}), found {found!r}"], []
@@ -558,7 +558,7 @@ def _validate_line_attribute(resolved: ResolvedAttribute, node: RawNode, ctx: st
     validator = _validate_polyline_node if single_tags == frozenset({"POLYLINE"}) else _validate_surface_node
     if not multi:
         return validator(child, axes, ctx), infos
-    parts = [c for c in child.children if _geom_tag(c) in single_tags]
+    parts = [c for c in child.children if geom_tag(c) in single_tags]
     if not parts:
         label = "/".join(sorted(single_tags))
         return [f"{ctx}: {child.tag} without any inner {label}"], infos
@@ -658,7 +658,7 @@ def unresolved_reference_detail(status: bool | None) -> str:
     )
 
 
-def _build_tid_index(transfer: XtfTransfer, catalogs: list[XtfTransfer] | None = None) -> dict[str, XtfObject]:
+def build_tid_index(transfer: XtfTransfer, catalogs: list[XtfTransfer] | None = None) -> dict[str, XtfObject]:
     """Map TID -> XtfObject, across every basket of the transfer.
 
     A reference can target an object in a different basket of the same
@@ -715,7 +715,7 @@ def _resolved_schema_of(
     return cached
 
 
-def _group_by_tag(nodes: list[RawNode]) -> dict[str, list[RawNode]]:
+def group_by_tag(nodes: list[RawNode]) -> dict[str, list[RawNode]]:
     """Group a FLAT list of `RawNode` by tag name.
 
     E.g. the children of ONE structure occurrence - same convention as
@@ -969,7 +969,7 @@ def _validate_resolved_attr(
             # target - never against the wrapper STRUCTURE itself.
             for node in raw_nodes:
                 wrapper = node if already_unwrapped else (node.children[0] if node.children else None)
-                child_attrs = _group_by_tag(wrapper.children) if wrapper is not None else {}
+                child_attrs = group_by_tag(wrapper.children) if wrapper is not None else {}
                 issues.extend(
                     _validate_attrs(
                         resolved.type_instance,
@@ -986,7 +986,7 @@ def _validate_resolved_attr(
                     )
                 )
             return issues
-        ref = _extract_reference(raw_nodes[0]) if raw_nodes else None
+        ref = extract_reference(raw_nodes[0]) if raw_nodes else None
         if ref is None:
             restriction_issue = _validate_restriction_text(
                 resolved,
@@ -1147,9 +1147,9 @@ def validate_transfer(
     (`parse_xtf`) whose objects should also count as resolvable for
     TID/REF resolution - typically a catalogue-data basket
     (RoadTrafficCensusCatalogues and family) distributed separately from
-    the main business data transfer (see `_build_tid_index`).
+    the main business data transfer (see `build_tid_index`).
     """
-    tid_index = _build_tid_index(transfer, catalogs)
+    tid_index = build_tid_index(transfer, catalogs)
     schema_cache: dict[int, dict[str, ResolvedAttribute]] = {}
     issues: list[ValidationIssue] = _duplicate_tid_issues(transfer)
     for basket in transfer.baskets:

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from interlis.builder.forward_refs import SymbolTable
 from interlis.convert.geometry_kinds import GEOMETRY_KINDS
-from interlis.convert.jsonschema import _is_structure
 from interlis.diagnostic_ids import note as _diag
 from interlis.metamodel.instance import MetaInstance
 from interlis.xtf.schema import (
@@ -20,6 +19,7 @@ from interlis.xtf.schema import (
     embedded_roles_of,
     inheritance_chain,
     is_class_compatible,
+    is_structure,
     line_allows_arcs,
     multi_geometry_element,
     reference_target_class,
@@ -128,7 +128,7 @@ def _columns_for_class(
             element = getattr(multi_value, "BaseType", None)
             is_abstract_struct = (
                 isinstance(element, MetaInstance)
-                and _is_structure(element)
+                and is_structure(element)
                 and bool(getattr(element, "Abstract", False))
             )
             # A BAG/LIST's child table stands for the attribute even inside a flattened STRUCTURE.
@@ -142,7 +142,7 @@ def _columns_for_class(
                 child_paths[label] = here
             continue
 
-        if resolved.type_kind == "Class" and _is_structure(resolved.type_instance):
+        if resolved.type_kind == "Class" and is_structure(resolved.type_instance):
             # A multi-geometry wrapper (CHBase MultiSurface/MultiLine/MultiPoint)
             # is one Multi* column, not a child table of single parts.
             multi_geometry = multi_geometry_element(resolved.type_instance)
@@ -339,7 +339,7 @@ def _build_child_table(
         columns.append(Column(SEQ_COLUMN, "bigint", nullable=False))
 
     nested_child_specs: list[tuple[str, MetaInstance]] = []
-    if base_kind == "Class" and _is_structure(base_type):
+    if base_kind == "Class" and is_structure(base_type):
         if bool(getattr(base_type, "Abstract", False)):
             # An abstract element is routed to `abstract_specs` by `_columns_for_class`
             # (one child table per concrete subclass) - never reaches here.
@@ -382,7 +382,7 @@ def _build_child_table(
 
     renamed = _avoid_identity_collision(columns)
     checks: list[CheckConstraint] = []
-    if base_kind == "Class" and _is_structure(base_type):
+    if base_kind == "Class" and is_structure(base_type):
         # The element STRUCTURE's own MANDATORY CONSTRAINTs bind each child row.
         checks, check_notes = _check_constraints_for_class(
             base_type, child_table_name, {c.name for c in columns}, renamed

@@ -28,6 +28,9 @@ from interlis.xtf.schema import (
     attributes_of,
     concrete_structure_subclasses,
     enum_values,
+    is_integer_range,
+    is_structure,
+    nested_class,
     reference_external_status,
     reference_target_class,
     resolve_attribute,
@@ -91,19 +94,10 @@ def _crud_operations(class_instance: MetaInstance) -> tuple[str, ...] | None:
     return _FULL_CRUD
 
 
-def _is_integer_range(min_raw: str | None, max_raw: str | None) -> bool:
-    """True if both bounds are present and neither has a decimal point.
-
-    Same shape heuristic already used (read-only, not duplicated) by
-    xtf/validate.py's `_decimal_places` for range-tolerance rounding.
-    """
-    return min_raw is not None and max_raw is not None and "." not in min_raw and "." not in max_raw
-
-
 def _num_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
     min_raw = getattr(type_instance, "Min", None)
     max_raw = getattr(type_instance, "Max", None)
-    schema: dict[str, Any] = {"type": "integer" if _is_integer_range(min_raw, max_raw) else "number"}
+    schema: dict[str, Any] = {"type": "integer" if is_integer_range(min_raw, max_raw) else "number"}
     cast = int if schema["type"] == "integer" else float
     for keyword, raw in (("minimum", min_raw), ("maximum", max_raw)):
         if raw is None:
@@ -240,21 +234,6 @@ def _reference_type_schema(resolved: ResolvedAttribute) -> dict[str, Any]:
     return schema
 
 
-def _is_structure(type_instance: MetaInstance | None) -> bool:
-    """True if a `type_kind == "Class"` resolution is genuine STRUCTURE nesting.
-
-    `resolve_attribute` resolves BOTH a `Class(Kind=Structure)` attribute
-    AND an embedded association role
-    (`xtf.schema.embedded_roles_of` - always `Kind == "Class"`, a role
-    points at a real class instance, never a structure) to the SAME
-    `type_kind == "Class"`. `Kind` is the only signal that tells them
-    apart - confirmed by `xtf/validate.py`'s own `_validate_resolved_attr`
-    dispatch (`Kind == "Structure"` recurses into inline content;
-    anything else expects a `REF`/OID, same as a plain `REFERENCE TO`).
-    """
-    return type_instance is not None and getattr(type_instance, "Kind", None) == "Structure"
-
-
 # `_concrete_subclasses` moved to `xtf.schema.concrete_structure_subclasses`
 # (shared with `convert/sql.py`'s abstract-structure child tables).
 _concrete_subclasses = concrete_structure_subclasses
@@ -267,7 +246,7 @@ def _class_ref_or_marker(
 ) -> dict[str, Any]:
     """Return a `$ref` to `class_instance`'s own $defs entry, or the unsupported marker.
 
-    Only called for genuine STRUCTURE nesting (`_is_structure` already
+    Only called for genuine STRUCTURE nesting (`is_structure` already
     checked by the caller) - a Class not present in `ref_keys` means it
     wasn't reachable from the roots given to `model_to_json_schema` (e.g.
     an unresolved cross-model reference, no `--repo` given) - RULE #5,
@@ -329,7 +308,7 @@ def _element_schema(
     scalar = _scalar_type_schema(kind, type_instance)
     if scalar is not None:
         return scalar
-    if kind == "Class" and _is_structure(type_instance):
+    if kind == "Class" and is_structure(type_instance):
         wrapped = wrapped_reference(type_instance)
         if wrapped is not None:
             return _reference_type_schema(wrapped)
@@ -393,7 +372,7 @@ def _attribute_schema(
     LineType/ReferenceType/Class/MultiValue) is never silently dropped -
     it gets an explicit `x-unsupported` marker instead (RULE #5).
 
-    `type_kind == "Class"` covers two DIFFERENT things (see `_is_structure`):
+    `type_kind == "Class"` covers two DIFFERENT things (see `is_structure`):
     genuine STRUCTURE nesting (`$ref`/`anyOf` if ABSTRACT, see
     `_class_ref_or_marker`) vs. an embedded association
     role - which, like a plain `REFERENCE TO`, is
@@ -412,7 +391,7 @@ def _attribute_schema(
     """
     if resolved.type_kind == "MultiValue" and resolved.type_instance is not None:
         schema = _multi_value_schema(resolved.type_instance, ref_keys, symbol_table)
-    elif resolved.type_kind == "Class" and _is_structure(resolved.type_instance):
+    elif resolved.type_kind == "Class" and is_structure(resolved.type_instance):
         wrapped = wrapped_reference(resolved.type_instance)
         schema = (
             _reference_type_schema(wrapped)
@@ -427,27 +406,6 @@ def _attribute_schema(
     if meta:
         schema["x-meta"] = meta
     return schema
-
-
-def _nested_class(resolved: ResolvedAttribute) -> MetaInstance | None:
-    """Return the Class a structure/BAG/LIST-of-structure attribute points to, else None.
-
-    Only genuine STRUCTURE nesting counts as "reachable" for `$defs`
-    discovery (`_is_structure`) - an embedded association role's target
-    is a REFERENCE, not containment, same as a plain `REFERENCE TO`
-    target (also never added to `$defs` by this discovery).
-    """
-    if resolved.type_kind == "Class" and _is_structure(resolved.type_instance):
-        return resolved.type_instance
-    if resolved.type_kind == "MultiValue" and resolved.type_instance is not None:
-        base = getattr(resolved.type_instance, "BaseType", None)
-        if (
-            isinstance(base, MetaInstance)
-            and base._qualified_class.rsplit(".", 1)[-1] == "Class"
-            and _is_structure(base)
-        ):
-            return base
-    return None
 
 
 def _discover_classes(roots: list[MetaInstance], symbol_table: SymbolTable | None = None) -> dict[int, MetaInstance]:
@@ -489,7 +447,7 @@ def _discover_classes(roots: list[MetaInstance], symbol_table: SymbolTable | Non
             resolved = resolve_attribute(attr)
             if feature and geometry_format(resolved.type_kind, resolved.type_instance, feature_level=True):
                 continue
-            nested = _nested_class(resolved)
+            nested = nested_class(resolved)
             if nested is not None and id(nested) not in found:
                 queue.append(nested)
     return found
@@ -583,7 +541,7 @@ def class_to_json_schema(
     ASSOCIATION ROLES (`xtf.schema.schema_members_of` instead of plain
     `attributes_of`) as pseudo-attributes - mapped the SAME way as a
     plain `REFERENCE TO` (a `REF`/OID, never inlined - see
-    `_is_structure`), since that's how the XTF wire format actually
+    `is_structure`), since that's how the XTF wire format actually
     transfers them. `None` (the default) means own+inherited
     `ClassAttribute`s only, no embedded roles.
 

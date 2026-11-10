@@ -34,7 +34,7 @@ from interlis.convert.constraint_eval import (
     describe_expression,
     evaluate_expression,
 )
-from interlis.convert.jsonfg import _raw_node_value
+from interlis.convert.jsonfg import raw_node_value
 from interlis.metamodel.instance import MetaInstance
 from interlis.xtf.parse import RawNode, XtfBasket, XtfObject, XtfTransfer
 from interlis.xtf.schema import (
@@ -45,7 +45,7 @@ from interlis.xtf.schema import (
     resolve_attribute,
     resolve_class,
 )
-from interlis.xtf.validate import ValidationIssue, _build_tid_index, _extract_reference, _group_by_tag
+from interlis.xtf.validate import ValidationIssue, build_tid_index, extract_reference, group_by_tag
 
 _UNDEFINED = object()
 _ATTRIBUTE_KINDS = ("ReferenceAttr", "Attribute")
@@ -68,10 +68,10 @@ class _ObjectScope(dict):
 
     def __getitem__(self, name: str) -> Any:
         node = self._obj.attributes[name][0]
-        target = _extract_reference(node)
+        target = extract_reference(node)
         if target is not None and target in self._by_tid:
             return _ObjectScope(self._by_tid[target], self._by_tid)
-        return _raw_node_value(node)
+        return raw_node_value(node)
 
     def __eq__(self, other: object) -> bool:
         return self._obj.tid == (other._obj.tid if isinstance(other, _ObjectScope) else other)
@@ -179,7 +179,7 @@ def _path_value(obj: XtfObject, path_els: list[MetaInstance], by_tid: dict[str, 
         if not nodes:
             return _UNDEFINED
         node = nodes[0]
-        target = _extract_reference(node)
+        target = extract_reference(node)
         if index < len(path_els) - 1:
             if target is None:
                 raise UnsupportedExpressionError("navigation through a structure attribute is not supported")
@@ -244,7 +244,7 @@ def _structure_elements(obj: XtfObject, hops: list[str]) -> list[dict[str, list[
     holders = [obj.attributes]
     for hop in hops:
         holders = [
-            _group_by_tag(occurrence.children)
+            group_by_tag(occurrence.children)
             for holder in holders
             for node in holder.get(hop, [])
             for occurrence in node.children
@@ -289,17 +289,17 @@ def _attribute_values(obj: XtfObject, names: list[str], by_tid: dict[str, XtfObj
         following: list[dict[str, list[RawNode]]] = []
         for holder in holders:
             for node in holder.get(name, []):
-                target = _extract_reference(node)
+                target = extract_reference(node)
                 if target is not None:
                     if target in by_tid:
                         following.append(by_tid[target].attributes)
                 else:
-                    following.extend(_group_by_tag(occurrence.children) for occurrence in node.children)
+                    following.extend(group_by_tag(occurrence.children) for occurrence in node.children)
         holders = following
     values: list[Any] = []
     for holder in holders:
         for node in holder.get(names[-1], []):
-            target = _extract_reference(node)
+            target = extract_reference(node)
             if target is not None:
                 values.append(target)
             elif node.text is not None and not node.children:
@@ -416,14 +416,14 @@ def _association_links(
         embedded_index = roles.index(embedded_role)
         for obj in population.objects_of(embed_on):
             for node in obj.attributes.get(embedded_role.Name, []):
-                target = _extract_reference(node)
+                target = extract_reference(node)
                 if obj.tid is not None and target is not None:
                     ends = ["", ""]
                     ends[embedded_index], ends[1 - embedded_index] = target, obj.tid
                     links.append((ends[0], ends[1]))
         return links, [1 - embedded_index]
     for obj in population.objects_of(assoc):
-        refs = [[_extract_reference(n) for n in obj.attributes.get(role.Name, [])] for role in roles]
+        refs = [[extract_reference(n) for n in obj.attributes.get(role.Name, [])] for role in roles]
         if all(len(r) == 1 and r[0] is not None for r in refs):
             links.append((refs[0][0], refs[1][0]))  # type: ignore[arg-type]
     return links, [0, 1]
@@ -529,7 +529,7 @@ def check_transfer_constraints(
     catalogs: list[XtfTransfer] | None = None,
 ) -> list[ValidationIssue]:
     """Check the constraints of every object of `transfer`, returning the issues found (see module docstring)."""
-    by_tid = _build_tid_index(transfer, catalogs)
+    by_tid = build_tid_index(transfer, catalogs)
     report = _Report()
     cache: dict[str, list[MetaInstance]] = {}
     unique_members: dict[int, tuple[MetaInstance, list[tuple[XtfBasket, XtfObject]]]] = {}

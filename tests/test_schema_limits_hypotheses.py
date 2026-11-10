@@ -71,7 +71,6 @@ def test_h4_arc_geometry_is_stroked_on_load_not_dropped():
     assert sql.startswith("ST_CurveToLine(") and "CIRCULARSTRING" in sql
 
 
-@pytest.mark.xfail(strict=True, reason="H8: convert/sql imports private helpers of convert.jsonfg / convert.jsonschema")
 def test_h8_sql_package_has_no_private_cross_package_imports():
     pattern = re.compile(r"from interlis\.convert\.(jsonfg|jsonschema) import [^\n]*\b_\w+")
     offenders = [

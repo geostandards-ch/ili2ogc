@@ -19,10 +19,10 @@ from interlis.builder.repository import ModelRepository
 from interlis.convert.geometry_kinds import geometry_types
 from interlis.convert.jsonfg import _context_concrete_domain, _crs_uri, geometry_coord_type
 from interlis.convert.jsonschema import (
-    _is_structure,
     class_schema_keys,
     convertible_roots,
     inherited_topic_classes,
+    is_structure,
     model_to_json_schema,
     property_validator,
 )
@@ -39,7 +39,7 @@ from interlis.xtf.schema import (
     restriction_candidates,
     schema_members_of,
 )
-from interlis.xtf.validate import ValidationIssue, _build_tid_index, unresolved_reference_detail
+from interlis.xtf.validate import ValidationIssue, build_tid_index, unresolved_reference_detail
 
 _CURVE_TYPES_WITH_POSITIONS = ("CircularString",)
 _MAX_NESTING = 8
@@ -385,7 +385,7 @@ class _JsonFgValidator:
         return XtfTransfer(None, None, [], list(baskets.values()))
 
     def _references(self, checked: list[_Checked], catalogs: list[XtfTransfer] | None) -> list[ValidationIssue]:
-        known = _build_tid_index(self._transfer(checked), catalogs)
+        known = build_tid_index(self._transfer(checked), catalogs)
         found: list[ValidationIssue] = []
         for item in checked:
             properties = item.feature.get("properties")
@@ -431,13 +431,13 @@ def _nested_references(
     structure = resolved.type_instance
     if resolved.type_kind == "MultiValue":
         structure = getattr(structure, "BaseType", None)
-        if isinstance(structure, MetaInstance) and _is_structure(structure) and depth <= _MAX_NESTING:
+        if isinstance(structure, MetaInstance) and is_structure(structure) and depth <= _MAX_NESTING:
             element = ResolvedAttribute(attr=resolved.attr, type_instance=structure, type_kind="Class", mandatory=False)
             if _is_reference(element):  # a list of catalogue references, written as a list of strings
                 return [(path, element, value)]
     elif resolved.type_kind != "Class":
         return []
-    if not isinstance(structure, MetaInstance) or not _is_structure(structure) or depth > _MAX_NESTING:
+    if not isinstance(structure, MetaInstance) or not is_structure(structure) or depth > _MAX_NESTING:
         return []
     found: list[tuple[str, ResolvedAttribute, Any]] = []
     for index, element in enumerate(value if isinstance(value, list) else [value]):

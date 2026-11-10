@@ -985,7 +985,7 @@ def test_sql_identifier_matches_jsonfg_copy(name):
     """`convert/sql.py::_sql_identifier` and `convert/jsonfg.py::_sql_identifier` are 2 manually-synced copies.
 
     `jsonfg.py` can't import from `sql.py` (the reverse import already
-    exists, `_meta_value`, so importing back would be circular) - this
+    exists, so importing back would be circular) - this
     guards the "kept manually in sync" claim in both docstrings against
     silent drift if either copy is ever edited alone.
     """

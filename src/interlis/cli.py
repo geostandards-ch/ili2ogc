@@ -348,8 +348,7 @@ def _fold_in_dependency_models(classes, views, root_table, repository, class_sym
     """
     if repository is None:
         return
-    from interlis.convert.jsonschema import _nested_class
-    from interlis.xtf.schema import reference_target_classes, resolve_attribute, schema_members_of
+    from interlis.xtf.schema import nested_class, reference_target_classes, resolve_attribute, schema_members_of
 
     needed_ids: set[int] = {
         id(rbv.BaseView)
@@ -398,7 +397,7 @@ def _fold_in_dependency_models(classes, views, root_table, repository, class_sym
             continue
         for attr in members.values():
             resolved = resolve_attribute(attr)
-            nested = _nested_class(resolved)
+            nested = nested_class(resolved)
             if isinstance(nested, MetaInstance):
                 queue.append(nested)
             if resolved.type_kind in ("Class", "ReferenceType"):

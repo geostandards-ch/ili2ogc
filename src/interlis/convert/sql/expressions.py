@@ -7,8 +7,8 @@ module.
 
 from __future__ import annotations
 
-from interlis.convert.constraint_eval import _unquote_text
 from interlis.metamodel.instance import MetaInstance
+from interlis.runtime.parse import unquote_interlis_string
 
 from .identifiers import _quote, _sql_identifier
 
@@ -60,7 +60,7 @@ def _path_to_column(path_els: list[MetaInstance]) -> str:
 
 def _text_sql_literal(quoted_value: str) -> str:
     r"""Turn a `Constant.Value` STRING token (still INTERLIS-quoted, e.g. `'"a\\"b"'`) into a SQL string literal."""
-    unescaped = _unquote_text(quoted_value)
+    unescaped = unquote_interlis_string(quoted_value)
     return "'" + unescaped.replace("'", "''") + "'"
 
 

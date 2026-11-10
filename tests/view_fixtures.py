@@ -15,7 +15,7 @@ from interlis.convert.sql import build_tables, build_views, render_gpkg
 from interlis.metamodel.instance import MetaInstance
 from interlis.runtime.parse import meta_attribute_comments_in_file
 from interlis.xtf.parse import parse_xtf
-from interlis.xtf.validate import _extract_reference
+from interlis.xtf.validate import extract_reference
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / "tests" / "fixtures" / "views"
@@ -99,7 +99,7 @@ def load_transfer(con, transfer, *, geometry_sql=None) -> None:
         columns, marks, params = ['"t_id"', '"t_basket"'], ["?", "?"], [ids[obj.tid], 1]
         for name, nodes in obj.attributes.items():
             node = nodes[0]
-            ref = _extract_reference(node)
+            ref = extract_reference(node)
             if ref is not None:
                 value = ids[ref]
             elif node.children and geometry_sql is not None:

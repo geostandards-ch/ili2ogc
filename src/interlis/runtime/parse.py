@@ -138,7 +138,7 @@ def parse_text(text: str):
     return _parse_stream(InputStream(text))
 
 
-def _unquote_interlis_string(value: str) -> str:
+def unquote_interlis_string(value: str) -> str:
     r"""Strip an INTERLIS `STRING` token's quoting/escapes, if present (eCH-0117 SS4.1, same rule as the lexer STRING).
 
     A bare (unquoted) value is returned as-is; a `"..."` value has its
@@ -190,7 +190,7 @@ def meta_attribute_comments(text: str) -> list[tuple[int, str, str]]:
             name = name.strip()
             if not name:
                 continue
-            results.append((token.line, name, _unquote_interlis_string(raw_value.strip())))
+            results.append((token.line, name, unquote_interlis_string(raw_value.strip())))
     return results
 
 

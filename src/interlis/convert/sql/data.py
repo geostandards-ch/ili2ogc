@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from interlis.convert.jsonfg import _members_value
+from interlis.convert.jsonfg import members_value
 from interlis.metamodel.instance import MetaInstance
 from interlis.xtf.parse import XtfTransfer
 
@@ -179,7 +179,7 @@ def transfer_inserts(
                     continue
                 cls, table_name, home_table = found
                 operation = obj.operation or "INSERT"
-                values = {} if operation == "DELETE" else _members_value(cls, obj.attributes, symbol_table=home_table)
+                values = {} if operation == "DELETE" else members_value(cls, obj.attributes, symbol_table=home_table)
                 row = _Row(by_name[table_name], next_id(), basket_id, values, tid=obj.tid, operation=operation)
                 rows.append(row)
                 if obj.tid is not None and operation == "INSERT":
