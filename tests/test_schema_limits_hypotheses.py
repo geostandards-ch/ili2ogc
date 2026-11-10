@@ -7,8 +7,6 @@ moment the limitation is fixed, forcing the marker to be dropped. An unconfirmed
 import re
 from pathlib import Path
 
-import pytest
-
 from interlis.cli import main
 from interlis.convert.sql.data import _geometry_sql
 from interlis.convert.sql.model import Column
@@ -18,7 +16,6 @@ FIX = Path(__file__).parent / "fixtures"
 SRC = Path(__file__).parent.parent / "src" / "interlis"
 
 
-@pytest.mark.xfail(strict=True, reason="H1: parse_xtf materialises every basket/object; no streaming entry point")
 def test_h1_xtf_objects_can_be_streamed():
     assert hasattr(xtf_parse, "iter_objects")
 

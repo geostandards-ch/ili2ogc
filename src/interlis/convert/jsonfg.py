@@ -41,7 +41,7 @@ validate(), same split already established by convert/jsonschema.py.
 
 import contextlib
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
@@ -112,8 +112,8 @@ _SCALAR_KINDS = {"NumType", "TextType", "EnumType", "BooleanType", "FormattedTyp
 # JSON-FG Part 1 Core §7.5 (conformance class "circular-arcs") - geometry
 # "type" values that require CONF_CIRCULAR_ARCS to be declared in
 # "conformsTo".
-_CIRCULAR_ARC_TYPES = frozenset({"CircularString", "CompoundCurve", "CurvePolygon", "MultiCurve", "MultiSurface"})
-_POLYHEDRA_TYPES = frozenset({"Polyhedron", "MultiPolyhedron"})
+CIRCULAR_ARC_TYPES = frozenset({"CircularString", "CompoundCurve", "CurvePolygon", "MultiCurve", "MultiSurface"})
+POLYHEDRA_TYPES = frozenset({"Polyhedron", "MultiPolyhedron"})
 # `Geometry3D_V2.Solid3D` (CHBase Part VIII, models.geo.admin.ch) is the
 # only published INTERLIS 3D solid structure - matched by Name + its
 # distinctive `OuterShell` attribute (see `is_solid3d`), not by qualified
@@ -125,7 +125,7 @@ _POLYHEDRA_TYPES = frozenset({"Polyhedron", "MultiPolyhedron"})
 # docs/dev-notes/solid3d-polyhedron-mapping.md).
 
 
-def _place_type_names(place: dict[str, Any] | None) -> set[str]:
+def place_type_names(place: dict[str, Any] | None) -> set[str]:
     """Collect the "type" value(s) a `place` actually carries, unwrapping a `GeometryCollection` one level.
 
     Shared between a single Feature's own `conformsTo` and a
@@ -213,9 +213,9 @@ def _feature_scope(feature_type: str, tid: str | None) -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def _recording(sink: list[UnmappedValue] | None) -> Iterator[None]:
+def _recording(sink: list[UnmappedValue] | None, seen: set[tuple[str, str]] | None = None) -> Iterator[None]:
     token = _UNMAPPED.set(sink)
-    seen_token = _CRS_SEEN.set(set())
+    seen_token = _CRS_SEEN.set(set() if seen is None else seen)
     try:
         yield
     finally:
@@ -1273,10 +1273,10 @@ def _object_to_feature(
     feature: dict[str, Any] = {"type": "Feature"}
     if standalone:
         conforms_to = [CONF_CORE, CONF_TYPES_SCHEMAS]
-        place_types = _place_type_names(place)
-        if place_types & _CIRCULAR_ARC_TYPES:
+        place_types = place_type_names(place)
+        if place_types & CIRCULAR_ARC_TYPES:
             conforms_to.append(CONF_CIRCULAR_ARCS)
-        if place_types & _POLYHEDRA_TYPES:
+        if place_types & POLYHEDRA_TYPES:
             conforms_to.append(CONF_POLYHEDRA)
         feature["conformsTo"] = conforms_to
     if obj.tid is not None:
@@ -2464,6 +2464,58 @@ def transfer_to_feature_collection(
         )
 
 
+def _object_features(
+    objects: Iterable[XtfObject],
+    *,
+    symbol_table: SymbolTable,
+    repository: ModelRepository | None,
+    include_child_rows: bool,
+) -> Iterator[dict[str, Any]]:
+    """One Feature per resolvable object (plus its child rows), lazily - the loop both entry points share."""
+    for obj in objects:
+        cls = resolve_class(obj.qualified_class, symbol_table=symbol_table, repository=repository)
+        if cls is None:
+            continue
+        # The declaring model's table holds the associations embedding a role on `cls`.
+        cls_table = home_symbol_table(obj.qualified_class, symbol_table=symbol_table, repository=repository)
+        yield object_to_feature(
+            obj,
+            cls,
+            standalone=False,
+            symbol_table=cls_table,
+            repository=repository,
+            omit_multivalue=include_child_rows,
+        )
+        if include_child_rows:
+            with _feature_scope(getattr(cls, "Name", None) or obj.qualified_class, obj.tid):
+                yield from _child_row_features(obj, cls, symbol_table=symbol_table)
+
+
+def iter_features(
+    objects: Iterable[XtfObject],
+    *,
+    symbol_table: SymbolTable,
+    repository: ModelRepository | None = None,
+    include_child_rows: bool = False,
+    unmapped: list[UnmappedValue] | None = None,
+) -> Iterator[dict[str, Any]]:
+    """The Features of `objects`, one at a time (flat memory with `xtf.parse.iter_objects`).
+
+    Each Feature keeps its own `featureType` and `coordRefSys`: hoisting them to the collection needs every Feature
+    first (`transfer_to_feature_collection`). VIEWs need every object and are not evaluated here.
+    """
+    seen: set[tuple[str, str]] = set()
+    stream = _object_features(
+        objects, symbol_table=symbol_table, repository=repository, include_child_rows=include_child_rows
+    )
+    while True:
+        with _recording(unmapped, seen):
+            feature = next(stream, None)
+        if feature is None:
+            return
+        yield feature
+
+
 def _transfer_to_feature_collection(
     transfer: XtfTransfer,
     *,
@@ -2473,27 +2525,14 @@ def _transfer_to_feature_collection(
     schema_url: str | None = None,
     include_child_rows: bool = False,
 ) -> dict[str, Any]:
-    features: list[dict[str, Any]] = []
-    for basket in transfer.baskets:
-        for obj in basket.objects:
-            cls = resolve_class(obj.qualified_class, symbol_table=symbol_table, repository=repository)
-            if cls is None:
-                continue
-            # The declaring model's table holds the associations embedding a role on `cls`.
-            cls_table = home_symbol_table(obj.qualified_class, symbol_table=symbol_table, repository=repository)
-            features.append(
-                object_to_feature(
-                    obj,
-                    cls,
-                    standalone=False,
-                    symbol_table=cls_table,
-                    repository=repository,
-                    omit_multivalue=include_child_rows,
-                )
-            )
-            if include_child_rows:
-                with _feature_scope(getattr(cls, "Name", None) or obj.qualified_class, obj.tid):
-                    features.extend(_child_row_features(obj, cls, symbol_table=symbol_table))
+    features = list(
+        _object_features(
+            (obj for basket in transfer.baskets for obj in basket.objects),
+            symbol_table=symbol_table,
+            repository=repository,
+            include_child_rows=include_child_rows,
+        )
+    )
 
     for view in views or []:
         features.extend(
@@ -2503,10 +2542,10 @@ def _transfer_to_feature_collection(
     conforms_to = [CONF_CORE, CONF_TYPES_SCHEMAS]
     all_place_types: set[str] = set()
     for f in features:
-        all_place_types |= _place_type_names(f.get("place"))
-    if all_place_types & _CIRCULAR_ARC_TYPES:
+        all_place_types |= place_type_names(f.get("place"))
+    if all_place_types & CIRCULAR_ARC_TYPES:
         conforms_to.append(CONF_CIRCULAR_ARCS)
-    if all_place_types & _POLYHEDRA_TYPES:
+    if all_place_types & POLYHEDRA_TYPES:
         conforms_to.append(CONF_POLYHEDRA)
     collection: dict[str, Any] = {
         "type": "FeatureCollection",
@@ -2563,13 +2602,18 @@ def view_skip_diagnostic(view: MetaInstance, *, file: str | None = None):
 
 def incremental_diagnostic(transfer: XtfTransfer, *, file: str | None = None):
     """A warning when `transfer` holds `UPDATE`/`DELETE` objects (not carried by a FeatureCollection), else `None`."""
-    from interlis.diagnostics import Diagnostic, Location
-
     counts: dict[str, int] = {}
     for basket in transfer.baskets:
         for obj in basket.objects:
             if obj.operation in ("UPDATE", "DELETE"):
                 counts[obj.operation] = counts.get(obj.operation, 0) + 1
+    return incremental_diagnostic_for(counts, file=file)
+
+
+def incremental_diagnostic_for(counts: dict[str, int], *, file: str | None = None):
+    """`incremental_diagnostic` from the `{operation: count}` of a transfer already walked, `None` when empty."""
+    from interlis.diagnostics import Diagnostic, Location
+
     if not counts:
         return None
     listed = ", ".join(f"{n} {op}" for op, n in sorted(counts.items()))

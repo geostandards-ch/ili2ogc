@@ -24,8 +24,10 @@ handling below; confirmed only via non-production reference/test fixtures,
 see tests/fixtures/xtf/xtf24allerrors/NOTICE and xtf24envelope/NOTICE).
 """
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 from xml.etree import ElementTree as ET
 
 
@@ -160,16 +162,15 @@ def _to_raw_node(elem: ET.Element) -> RawNode:
     )
 
 
-def parse_xtf(path: Path) -> XtfTransfer:
-    """Parse an .xtf into (sender, version, models, baskets), see XtfTransfer.
+def _walk(path: Path) -> Iterator[tuple[str, Any]]:
+    """Walk an .xtf once, yielding `("header", (sender, version, models))` after its header section, `("basket",
+    basket)` as each basket opens (its `objects` left empty) and `("object", (basket, obj))` as each object closes.
 
-    Resolves NO reference, interprets NO type - a purely structural layer
-    (don't guess what needs the schema to be decided).
+    Nothing is retained here, so memory stays flat whatever the file's size.
     """
     sender: str | None = None
     ili_version: str | None = None
     models: list[XtfModelRef] = []
-    baskets: list[XtfBasket] = []
 
     # Stack of (role, tag_without_namespace) - the role is determined by
     # STRUCTURAL POSITION (depth relative to DATASECTION), never by the
@@ -219,6 +220,7 @@ def parse_xtf(path: Path) -> XtfTransfer:
                     kind=_get_attr_ci(elem, "KIND"),
                     endstate=_get_attr_ci(elem, "ENDSTATE"),
                 )
+                yield ("basket", current_basket)
             elif parent_role == "basket":
                 role = "object"
                 # XTF 2.4: the object's own namespace prefix names its
@@ -256,11 +258,10 @@ def parse_xtf(path: Path) -> XtfTransfer:
             current_object.attributes.setdefault(tag, []).append(_to_raw_node(elem))
             elem.clear()
         elif role == "object":
-            current_basket.objects.append(current_object)
+            yield ("object", (current_basket, current_object))
             current_object = None
             elem.clear()
         elif role == "basket":
-            baskets.append(current_basket)
             current_basket = None
             elem.clear()
         elif role == "model":
@@ -279,5 +280,44 @@ def parse_xtf(path: Path) -> XtfTransfer:
             if sender is None:  # not already set via the XTF 2.4 "sender" child role above
                 sender = _get_attr_ci(elem, "SENDER")
             ili_version = _get_attr_ci(elem, "VERSION")
+            yield ("header", (sender, ili_version, models))
 
-    return XtfTransfer(sender=sender, ili_version=ili_version, models=models, baskets=baskets)
+
+def parse_xtf(path: Path) -> XtfTransfer:
+    """Parse an .xtf into (sender, version, models, baskets), see XtfTransfer.
+
+    Resolves NO reference, interprets NO type - a purely structural layer
+    (don't guess what needs the schema to be decided). Holds every object in memory:
+    see `iter_objects` to stream them instead.
+    """
+    transfer = XtfTransfer(sender=None, ili_version=None, models=[], baskets=[])
+    for kind, payload in _walk(path):
+        if kind == "header":
+            transfer.sender, transfer.ili_version, transfer.models = payload
+        elif kind == "basket":
+            transfer.baskets.append(payload)
+        else:
+            payload[0].objects.append(payload[1])
+    return transfer
+
+
+def read_skeleton(path: Path) -> XtfTransfer:
+    """The header and the baskets (topic, BID, kind) of an .xtf, with no object kept - flat memory."""
+    transfer = XtfTransfer(sender=None, ili_version=None, models=[], baskets=[])
+    for kind, payload in _walk(path):
+        if kind == "header":
+            transfer.sender, transfer.ili_version, transfer.models = payload
+        elif kind == "basket":
+            transfer.baskets.append(payload)
+    return transfer
+
+
+def iter_objects(path: Path) -> Iterator[tuple[XtfBasket, XtfObject]]:
+    """Every object of an .xtf with its basket, one at a time and never accumulated (flat memory).
+
+    The yielded basket's `objects` stays empty, so nothing that needs to see every object of the transfer
+    (resolving references, VIEWs) can work from this: use `parse_xtf` for those.
+    """
+    for kind, payload in _walk(path):
+        if kind == "object":
+            yield payload

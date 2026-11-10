@@ -9,6 +9,7 @@ root in that mode, never copied under src/interlis/).
 """
 
 import argparse
+import contextlib
 import importlib.resources
 import json
 import sys
@@ -53,7 +54,7 @@ from interlis.metamodel.instance import MetaInstance
 from interlis.runtime.parse import meta_attribute_comments_in_file, parse_file
 from interlis.xtf.jsonfg_validate import validate_jsonfg
 from interlis.xtf.model_resolution import header_completeness, header_model_lookup, root_model_names
-from interlis.xtf.parse import parse_xtf
+from interlis.xtf.parse import iter_objects, parse_xtf, read_skeleton
 from interlis.xtf.validate import validate_transfer
 
 _DEV_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -924,6 +925,46 @@ def cmd_import(args: argparse.Namespace) -> int:
     return ExitCode.OK
 
 
+def _stream_feature_collection(
+    xtf_path: Path,
+    output: str | None,
+    *,
+    symbol_table,
+    repository: ModelRepository | None,
+    include_child_rows: bool,
+    unmapped: list,
+    operations: dict[str, int],
+) -> None:
+    """Write `xtf_path` as a JSON-FG FeatureCollection one Feature at a time (`conformsTo` last: it needs them all)."""
+
+    def objects():
+        for _basket, obj in iter_objects(xtf_path):
+            if obj.operation in ("UPDATE", "DELETE"):
+                operations[obj.operation] = operations.get(obj.operation, 0) + 1
+            yield obj
+
+    conforms_to = [_jsonfg_mod.CONF_CORE, _jsonfg_mod.CONF_TYPES_SCHEMAS]
+    place_types: set[str] = set()
+    with open(output, "w", encoding="utf-8") if output else contextlib.nullcontext(sys.stdout) as out:
+        out.write('{\n  "type": "FeatureCollection",\n  "features": [')
+        first = True
+        for feature in _jsonfg_mod.iter_features(
+            objects(),
+            symbol_table=symbol_table,
+            repository=repository,
+            include_child_rows=include_child_rows,
+            unmapped=unmapped,
+        ):
+            place_types |= _jsonfg_mod.place_type_names(feature.get("place"))
+            out.write(("" if first else ",") + "\n" + json.dumps(feature, ensure_ascii=False))
+            first = False
+        if place_types & _jsonfg_mod.CIRCULAR_ARC_TYPES:
+            conforms_to.append(_jsonfg_mod.CONF_CIRCULAR_ARCS)
+        if place_types & _jsonfg_mod.POLYHEDRA_TYPES:
+            conforms_to.append(_jsonfg_mod.CONF_POLYHEDRA)
+        out.write(f'\n  ],\n  "conformsTo": {json.dumps(conforms_to)}\n}}\n')
+
+
 def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
     """Convert an .xtf transfer to a JSON-FG FeatureCollection.
 
@@ -959,7 +1000,10 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
         _error(f".xtf file not found: {xtf_path}")
         return ExitCode.NOT_FOUND
 
-    transfer = parse_xtf(xtf_path)
+    if args.stream and (args.lang or args.feature_schema_url):
+        _error("--stream cannot be combined with --lang or --feature-schema-url (they need the whole collection).")
+        return ExitCode.USAGE
+    transfer = read_skeleton(xtf_path) if args.stream else parse_xtf(xtf_path)
     repository = ModelRepository([Path(d) for d in args.repo]) if args.repo else None
 
     resolved = _resolve_schema_model_path(xtf_path, transfer, args, repository)
@@ -1001,11 +1045,30 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
             continue
         views.append(view)
 
+    unmapped: list[_jsonfg_mod.UnmappedValue] = []
+    if args.stream and views:
+        _warn("--stream: the model has VIEWs, which need every object - not streamed.")
+        transfer, args.stream = parse_xtf(xtf_path), False
+    if args.stream:
+        operations: dict[str, int] = {}
+        _stream_feature_collection(
+            xtf_path,
+            args.output,
+            symbol_table=builder.symbol_table,
+            repository=repository,
+            include_child_rows=args.include_child_rows,
+            unmapped=unmapped,
+            operations=operations,
+        )
+        incremental = _jsonfg_mod.incremental_diagnostic_for(operations, file=str(xtf_path))
+        if incremental is not None:
+            bag.add(incremental)
+        bag.extend(_jsonfg_mod.collect_diagnostics(unmapped, file=str(xtf_path)))
+        return _finish(bag, args)
     incremental = _jsonfg_mod.incremental_diagnostic(transfer, file=str(xtf_path))
     if incremental is not None:
         bag.add(incremental)
 
-    unmapped: list[_jsonfg_mod.UnmappedValue] = []
     collection = transfer_to_feature_collection(
         transfer,
         symbol_table=builder.symbol_table,
@@ -1581,6 +1644,13 @@ def main(argv: list[str] | None = None) -> int:
         "'interlis convert-sql' child table name - loaded into that same "
         "table by GDAL's own featureType-based table splitting, in the SAME 'ogr2ogr -append' as the main data. "
         "Omitted (default): BAG/LIST occurrences stay inlined as a plain JSON array property, as before.",
+    )
+    convert_jsonfg_parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Write the FeatureCollection feature by feature, so memory stays flat on a very large transfer. Each "
+        "Feature keeps its own 'featureType' and 'coordRefSys' (they are not hoisted to the collection). A model with "
+        "VIEWs is not streamed (they need every object); not combinable with --lang or --feature-schema-url.",
     )
     _add_diagnostic_args(convert_jsonfg_parser)
     convert_jsonfg_parser.set_defaults(func=cmd_convert_jsonfg)
