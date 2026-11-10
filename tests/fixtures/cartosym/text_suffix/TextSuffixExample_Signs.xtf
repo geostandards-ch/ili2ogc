@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sign basket of TextSuffixExample: a text font and one TextSign (a basket of StandardSymbologyText.TextSigns). -->
+<ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS"
+  xmlns="http://www.interlis.ch/xtf/2.4/StandardSymbologyText">
+  <ili:headersection>
+    <ili:models><ili:model>StandardSymbologyText</ili:model></ili:models>
+    <ili:sender>ili2ogc test fixture</ili:sender>
+  </ili:headersection>
+  <ili:datasection>
+    <TextSigns ili:bid="TextSuffixExample">
+      <Font ili:tid="1"><Name>Cadastra</Name><Internal>false</Internal><Type>text</Type></Font>
+      <TextSign ili:tid="2"><ili:Name>ParcelLabel</ili:Name><Height>0.002</Height><Font ili:ref="1"></Font></TextSign>
+    </TextSigns>
+  </ili:datasection>
+</ili:transfer>

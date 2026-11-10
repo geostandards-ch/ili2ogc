@@ -1,0 +1,21 @@
+INTERLIS 2.4;
+
+!! Extension of StandardSymbology (same mechanism as the scale-visibility prototype of interlis-runtime): a text made of two values.
+!! The DMAV display rule 'Nummer mit Teilgrundstueck' is Grundstueck.Nummer & "." & Liegenschaft.NummerTeilgrundstueck; INTERLIS has no
+!! text concatenation (the scanner rejects '&'), so the sign interface gets the pieces: Txt, then Separator and Suffix when Suffix is defined.
+SYMBOLOGY MODEL StandardSymbologyText (en)
+  AT "https://example.org/dmavsym/" VERSION "2026-10-22" =
+
+  IMPORTS StandardSymbology;
+
+  TOPIC TextSigns EXTENDS StandardSymbology.StandardSigns =
+
+    CLASS TextSign (EXTENDED) =
+    PARAMETER
+      Separator : TEXT*10;   !! written between Txt and Suffix
+      Suffix    : TEXT;      !! second part of the text; none: the text is Txt alone
+    END TextSign;
+
+  END TextSigns;
+
+END StandardSymbologyText.

@@ -1131,7 +1131,7 @@ def styling_rule_from_drawing_rule(
             else {}
         )
         symbolizer_kwargs["label"] = text_sign_to_label(
-            text=params.get("Txt"),
+            text=_text_with_suffix(params),
             rotation=params.get("Rotation"),
             h_alignment=params.get("HAli"),
             v_alignment=params.get("VAli"),
@@ -1143,6 +1143,24 @@ def styling_rule_from_drawing_rule(
         selector=selector,
         symbolizer=Symbolizer(**symbolizer_kwargs),
     )
+
+
+def _text_with_suffix(params: dict[str, Any]) -> Any:
+    """`Txt`, or `Txt` + `Separator` + `Suffix` when the sign interface is extended with those two parameters.
+
+    INTERLIS cannot concatenate text, so a display rule such as DMAV's
+    Grundstueck.Nummer & "." & Liegenschaft.NummerTeilgrundstueck is written
+    `Txt := Nummer; Separator := "."; Suffix := Teil` on a `TextSign (EXTENDED)`
+    (`StandardSymbologyText.ili` of cartosym-dmav). The case without a suffix is
+    a rule of its own (`WHERE NOT (DEFINED(Teil))`), so no conditional
+    expression is needed (an SLD label cannot hold one).
+    """
+    txt, suffix = params.get("Txt"), params.get("Suffix")
+    if suffix is None:
+        return txt
+    separator = params.get("Separator")
+    parts = [txt] + ([separator] if separator not in (None, "") else []) + [suffix]
+    return {"op": "concatenate", "args": parts}
 
 
 def _cited_attributes(node: Any, seen: set[int]) -> Iterator[str]:
