@@ -958,7 +958,7 @@ def _stream_feature_collection(
     unmapped: list,
     operations: dict[str, int],
 ) -> None:
-    """Write `xtf_path` as a JSON-FG FeatureCollection one Feature at a time (`conformsTo` last: it needs them all)."""
+    """Write `xtf_path` as a JSON-FG FeatureCollection one Feature at a time, in two passes (flat memory)."""
 
     def objects():
         for _basket, obj in iter_objects(xtf_path):
@@ -966,26 +966,47 @@ def _stream_feature_collection(
                 operations[obj.operation] = operations.get(obj.operation, 0) + 1
             yield obj
 
-    conforms_to = [_jsonfg_mod.CONF_CORE, _jsonfg_mod.CONF_TYPES_SCHEMAS]
-    place_types: set[str] = set()
-    with open(output, "w", encoding="utf-8") if output else contextlib.nullcontext(sys.stdout) as out:
-        out.write('{\n  "type": "FeatureCollection",\n  "features": [')
-        first = True
-        for feature in _jsonfg_mod.iter_features(
+    def features(sink: list | None):
+        return _jsonfg_mod.iter_features(
             objects(),
             symbol_table=symbol_table,
             repository=repository,
             include_child_rows=include_child_rows,
-            unmapped=unmapped,
-        ):
-            place_types |= _jsonfg_mod.place_type_names(feature.get("place"))
+            unmapped=sink,
+        )
+
+    # Pass 1 only collects what the collection root hoists (featureType, coordRefSys, geometry kinds): flat memory.
+    feature_types: set[str] = set()
+    crs_values: set[str] = set()
+    place_types: set[str] = set()
+    for feature in features(None):
+        feature_types.add(feature["featureType"])
+        if "coordRefSys" in feature:
+            crs_values.add(feature["coordRefSys"])
+        place_types |= _jsonfg_mod.place_type_names(feature.get("place"))
+    operations.clear()
+    conforms_to = [_jsonfg_mod.CONF_CORE, _jsonfg_mod.CONF_TYPES_SCHEMAS]
+    if place_types & _jsonfg_mod.CIRCULAR_ARC_TYPES:
+        conforms_to.append(_jsonfg_mod.CONF_CIRCULAR_ARCS)
+    if place_types & _jsonfg_mod.POLYHEDRA_TYPES:
+        conforms_to.append(_jsonfg_mod.CONF_POLYHEDRA)
+    root: dict[str, object] = {"type": "FeatureCollection", "conformsTo": conforms_to}
+    if len(feature_types) == 1:
+        root["featureType"] = next(iter(feature_types))
+    if len(crs_values) == 1:
+        root["coordRefSys"] = next(iter(crs_values))
+    hoisted = [key for key in ("featureType", "coordRefSys") if key in root]
+
+    with open(output, "w", encoding="utf-8") if output else contextlib.nullcontext(sys.stdout) as out:
+        head = json.dumps(root, ensure_ascii=False, indent=2)
+        out.write(head[: head.rindex("\n}")] + ',\n  "features": [')
+        first = True
+        for feature in features(unmapped):
+            for key in hoisted:
+                feature.pop(key, None)
             out.write(("" if first else ",") + "\n" + json.dumps(feature, ensure_ascii=False))
             first = False
-        if place_types & _jsonfg_mod.CIRCULAR_ARC_TYPES:
-            conforms_to.append(_jsonfg_mod.CONF_CIRCULAR_ARCS)
-        if place_types & _jsonfg_mod.POLYHEDRA_TYPES:
-            conforms_to.append(_jsonfg_mod.CONF_POLYHEDRA)
-        out.write(f'\n  ],\n  "conformsTo": {json.dumps(conforms_to)}\n}}\n')
+        out.write("\n  ]\n}\n")
 
 
 @_with_crs_fallback

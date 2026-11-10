@@ -63,10 +63,8 @@ def test_stream_option_writes_the_same_features(tmp_path: Path):
     assert main([*base, "--stream", "-o", str(streamed)]) == 0
     expected = json.loads(whole.read_text(encoding="utf-8"))
     got = json.loads(streamed.read_text(encoding="utf-8"))
-    assert got["type"] == "FeatureCollection" and got["conformsTo"] == expected["conformsTo"]
-    hoisted = expected.get("featureType")
-    assert [{**f, "featureType": hoisted or f.get("featureType")} for f in expected["features"]] == got["features"]
-    assert len(got["features"]) == 4
+    assert got == expected  # featureType / coordRefSys hoisted exactly as in the whole-collection output
+    assert got["featureType"] == "A" and len(got["features"]) == 4
 
 
 def test_stream_option_refuses_what_needs_the_whole_collection(tmp_path: Path):
