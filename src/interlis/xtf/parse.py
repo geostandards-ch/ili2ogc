@@ -321,3 +321,13 @@ def iter_objects(path: Path) -> Iterator[tuple[XtfBasket, XtfObject]]:
     for kind, payload in _walk(path):
         if kind == "object":
             yield payload
+
+
+def iter_events(path: Path) -> Iterator[tuple[str, Any]]:
+    """`("basket", XtfBasket)` as each basket opens, then `("object", (basket, XtfObject))` for each of its objects.
+
+    Nothing is accumulated (flat memory), and an empty basket is still reported.
+    """
+    for kind, payload in _walk(path):
+        if kind != "header":
+            yield kind, payload
