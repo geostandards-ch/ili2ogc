@@ -331,3 +331,25 @@ def iter_events(path: Path) -> Iterator[tuple[str, Any]]:
     for kind, payload in _walk(path):
         if kind != "header":
             yield kind, payload
+
+
+def _is_incremental_basket(basket: XtfBasket) -> bool:
+    return (basket.kind or "").upper() in ("UPDATE", "INCREMENTAL")
+
+
+def is_incremental(source: XtfTransfer | Path) -> bool:
+    """Whether a transfer (parsed, or an .xtf path read once without keeping anything) is incremental.
+
+    It is when a basket has KIND `UPDATE`/`INCREMENTAL` or an object carries an `UPDATE`/`DELETE` operation.
+    """
+    if isinstance(source, XtfTransfer):
+        return any(
+            _is_incremental_basket(b) or any(o.operation in ("UPDATE", "DELETE") for o in b.objects)
+            for b in source.baskets
+        )
+    for kind, payload in _walk(source):
+        if kind == "basket" and _is_incremental_basket(payload):
+            return True
+        if kind == "object" and payload[1].operation in ("UPDATE", "DELETE"):
+            return True
+    return False

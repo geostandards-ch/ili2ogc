@@ -2600,30 +2600,67 @@ def view_skip_diagnostic(view: MetaInstance, *, file: str | None = None):
     return Diagnostic(sev, rule, f"VIEW {name!r} skipped: {reason}", Location(file=file, element_path=name), help=hlp)
 
 
-def incremental_diagnostic(transfer: XtfTransfer, *, file: str | None = None):
-    """A warning when `transfer` holds `UPDATE`/`DELETE` objects (not carried by a FeatureCollection), else `None`."""
-    counts: dict[str, int] = {}
-    for basket in transfer.baskets:
-        for obj in basket.objects:
-            if obj.operation in ("UPDATE", "DELETE"):
-                counts[obj.operation] = counts.get(obj.operation, 0) + 1
-    return incremental_diagnostic_for(counts, file=file)
+FG_MEDIA_TYPE = "application/vnd.ogc.fg+json"
+
+_METHOD_OF = {"INSERT": "POST", "UPDATE": "PUT"}
 
 
-def incremental_diagnostic_for(counts: dict[str, int], *, file: str | None = None):
-    """`incremental_diagnostic` from the `{operation: count}` of a transfer already walked, `None` when empty."""
+def iter_change_requests(
+    objects: Iterable[XtfObject],
+    *,
+    symbol_table: SymbolTable,
+    repository: ModelRepository | None = None,
+    unmapped: list[UnmappedValue] | None = None,
+    skipped: list[str] | None = None,
+) -> Iterator[dict[str, Any]]:
+    """The objects of an incremental transfer as OGC API Features Part 4 requests, in file order, one at a time.
+
+    INSERT = `POST /collections/{class}/items` (the Feature as body), UPDATE = `PUT .../items/{tid}` (the whole
+    Feature replaces the stored one), DELETE = `DELETE .../items/{tid}`; `{class}` is the Feature's `featureType`.
+    A `DeleteObject` names no class, so no collection: its TID goes to `skipped` and no request is written.
+    """
+    seen: set[tuple[str, str]] = set()
+    for obj in objects:
+        operation = obj.operation or "INSERT"
+        cls = resolve_class(obj.qualified_class, symbol_table=symbol_table, repository=repository)
+        if cls is None:
+            if operation == "DELETE" and not obj.qualified_class and skipped is not None:
+                skipped.append(obj.tid or "")
+            continue
+        collection = getattr(cls, "Name", None) or obj.qualified_class
+        items = f"/collections/{collection}/items"
+        if operation == "DELETE":
+            yield {"method": "DELETE", "href": f"{items}/{obj.tid}"}
+            continue
+        with _recording(unmapped, seen):
+            feature = next(
+                _object_features([obj], symbol_table=symbol_table, repository=repository, include_child_rows=False),
+                None,
+            )
+        if feature is None:
+            continue
+        yield {
+            "method": _METHOD_OF[operation],
+            "href": items if operation == "INSERT" else f"{items}/{obj.tid}",
+            "headers": {"Content-Type": FG_MEDIA_TYPE},
+            "body": feature,
+        }
+
+
+def change_diagnostics(skipped: list[str], *, file: str | None = None):
+    """A note per `DeleteObject` that `iter_change_requests` could not address to a collection."""
     from interlis.diagnostics import Diagnostic, Location
 
-    if not counts:
-        return None
-    listed = ", ".join(f"{n} {op}" for op, n in sorted(counts.items()))
-    return Diagnostic(
-        "warning",
-        "JSONFG-INCREMENTAL-UNSUPPORTED",
-        f"incremental transfer ({listed} object(s)): emitted as plain features, the operation is not carried over",
-        Location(file=file),
-        help="use import-xtf to replay the operations on an existing dataset",
-    )
+    return [
+        Diagnostic(
+            "note",
+            "JSONFG-DELETEOBJECT-NO-COLLECTION",
+            f"DeleteObject {tid}: names no class, so no collection to send DELETE to - left out",
+            Location(file=file),
+            help="OGC API Features addresses an item by its collection; use import-xtf to replay it on a database",
+        )
+        for tid in skipped
+    ]
 
 
 _REPO_HELP = frozenset({"JSONFG-MULTIVALUE-UNRESOLVED", "JSONFG-GEOM-NO-CRS"})
