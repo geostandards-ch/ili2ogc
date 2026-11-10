@@ -34,6 +34,25 @@ def _sql_literal(value: Any) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+def _raise(message: str) -> str:
+    return f"RAISE EXCEPTION '%', {_sql_literal(message)};"
+
+
+def _guard(condition: str, message: str) -> str:
+    """A PL/pgSQL block aborting the transaction with `message` when `condition` holds."""
+    return f"DO $$ BEGIN IF {condition} THEN {_raise(message)} END IF; END $$;"
+
+
+def _guard_delete(target: str, message: str) -> str:
+    """A `DELETE FROM target` aborting the transaction with `message` when it removes no row."""
+    return f"DO $$ BEGIN DELETE FROM {target}; IF NOT FOUND THEN {_raise(message)} END IF; END $$;"
+
+
+def _guard_update(statement: str, message: str) -> str:
+    """`statement` (an UPDATE) aborting the transaction with `message` when it touches no row."""
+    return f"DO $$ BEGIN {statement} IF NOT FOUND THEN {_raise(message)} END IF; END $$;"
+
+
 def _wkt(geometry: dict, tagged: bool = True) -> str:
     """A GeoJSON/JSON-FG geometry, curves included, as WKT (PostGIS's untagged form inside a curved geometry)."""
     kind = geometry["type"]
@@ -109,6 +128,7 @@ class _Row:
     parent: int | None = None
     seq: int | None = None
     children: list[_Row] = field(default_factory=list)
+    operation: str = "INSERT"
 
 
 def transfer_inserts(
@@ -121,6 +141,10 @@ def transfer_inserts(
 ) -> tuple[str, dict[str, int], list[str]]:
     """Return `(sql, rows per table, notes)` for every object of `transfers`, as one dataset.
 
+    A transfer holding `UPDATE`/`DELETE` objects is incremental and is replayed like a sequence of REST calls on an
+    EXISTING dataset (`dataset` must name it): `INSERT` = POST (409 if the TID is already there), `UPDATE` = PUT (the
+    object is replaced in place, 404 if absent), `DELETE` = DELETE (404 if absent). A failing call aborts and rolls
+    back the whole transaction.
     `table_of(qualified_class)` gives an object's class, its table and the symbol table declaring the class (for its
     embedded association roles), `None` when that class has no table here.
     A reference to an object absent from the transfers stays NULL (noted).
@@ -143,6 +167,7 @@ def transfer_inserts(
     basket_rows: list[tuple[int, str, str]] = []
     rows: list[_Row] = []
     located: dict[str, tuple[str, int]] = {}  # TID -> (table, t_id)
+    incremental = any(o.operation in ("UPDATE", "DELETE") for t in transfers for b in t.baskets for o in b.objects)
     for transfer in transfers:
         for basket in transfer.baskets:
             basket_id = next_id()
@@ -153,12 +178,14 @@ def transfer_inserts(
                     skipped[obj.qualified_class] = skipped.get(obj.qualified_class, 0) + 1
                     continue
                 cls, table_name, home_table = found
-                values = _members_value(cls, obj.attributes, symbol_table=home_table)
-                row = _Row(by_name[table_name], next_id(), basket_id, values, tid=obj.tid)
+                operation = obj.operation or "INSERT"
+                values = {} if operation == "DELETE" else _members_value(cls, obj.attributes, symbol_table=home_table)
+                row = _Row(by_name[table_name], next_id(), basket_id, values, tid=obj.tid, operation=operation)
                 rows.append(row)
-                if obj.tid is not None:
+                if obj.tid is not None and operation == "INSERT":
                     located[obj.tid] = (table_name, row.t_id)
-                _add_children(row, children_of, next_id)
+                if operation != "DELETE":
+                    _add_children(row, children_of, next_id)
     for qualified_class, count in sorted(skipped.items()):
         notes.append(f"{count} {qualified_class} object(s) skipped: no table for that class in this schema")
 
@@ -166,30 +193,74 @@ def transfer_inserts(
         "BEGIN;",
         "CREATE TEMP TABLE _ili_import ON COMMIT DROP AS SELECT nextval('t_ili2db_seq') AS base;",
         f"SELECT setval('t_ili2db_seq', {_BASE} + {counter});",
-        f"INSERT INTO T_ILI2DB_DATASET (T_Id, datasetName) VALUES ({_BASE} + {dataset_id}, {_sql_literal(dataset)});",
     ]
-    statements += [
-        "INSERT INTO T_ILI2DB_BASKET (T_Id, dataset, topic, T_Ili_Tid, attachmentKey) VALUES "
-        f"({_BASE} + {bid}, {_BASE} + {dataset_id}, {_sql_literal(topic)}, {_sql_literal(tid)}, "
-        f"{_sql_literal(attachment)});"
-        for bid, topic, tid in basket_rows
-    ]
+    baskets_by_id = {bid: tid for bid, _topic, tid in basket_rows}
+    if incremental:
+        in_dataset = "(SELECT id FROM _ili_dataset)"
+        scope = f"{_quote(BASKET_COLUMN)} IN (SELECT T_Id FROM T_ILI2DB_BASKET WHERE dataset = {in_dataset})"
+        statements += [
+            "CREATE TEMP TABLE _ili_dataset ON COMMIT DROP AS SELECT T_Id AS id FROM T_ILI2DB_DATASET "
+            f"WHERE datasetName = {_sql_literal(dataset)};",
+            _guard("NOT EXISTS (SELECT 1 FROM _ili_dataset)", f"404 Not Found: dataset {dataset}"),
+        ]
+        statements += [
+            "INSERT INTO T_ILI2DB_BASKET (T_Id, dataset, topic, T_Ili_Tid, attachmentKey) "
+            f"SELECT {_BASE} + {bid}, {in_dataset}, {_sql_literal(topic)}, {_sql_literal(tid)}, "
+            f"{_sql_literal(attachment)} WHERE NOT EXISTS (SELECT 1 FROM T_ILI2DB_BASKET "
+            f"WHERE dataset = {in_dataset} AND T_Ili_Tid = {_sql_literal(tid)});"
+            for bid, topic, tid in basket_rows
+        ]
+    else:
+        statements.append(
+            "INSERT INTO T_ILI2DB_DATASET (T_Id, datasetName) "
+            f"VALUES ({_BASE} + {dataset_id}, {_sql_literal(dataset)});"
+        )
+        statements += [
+            "INSERT INTO T_ILI2DB_BASKET (T_Id, dataset, topic, T_Ili_Tid, attachmentKey) VALUES "
+            f"({_BASE} + {bid}, {_BASE} + {dataset_id}, {_sql_literal(topic)}, {_sql_literal(tid)}, "
+            f"{_sql_literal(attachment)});"
+            for bid, topic, tid in basket_rows
+        ]
+
+    def basket_ref(basket: int) -> str:
+        if not incremental:
+            return f"{_BASE} + {basket}"
+        return (
+            f"(SELECT T_Id FROM T_ILI2DB_BASKET WHERE dataset = {in_dataset} "
+            f"AND T_Ili_Tid = {_sql_literal(baskets_by_id[basket])})"
+        )
+
+    def of_tid(row: _Row) -> str:
+        return f"{_quote(row.table.name)} WHERE {_quote(TID_COLUMN)} = {_sql_literal(row.tid)} AND {scope}"
+
     unresolved = 0
     counts: dict[str, int] = {}
 
-    def insert(row: _Row, basket: int) -> None:
+    def insert(row: _Row, basket: int, parent_ref: str | None = None) -> None:
         nonlocal unresolved
+        update = row.operation == "UPDATE"
+        if row.operation == "DELETE":
+            statements.append(
+                _guard_delete(of_tid(row), f"404 Not Found: DELETE {row.table.name} {row.tid}"),
+            )
+            counts[row.table.name] = counts.get(row.table.name, 0) + 1
+            return
+        if incremental and row.operation == "INSERT" and row.tid is not None and row.table.has_tid:
+            statements.append(
+                _guard(f"EXISTS (SELECT 1 FROM {of_tid(row)})", f"409 Conflict: INSERT {row.table.name} {row.tid}")
+            )
         names = [OID_COLUMN, BASKET_COLUMN]
-        values = [f"{_BASE} + {row.t_id}", f"{_BASE} + {basket}"]
+        values = [f"{_BASE} + {row.t_id}", basket_ref(basket)]
         if row.table.has_tid:
             names.append(TID_COLUMN)
             values.append(_sql_literal(row.tid))
         if row.parent is not None:
             names.append(f"{row.table.parent}_fk")
-            values.append(f"{_BASE} + {row.parent}")
+            values.append(parent_ref or f"{_BASE} + {row.parent}")
         if row.seq is not None:
             names.append(SEQ_COLUMN)
             values.append(str(row.seq))
+        technical = set(names)
         references = {fk.columns[0]: fk.ref_table for fk in row.table.foreign_keys if len(fk.columns) == 1}
         for column in row.table.columns:
             if column.name in names or (not column.source and column.name != "value"):
@@ -199,21 +270,43 @@ def transfer_inserts(
                 sql = _geometry_sql(column, value)
             elif column.name in references and not isinstance(value, (dict, list)):
                 target = located.get(value) if isinstance(value, str) else None
-                if value is not None and target is None:
-                    unresolved += 1
-                sql = f"{_BASE} + {target[1]}" if target and target[0] == references[column.name] else "NULL"
+                if target and target[0] == references[column.name]:
+                    sql = f"{_BASE} + {target[1]}"
+                elif incremental and isinstance(value, str):
+                    sql = (
+                        f"(SELECT T_Id FROM {_quote(references[column.name])} "
+                        f"WHERE {_quote(TID_COLUMN)} = {_sql_literal(value)} AND {scope})"
+                    )
+                else:
+                    if value is not None and target is None:
+                        unresolved += 1
+                    sql = "NULL"
             elif isinstance(value, (dict, list)):
                 continue
             else:
                 sql = _sql_literal(value)
-            if sql != "NULL":
+            if sql != "NULL" or update:
                 names.append(column.name)
                 values.append(sql)
-        columns_sql = ", ".join(_quote(n) for n in names)
-        statements.append(f"INSERT INTO {_quote(row.table.name)} ({columns_sql}) VALUES ({', '.join(values)});")
+        if update:
+            assignments = ", ".join(f"{_quote(n)} = {v}" for n, v in zip(names, values) if n not in technical)
+            body = f"UPDATE {_quote(row.table.name)} SET {assignments} WHERE {_quote(TID_COLUMN)} = " + (
+                f"{_sql_literal(row.tid)} AND {scope};"
+            )
+            statements.append(_guard_update(body, f"404 Not Found: UPDATE {row.table.name} {row.tid}"))
+            own = f"(SELECT {_quote(OID_COLUMN)} FROM {of_tid(row)})"
+            for child_table in children_of.get(row.table.name, []):
+                statements.append(
+                    f"DELETE FROM {_quote(child_table.name)} WHERE {_quote(row.table.name + '_fk')} = {own};"
+                )
+            for child in row.children:
+                insert(child, basket, own)
+        else:
+            columns_sql = ", ".join(_quote(n) for n in names)
+            statements.append(f"INSERT INTO {_quote(row.table.name)} ({columns_sql}) VALUES ({', '.join(values)});")
+            for child in row.children:
+                insert(child, basket)
         counts[row.table.name] = counts.get(row.table.name, 0) + 1
-        for child in row.children:
-            insert(child, basket)
 
     for row in rows:
         insert(row, row.basket or dataset_id)

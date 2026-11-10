@@ -318,7 +318,11 @@ class _Population:
         repository: ModelRepository | None,
     ) -> None:
         self._objects = [
-            obj for source in [transfer, *(catalogs or [])] for basket in source.baskets for obj in basket.objects
+            obj
+            for source in [transfer, *(catalogs or [])]
+            for basket in source.baskets
+            for obj in basket.objects
+            if obj.operation != "DELETE"  # an incremental DELETE is an empty shell, not a population member
         ]
         self._symbol_table = symbol_table
         self._repository = repository
@@ -479,7 +483,9 @@ def _check_role_cardinalities(
             subject_ids = {id(t) for t in targets[1 - index]}
             for basket in transfer.baskets:
                 for obj in basket.objects:
-                    if obj.tid is None or not subject_ids & population.chain_ids(obj.qualified_class):
+                    if obj.operation == "DELETE" or obj.tid is None:
+                        continue
+                    if not subject_ids & population.chain_ids(obj.qualified_class):
                         continue
                     count = counts.get(obj.tid, 0)
                     if minimum <= count <= maximum:
@@ -531,6 +537,8 @@ def check_transfer_constraints(
     existence_members: dict[int, tuple[MetaInstance, list[tuple[XtfBasket, XtfObject]]]] = {}
     for basket in transfer.baskets:
         for obj in basket.objects:
+            if obj.operation == "DELETE":
+                continue
             scope = _ObjectScope(obj, by_tid)
             for constraint in _constraints_of(obj, cache, symbol_table, repository):
                 if id(constraint) in report.skipped:

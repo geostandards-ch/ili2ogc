@@ -1001,6 +1001,10 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
             continue
         views.append(view)
 
+    incremental = _jsonfg_mod.incremental_diagnostic(transfer, file=str(xtf_path))
+    if incremental is not None:
+        bag.add(incremental)
+
     unmapped: list[_jsonfg_mod.UnmappedValue] = []
     collection = transfer_to_feature_collection(
         transfer,
@@ -1442,7 +1446,13 @@ def main(argv: list[str] | None = None) -> int:
     import_parser.add_argument(
         "--repo", action="append", default=[], metavar="DIR", help="Directory of .ili models (repeatable)."
     )
-    import_parser.add_argument("--dataset", default=None, help="Dataset name (default: the first transfer's name).")
+    import_parser.add_argument(
+        "--dataset",
+        default=None,
+        help="Dataset name (default: the first transfer's name). A transfer with UPDATE/DELETE objects is replayed "
+        "like REST calls on this EXISTING dataset: INSERT = POST (409 if the TID exists), UPDATE = PUT (replaced in "
+        "place, 404 if absent), DELETE = DELETE (404 if absent); any failure rolls the whole script back.",
+    )
     import_parser.add_argument("-o", "--output", default=None, metavar="FILE", help="Write to FILE instead of stdout.")
     import_parser.set_defaults(func=cmd_import)
 

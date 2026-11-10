@@ -115,6 +115,9 @@ class XtfObject:
     tid: str | None
     qualified_class: str
     attributes: dict[str, list[RawNode]]  # nom d'attribut -> occurrences (LIST/BAG : plusieurs)
+    operation: str | None = None
+    """The upper-cased `OPERATION` (`INSERT`/`UPDATE`/`DELETE`) of an incremental transfer, `None` when absent
+    (an `INSERT`)."""
 
 
 @dataclass
@@ -229,7 +232,10 @@ def parse_xtf(path: Path) -> XtfTransfer:
                 basket_topic = current_basket.qualified_topic.rsplit(".", 1)[-1]
                 qualified_class = f"{model_name}.{basket_topic}.{tag}" if model_name else tag
                 current_object = XtfObject(
-                    tid=_get_attr_ci(elem, "TID"), qualified_class=qualified_class, attributes={}
+                    tid=_get_attr_ci(elem, "TID"),
+                    qualified_class=qualified_class,
+                    attributes={},
+                    operation=(_get_attr_ci(elem, "OPERATION") or "").upper() or None,
                 )
             elif parent_role == "object":
                 role = "attribute"
