@@ -901,24 +901,10 @@ def cmd_fetch_models(args: argparse.Namespace) -> int:
     return ExitCode.NOT_FOUND if missing else ExitCode.OK
 
 
-@_with_crs_fallback
-def cmd_import(args: argparse.Namespace) -> int:
-    """Write the objects of XTF transfers as PostgreSQL INSERTs into the schema `convert-sql MODEL` creates."""
-    from interlis.convert.sql.data import transfer_inserts
-    from interlis.xtf.parse import parse_xtf
+def _table_resolver(schema: SimpleNamespace):
+    """`qualified_class -> (class, table name, its symbol table)` for the classes `schema` has a table for."""
     from interlis.xtf.schema import home_symbol_table, resolve_class
 
-    bag = DiagnosticBag()
-    args.file, args.catalog = args.model, []
-    schema = _sql_schema(args, bag)
-    if isinstance(schema, int):
-        return schema
-    transfers = []
-    for xtf in args.xtf:
-        if not Path(xtf).exists():
-            _error(f"file not found: {xtf}")
-            return ExitCode.NOT_FOUND
-        transfers.append(Path(xtf) if args.stream else parse_xtf(Path(xtf)))
     names = schema.class_table_names
     by_qualified = {
         name: names[id(cls)]
@@ -935,6 +921,57 @@ def cmd_import(args: argparse.Namespace) -> int:
         home = home_symbol_table(qualified_class, symbol_table=root, repository=schema.repository)
         table = names.get(id(cls)) or by_qualified.get(home.qualified_name_of(cls) or "")
         return (cls, table, home) if table else None
+
+    return table_of
+
+
+def _column_renamer(schema: SimpleNamespace):
+    """`(qualified_class, properties) -> properties` keyed by the SQL column `convert-sql` gives each attribute.
+
+    Geometry columns and references stay out: the first travels as the Feature's geometry, the second holds a
+    row id in the database, not the TID a transfer carries.
+    """
+    from interlis.convert.sql.data import _at
+
+    table_of = _table_resolver(schema)
+    by_name = {t.name: t for t in schema.tables}
+
+    def rename(qualified_class: str, properties: dict) -> dict:
+        found = table_of(qualified_class)
+        table = by_name.get(found[1]) if found else None
+        if table is None:
+            return properties
+        references = {fk.columns[0] for fk in table.foreign_keys if len(fk.columns) == 1}
+        renamed = {}
+        for column in table.columns:
+            if not column.source or column.geometry_type or column.name in references:
+                continue
+            value = _at(properties, column.source)
+            if value is not None and not isinstance(value, (dict, list)):
+                renamed[column.name] = value
+        return renamed
+
+    return rename
+
+
+@_with_crs_fallback
+def cmd_import(args: argparse.Namespace) -> int:
+    """Write the objects of XTF transfers as PostgreSQL INSERTs into the schema `convert-sql MODEL` creates."""
+    from interlis.convert.sql.data import transfer_inserts
+    from interlis.xtf.parse import parse_xtf
+
+    bag = DiagnosticBag()
+    args.file, args.catalog = args.model, []
+    schema = _sql_schema(args, bag)
+    if isinstance(schema, int):
+        return schema
+    transfers = []
+    for xtf in args.xtf:
+        if not Path(xtf).exists():
+            _error(f"file not found: {xtf}")
+            return ExitCode.NOT_FOUND
+        transfers.append(Path(xtf) if args.stream else parse_xtf(Path(xtf)))
+    table_of = _table_resolver(schema)
 
     options = {
         "dataset": args.dataset or Path(args.xtf[0]).stem,
@@ -1013,7 +1050,7 @@ def _stream_feature_collection(
 
 
 def _write_change_requests(
-    objects, output: str | None, *, symbol_table, repository, unmapped: list, body_profile: str
+    objects, output: str | None, *, symbol_table, repository, unmapped: list, body_profile: str, rename_properties=None
 ) -> list[str]:
     """Write `{"requests": [...]}`, one OGC API Features Part 4 request per object, as they are produced.
 
@@ -1030,6 +1067,7 @@ def _write_change_requests(
             unmapped=unmapped,
             skipped=skipped,
             body_profile=body_profile,
+            rename_properties=rename_properties,
         ):
             out.write(("" if first else ",") + "\n" + json.dumps(request, ensure_ascii=False))
             first = False
@@ -1113,6 +1151,13 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
         objects = (
             (o for _b, o in iter_objects(xtf_path)) if args.stream else (o for b in transfer.baskets for o in b.objects)
         )
+        rename = None
+        if args.request_body == "geojson":
+            args.file, args.catalog = str(model_path), []
+            schema = _sql_schema(args, bag)
+            if isinstance(schema, int):
+                return schema
+            rename = _column_renamer(schema)
         skipped = _write_change_requests(
             objects,
             args.output,
@@ -1120,6 +1165,7 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
             repository=repository,
             unmapped=unmapped,
             body_profile=args.request_body,
+            rename_properties=rename,
         )
         bag.extend(_jsonfg_mod.change_diagnostics(skipped, file=str(xtf_path)))
         bag.extend(_jsonfg_mod.collect_diagnostics(unmapped, file=str(xtf_path)))
@@ -1727,7 +1773,8 @@ def main(argv: list[str] | None = None) -> int:
         default="jsonfg",
         help="Body of the POST/PUT requests written for an incremental transfer. 'jsonfg' (default): the JSON-FG "
         "Feature (application/vnd.ogc.fg+json, geometry in `place`). 'geojson': a plain GeoJSON Feature "
-        "(application/geo+json, `place` as `geometry`, its CRS in a Content-Crs header) - what pygeoapi accepts.",
+        "(application/geo+json, `place` as `geometry`, its CRS in a Content-Crs header) - what pygeoapi accepts - "
+        "with the properties keyed by the SQL column `convert-sql` gives each attribute (references left out).",
     )
     convert_jsonfg_parser.add_argument(
         "--crs",

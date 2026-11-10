@@ -2607,8 +2607,12 @@ _GEOJSON_TYPES = frozenset({"Point", "LineString", "Polygon", "MultiPoint", "Mul
 _METHOD_OF = {"INSERT": "POST", "UPDATE": "PUT"}
 
 
-def _geojson_request_body(feature: dict[str, Any]) -> tuple[dict[str, str], dict[str, Any]]:
+def _geojson_request_body(
+    feature: dict[str, Any], rename: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+) -> tuple[dict[str, str], dict[str, Any]]:
     """`(headers, body)` of a request a plain GeoJSON server takes: `place` becomes `geometry`, in its own CRS.
+
+    `rename` maps the properties onto the keys the server stores them under (a SQL column per attribute).
 
     The CRS travels in the `Content-Crs` header of OGC API Features Part 4. A `place` GeoJSON cannot hold
     (arcs, solids, ...) leaves `geometry` null.
@@ -2622,7 +2626,8 @@ def _geojson_request_body(feature: dict[str, Any]) -> tuple[dict[str, str], dict
     if "id" in feature:
         body["id"] = feature["id"]
     body["geometry"] = place if usable else None
-    body["properties"] = feature.get("properties", {})
+    properties = feature.get("properties", {})
+    body["properties"] = rename(properties) if rename else properties
     return headers, body
 
 
@@ -2634,13 +2639,15 @@ def iter_change_requests(
     unmapped: list[UnmappedValue] | None = None,
     skipped: list[str] | None = None,
     body_profile: str = "jsonfg",
+    rename_properties: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """The objects of an incremental transfer as OGC API Features Part 4 requests, in file order, one at a time.
 
     INSERT = `POST /collections/{class}/items` (the Feature as body), UPDATE = `PUT .../items/{tid}` (the whole
     Feature replaces the stored one), DELETE = `DELETE .../items/{tid}`; `{class}` is the Feature's `featureType`.
     A `DeleteObject` names no class, so no collection: its TID goes to `skipped` and no request is written.
-    `body_profile` `"geojson"` writes plain GeoJSON bodies (see `_geojson_request_body`) instead of JSON-FG ones.
+    `body_profile` `"geojson"` writes plain GeoJSON bodies (see `_geojson_request_body`) instead of JSON-FG ones;
+    `rename_properties(qualified_class, properties)` then gives their keys the names the server stores them under.
     """
     seen: set[tuple[str, str]] = set()
     for obj in objects:
@@ -2662,9 +2669,11 @@ def iter_change_requests(
             )
         if feature is None:
             continue
-        headers, body = (
-            _geojson_request_body(feature) if body_profile == "geojson" else ({"Content-Type": FG_MEDIA_TYPE}, feature)
-        )
+        if body_profile == "geojson":
+            rename = (lambda props: rename_properties(obj.qualified_class, props)) if rename_properties else None
+            headers, body = _geojson_request_body(feature, rename)
+        else:
+            headers, body = {"Content-Type": FG_MEDIA_TYPE}, feature
         yield {
             "method": _METHOD_OF[operation],
             "href": items if operation == "INSERT" else f"{items}/{obj.tid}",

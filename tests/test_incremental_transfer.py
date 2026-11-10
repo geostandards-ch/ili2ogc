@@ -198,5 +198,5 @@ def test_convert_jsonfg_geojson_request_bodies(tmp_path: Path):
         "type": "Feature",
         "id": "new",
         "geometry": {"type": "Point", "coordinates": [2600000.0, 1200000.0]},
-        "properties": {"Name": "n"},
+        "properties": {"name": "n"},
     }
