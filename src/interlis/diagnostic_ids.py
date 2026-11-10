@@ -126,6 +126,10 @@ REGISTRY: dict[str, tuple[str, str]] = {
         "B",
         "a VIEW WHERE clause needs arithmetic/function-call context the evaluator does not support",
     ),
+    "JSONFG-INCREMENTAL-UNSUPPORTED": (
+        "A",
+        "an incremental transfer's UPDATE/DELETE objects are emitted as plain features (no change-set output yet)",
+    ),
     "JSONFG-VIEW-INSPECTION-GAP": ("A", "an INSPECTION VIEW's '-> attribute' path was not built by the model builder"),
     "JSONFG-VIEW-FORMATION-UNSUPPORTED": (
         "B",

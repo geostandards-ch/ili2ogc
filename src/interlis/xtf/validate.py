@@ -1154,6 +1154,8 @@ def validate_transfer(
     issues: list[ValidationIssue] = _duplicate_tid_issues(transfer)
     for basket in transfer.baskets:
         for obj in basket.objects:
+            if obj.operation == "DELETE":
+                continue  # an incremental DELETE carries no attributes: only its TID names the object to remove
             issues.extend(
                 _validate_object(
                     obj,

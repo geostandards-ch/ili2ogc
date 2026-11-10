@@ -2646,6 +2646,27 @@ def view_skip_diagnostic(view: MetaInstance, *, file: str | None = None):
     return Diagnostic(sev, rule, f"VIEW {name!r} skipped: {reason}", Location(file=file, element_path=name), help=hlp)
 
 
+def incremental_diagnostic(transfer: XtfTransfer, *, file: str | None = None):
+    """A warning when `transfer` holds `UPDATE`/`DELETE` objects (not carried by a FeatureCollection), else `None`."""
+    from interlis.diagnostics import Diagnostic, Location
+
+    counts: dict[str, int] = {}
+    for basket in transfer.baskets:
+        for obj in basket.objects:
+            if obj.operation in ("UPDATE", "DELETE"):
+                counts[obj.operation] = counts.get(obj.operation, 0) + 1
+    if not counts:
+        return None
+    listed = ", ".join(f"{n} {op}" for op, n in sorted(counts.items()))
+    return Diagnostic(
+        "warning",
+        "JSONFG-INCREMENTAL-UNSUPPORTED",
+        f"incremental transfer ({listed} object(s)): emitted as plain features, the operation is not carried over",
+        Location(file=file),
+        help="use import-xtf to replay the operations on an existing dataset",
+    )
+
+
 def collect_diagnostics(unmapped: list[UnmappedValue], *, file: str | None = None):
     """One `Diagnostic` per value `transfer_to_feature_collection` recorded in its `unmapped` list.
 
