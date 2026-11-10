@@ -10,6 +10,7 @@ root in that mode, never copied under src/interlis/).
 
 import argparse
 import contextlib
+import functools
 import importlib.resources
 import json
 import sys
@@ -52,6 +53,7 @@ from interlis.diagnostics import (
 )
 from interlis.metamodel.instance import MetaInstance
 from interlis.runtime.parse import meta_attribute_comments_in_file, parse_file
+from interlis.xtf.crs import fallback_crs
 from interlis.xtf.jsonfg_validate import validate_jsonfg
 from interlis.xtf.model_resolution import header_completeness, header_model_lookup, root_model_names
 from interlis.xtf.parse import iter_objects, parse_xtf, read_skeleton
@@ -580,6 +582,26 @@ def _sql_schema(args: argparse.Namespace, bag: DiagnosticBag) -> SimpleNamespace
     )
 
 
+def _parse_epsg(value: str) -> int:
+    """`EPSG:2056` or `2056` as 2056 (argparse `type=`)."""
+    code = value.rsplit(":", 1)[-1].strip()
+    if not code.isdigit() or (":" in value and value.split(":", 1)[0].strip().upper() != "EPSG"):
+        raise argparse.ArgumentTypeError(f"{value!r} is not EPSG:<digits>")
+    return int(code)
+
+
+def _with_crs_fallback(command):
+    """Run `command(args)` with `args.crs` as the CRS of coordinate domains that declare none."""
+
+    @functools.wraps(command)
+    def wrapper(args: argparse.Namespace) -> int:
+        with fallback_crs(getattr(args, "crs", None)):
+            return command(args)
+
+    return wrapper
+
+
+@_with_crs_fallback
 def cmd_convert_sql(args: argparse.Namespace) -> int:
     """Convert an .ili model to SQL DDL, PostgreSQL or GeoPackage/SQLite.
 
@@ -874,6 +896,7 @@ def cmd_fetch_models(args: argparse.Namespace) -> int:
     return ExitCode.NOT_FOUND if missing else ExitCode.OK
 
 
+@_with_crs_fallback
 def cmd_import(args: argparse.Namespace) -> int:
     """Write the objects of XTF transfers as PostgreSQL INSERTs into the schema `convert-sql MODEL` creates."""
     from interlis.convert.sql.data import transfer_inserts
@@ -965,6 +988,7 @@ def _stream_feature_collection(
         out.write(f'\n  ],\n  "conformsTo": {json.dumps(conforms_to)}\n}}\n')
 
 
+@_with_crs_fallback
 def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
     """Convert an .xtf transfer to a JSON-FG FeatureCollection.
 
@@ -1452,6 +1476,15 @@ def main(argv: list[str] | None = None) -> int:
         "VIEW / FOREIGN KEY can be generated without also listing it via --catalog.",
     )
     convert_sql_parser.add_argument(
+        "--crs",
+        type=_parse_epsg,
+        default=None,
+        metavar="EPSG:CODE",
+        help="CRS for a coordinate domain that declares none (no !!@CRS=EPSG:xxxx on it or its EXTENDS chain, no "
+        "CONTEXT): used and reported as CRS-DEFAULT-APPLIED. Never applied to an ambiguous, invalid or unbound "
+        "domain. Without it such a geometry gets no CRS.",
+    )
+    convert_sql_parser.add_argument(
         "--catalog",
         action="append",
         default=[],
@@ -1502,6 +1535,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     import_parser.add_argument(
         "xtf", nargs="+", help="Transfer(s), e.g. data and its catalogues: references across them resolve."
+    )
+    import_parser.add_argument(
+        "--crs",
+        type=_parse_epsg,
+        default=None,
+        metavar="EPSG:CODE",
+        help="CRS for a coordinate domain that declares none (no !!@CRS=EPSG:xxxx on it or its EXTENDS chain, no "
+        "CONTEXT): used and reported as CRS-DEFAULT-APPLIED. Never applied to an ambiguous, invalid or unbound "
+        "domain. Without it such a geometry gets no CRS.",
     )
     import_parser.add_argument(
         "--model", required=True, metavar="FILE.ili", help="The model given to convert-sql for this schema."
@@ -1602,6 +1644,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Convert an .xtf transfer to a JSON-FG FeatureCollection.",
     )
     convert_jsonfg_parser.add_argument("xtf", help="Path to the .xtf file to convert.")
+    convert_jsonfg_parser.add_argument(
+        "--crs",
+        type=_parse_epsg,
+        default=None,
+        metavar="EPSG:CODE",
+        help="CRS for a coordinate domain that declares none (no !!@CRS=EPSG:xxxx on it or its EXTENDS chain, no "
+        "CONTEXT): used and reported as CRS-DEFAULT-APPLIED. Never applied to an ambiguous, invalid or unbound "
+        "domain. Without it such a geometry gets no CRS.",
+    )
     convert_jsonfg_parser.add_argument(
         "--model",
         default=None,

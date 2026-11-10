@@ -141,6 +141,7 @@ REGISTRY: dict[str, tuple[str, str]] = {
     "CRS-ANNOTATION-INVALID": ("C", "a domain's !!@CRS value is not EPSG:<digits> - no CRS is assumed"),
     "CRS-ANNOTATION-DUPLICATE": ("C", "a domain carries several !!@CRS annotations - no CRS is assumed"),
     "CRS-ANNOTATION-DISTANT": ("C", "a !!@CRS sits several lines above its domain (comments or blank lines between)"),
+    "CRS-DEFAULT-APPLIED": ("C", "a domain declares no !!@CRS: the CRS given with --crs was used instead"),
     "CRS-CONTEXT-AMBIGUOUS": (
         "B",
         "a CONTEXT binds a generic domain to several OR-ed concrete domains - choosing one would invent a CRS",

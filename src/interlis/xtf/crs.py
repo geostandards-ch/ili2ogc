@@ -8,6 +8,9 @@ bounds of a domain or from the name of its axes' reference system.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 from interlis.builder.forward_refs import SymbolTable
@@ -15,6 +18,8 @@ from interlis.builder.repository import ModelRepository
 from interlis.metamodel.instance import MetaInstance
 
 CRS_URI_PREFIX = "http://www.opengis.net/def/crs/EPSG/0/"
+
+_FALLBACK: ContextVar[int | None] = ContextVar("_FALLBACK", default=None)
 
 _CONTEXT_CLASS = "IlisMeta16.ModelData.Context"
 _MODEL_CLASS = "IlisMeta16.ModelData.Model"
@@ -25,7 +30,8 @@ class CrsResolution:
     """The CRS of a coordinate domain, or why it has none.
 
     `provenance` says where the code came from: `"annotation"` (on the domain itself), `"extends"` (on an ancestor
-    in its `EXTENDS` chain) or `"context"` (on the concrete domain a `CONTEXT` binds the generic one to).
+    in its `EXTENDS` chain), `"context"` (on the concrete domain a `CONTEXT` binds the generic one to) or `"cli"`
+    (the explicit `--crs` fallback for a domain that declares none).
     `reason` (when unresolved) is one of `unresolved-type`, `unresolved-super` (a base model is missing),
     `generic-unbound` (a generic domain no imported `CONTEXT` binds), `undeclared` (no annotation anywhere on the
     chain), `ambiguous-context`, `invalid-annotation` or `duplicate-annotation`.
@@ -43,6 +49,20 @@ class CrsResolution:
     def uri(self) -> str | None:
         """The `http://www.opengis.net/def/crs/EPSG/0/<code>` URI, or `None` when unresolved."""
         return None if self.epsg is None else f"{CRS_URI_PREFIX}{self.epsg}"
+
+
+@contextlib.contextmanager
+def fallback_crs(epsg: int | None) -> Iterator[None]:
+    """Inside the block, a domain that declares NO `!!@CRS` anywhere gets `epsg` (the user's explicit `--crs`).
+
+    Only the `undeclared` case: an ambiguous `CONTEXT`, an invalid or duplicated annotation and an unbound
+    generic domain stay unresolved, since the user's value would silence a real model problem.
+    """
+    token = _FALLBACK.set(epsg)
+    try:
+        yield
+    finally:
+        _FALLBACK.reset(token)
 
 
 def _name_of(domain: MetaInstance) -> str:
@@ -195,6 +215,25 @@ def resolve_crs(
     symbol_table: SymbolTable | None = None,
     repository: ModelRepository | None = None,
 ) -> CrsResolution:
+    """`_resolve`, then the `--crs` fallback for a domain declaring none."""
+    found = _resolve(coord_type, symbol_table=symbol_table, repository=repository)
+    fallback = _FALLBACK.get()
+    if fallback is None or found.reason != "undeclared":
+        return found
+    return CrsResolution(
+        epsg=fallback,
+        provenance="cli",
+        domain=found.domain,
+        warnings=(("CRS-DEFAULT-APPLIED", f"{found.detail}; --crs EPSG:{fallback} used"),),
+    )
+
+
+def _resolve(
+    coord_type: MetaInstance | None,
+    *,
+    symbol_table: SymbolTable | None = None,
+    repository: ModelRepository | None = None,
+) -> CrsResolution:
     """Resolve the CRS of a coordinate domain: its own `!!@CRS`, else its `EXTENDS` chain's, else its `CONTEXT`'s.
 
     Never guessed: an absent, duplicated or malformed annotation, or an ambiguous `CONTEXT`, gives an unresolved
@@ -269,6 +308,7 @@ __all__ = [
     "context_concrete_domain",
     "context_instances",
     "crs_uri",
+    "fallback_crs",
     "reason_rule",
     "resolve_crs",
 ]
