@@ -17,7 +17,7 @@ from typing import Any
 from interlis.builder.forward_refs import SymbolTable
 from interlis.builder.repository import ModelRepository
 from interlis.convert.geometry_kinds import geometry_types
-from interlis.convert.jsonfg import _context_concrete_domain, _crs_uri, geometry_coord_type
+from interlis.convert.jsonfg import geometry_coord_type
 from interlis.convert.jsonschema import (
     class_schema_keys,
     convertible_roots,
@@ -28,6 +28,7 @@ from interlis.convert.jsonschema import (
 )
 from interlis.metamodel.instance import MetaInstance
 from interlis.xtf.constraints import check_transfer_constraints
+from interlis.xtf.crs import context_concrete_domain, crs_uri
 from interlis.xtf.parse import RawNode, XtfBasket, XtfObject, XtfTransfer
 from interlis.xtf.schema import (
     ResolvedAttribute,
@@ -321,7 +322,7 @@ class _JsonFgValidator:
 
     def _geometry_value(self, attr: _GeometryAttr, geometry: dict[str, Any], issue) -> list[ValidationIssue]:
         found: list[ValidationIssue] = []
-        concrete = _context_concrete_domain(attr.coord_type, self.symbol_table, self.repository) or attr.coord_type
+        concrete = context_concrete_domain(attr.coord_type, self.symbol_table, self.repository) or attr.coord_type
         axes = coord_axes(concrete)
         positions = list(_leaf_positions(geometry))
         if axes and any(len(position) != len(axes) for position in positions):
@@ -355,7 +356,7 @@ class _JsonFgValidator:
         return found
 
     def _crs(self, attr: _GeometryAttr, feature, collection, issue) -> list[ValidationIssue]:
-        expected = _crs_uri(attr.coord_type, symbol_table=self.symbol_table, repository=self.repository)
+        expected = crs_uri(attr.coord_type, symbol_table=self.symbol_table, repository=self.repository)
         actual = feature.get("coordRefSys") or collection.get("coordRefSys")
         if expected is None:
             return []

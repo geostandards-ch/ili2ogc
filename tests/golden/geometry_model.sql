@@ -17,37 +17,37 @@ CREATE TABLE "point" (
     "t_basket" bigint NOT NULL,
     "t_ili_tid" varchar(200)
 );
--- NOTE (point): [SQL-GEOM-NO-CRS] Pos: no resolved CRS (!!@CRS meta-attribute) - provide the geometry base model via --repo
+-- NOTE (point): [SQL-GEOM-CRS-UNDECLARED] Pos: domain Coord2 and its ancestors carry no !!@CRS
 CREATE TABLE "multipoint" (
     "t_id" bigint PRIMARY KEY DEFAULT nextval('t_ili2db_seq'),
     "t_basket" bigint NOT NULL,
     "t_ili_tid" varchar(200)
 );
--- NOTE (multipoint): [SQL-GEOM-NO-CRS] Pos: no resolved CRS (!!@CRS meta-attribute) - provide the geometry base model via --repo
+-- NOTE (multipoint): [SQL-GEOM-CRS-UNDECLARED] Pos: domain MultiCoord2 and its ancestors carry no !!@CRS
 CREATE TABLE "way" (
     "t_id" bigint PRIMARY KEY DEFAULT nextval('t_ili2db_seq'),
     "t_basket" bigint NOT NULL,
     "t_ili_tid" varchar(200)
 );
--- NOTE (way): [SQL-GEOM-NO-CRS] Geom: no resolved CRS (!!@CRS meta-attribute) - provide the geometry base model via --repo
+-- NOTE (way): [SQL-GEOM-CRS-UNDECLARED] Geom: domain Coord2 and its ancestors carry no !!@CRS
 CREATE TABLE "directedway" (
     "t_id" bigint PRIMARY KEY DEFAULT nextval('t_ili2db_seq'),
     "t_basket" bigint NOT NULL,
     "t_ili_tid" varchar(200)
 );
--- NOTE (directedway): [SQL-GEOM-NO-CRS] Geom: no resolved CRS (!!@CRS meta-attribute) - provide the geometry base model via --repo
+-- NOTE (directedway): [SQL-GEOM-CRS-UNDECLARED] Geom: domain Coord2 and its ancestors carry no !!@CRS
 CREATE TABLE "multiway" (
     "t_id" bigint PRIMARY KEY DEFAULT nextval('t_ili2db_seq'),
     "t_basket" bigint NOT NULL,
     "t_ili_tid" varchar(200)
 );
--- NOTE (multiway): [SQL-GEOM-NO-CRS] Geom: no resolved CRS (!!@CRS meta-attribute) - provide the geometry base model via --repo
+-- NOTE (multiway): [SQL-GEOM-CRS-UNDECLARED] Geom: domain Coord2 and its ancestors carry no !!@CRS
 CREATE TABLE "zone" (
     "t_id" bigint PRIMARY KEY DEFAULT nextval('t_ili2db_seq'),
     "t_basket" bigint NOT NULL,
     "t_ili_tid" varchar(200)
 );
--- NOTE (zone): [SQL-GEOM-NO-CRS] Geom: no resolved CRS (!!@CRS meta-attribute) - provide the geometry base model via --repo
+-- NOTE (zone): [SQL-GEOM-CRS-UNDECLARED] Geom: domain Coord2 and its ancestors carry no !!@CRS
 ALTER TABLE "point" ADD CONSTRAINT point_t_basket_fkey FOREIGN KEY ("t_basket") REFERENCES T_ILI2DB_BASKET DEFERRABLE INITIALLY DEFERRED;
 ALTER TABLE "multipoint" ADD CONSTRAINT multipoint_t_basket_fkey FOREIGN KEY ("t_basket") REFERENCES T_ILI2DB_BASKET DEFERRABLE INITIALLY DEFERRED;
 ALTER TABLE "way" ADD CONSTRAINT way_t_basket_fkey FOREIGN KEY ("t_basket") REFERENCES T_ILI2DB_BASKET DEFERRABLE INITIALLY DEFERRED;

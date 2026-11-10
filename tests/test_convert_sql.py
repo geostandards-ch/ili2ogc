@@ -242,7 +242,7 @@ END Foo.
     tables = build_tables([a])
     table = _table(tables, "a")
     assert not any(c.name == "geom" for c in table.columns)
-    assert any("no resolved CRS" in note for note in table.notes)
+    assert any("carry no !!@CRS" in note for note in table.notes)
 
 
 def test_role_becomes_fk_when_symbol_table_given():

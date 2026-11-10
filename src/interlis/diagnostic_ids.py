@@ -55,9 +55,13 @@ REGISTRY: dict[str, tuple[str, str]] = {
         "C",
         "REFERENCE TO / role target did not resolve - provide its model via --repo/--catalog",
     ),
+    "SQL-GEOM-CRS-UNDECLARED": (
+        "B",
+        "geometry column dropped: its coordinate domain and its ancestors carry no !!@CRS (a CRS is never guessed)",
+    ),
     "SQL-GEOM-NO-CRS": (
         "C",
-        "geometry column has no resolvable CRS/domain - provide the geometry base model via --repo",
+        "geometry column dropped: its domain's base model or CONTEXT is not available - provide it via --repo",
     ),
     "SQL-FK-CROSS-MODEL-DROPPED": (
         "C",
@@ -125,6 +129,21 @@ REGISTRY: dict[str, tuple[str, str]] = {
     "JSONFG-VIEW-WHERE-UNSUPPORTED": (
         "B",
         "a VIEW WHERE clause needs arithmetic/function-call context the evaluator does not support",
+    ),
+    "JSONFG-GEOM-NO-CRS": (
+        "C",
+        "a geometry is left out: its domain's base model or CONTEXT is not available - provide it via --repo",
+    ),
+    "JSONFG-GEOM-CRS-UNDECLARED": (
+        "B",
+        "a geometry is left out: its coordinate domain and its ancestors carry no !!@CRS (a CRS is never guessed)",
+    ),
+    "CRS-ANNOTATION-INVALID": ("C", "a domain's !!@CRS value is not EPSG:<digits> - no CRS is assumed"),
+    "CRS-ANNOTATION-DUPLICATE": ("C", "a domain carries several !!@CRS annotations - no CRS is assumed"),
+    "CRS-ANNOTATION-DISTANT": ("C", "a !!@CRS sits several lines above its domain (comments or blank lines between)"),
+    "CRS-CONTEXT-AMBIGUOUS": (
+        "B",
+        "a CONTEXT binds a generic domain to several OR-ed concrete domains - choosing one would invent a CRS",
     ),
     "JSONFG-INCREMENTAL-UNSUPPORTED": (
         "A",

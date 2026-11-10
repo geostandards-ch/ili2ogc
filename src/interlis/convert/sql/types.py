@@ -6,34 +6,53 @@ of this package needed to build it.
 
 from __future__ import annotations
 
-from interlis.metamodel.instance import MetaInstance
+import contextlib
+from collections.abc import Iterator
+from contextvars import ContextVar
+from typing import NamedTuple
+
+from interlis.builder.forward_refs import SymbolTable
+from interlis.builder.repository import ModelRepository
+from interlis.xtf.crs import reason_rule, resolve_crs
 from interlis.xtf.schema import (
     ResolvedAttribute,
     coord_axes,
     enum_values,
     is_integer_range,
     line_coord_type,
-    meta_value,
 )
 
+_REPOSITORY: ContextVar[ModelRepository | None] = ContextVar("_REPOSITORY", default=None)
 
-def _srid(coord_type: MetaInstance | None) -> str | None:
-    """Return the bare numeric EPSG code (e.g. `"2056"`) from a CoordType's `!!@CRS=EPSG:<code>` meta-attribute, or
-    `None` (never guessed) if absent/malformed.
+
+@contextlib.contextmanager
+def crs_repository(repository: ModelRepository | None) -> Iterator[None]:
+    """Make `repository` the one whose `CONTEXT` rebindings resolve a geometry column's CRS, inside the block."""
+    token = _REPOSITORY.set(repository)
+    try:
+        yield
+    finally:
+        _REPOSITORY.reset(token)
+
+
+class GeometryColumnInfo(NamedTuple):
+    """What `_geometry_column_info` found: a column type and SRID, or the `(rule, message)` that explains its absence.
+
+    `warnings` are `(rule, message)` findings about the CRS annotation that did not prevent the column.
     """
-    raw = meta_value(coord_type, "CRS")
-    if raw is None:
-        return None
-    scheme, _, code = raw.partition(":")
-    if scheme.strip().upper() != "EPSG" or not code.strip().isdigit():
-        return None
-    return code.strip()
+
+    sfa_type: str | None
+    srid: int | None
+    problem: tuple[str, str] | None
+    warnings: tuple[tuple[str, str], ...] = ()
 
 
-def _geometry_column_info(resolved: ResolvedAttribute) -> tuple[str, int, None] | tuple[None, None, str]:
-    """Return `(sfa_type, srid, None)` on success or `(None, None, reason)` on failure, for a CoordType/LineType
-    attribute.
-    """
+def _geometry_column_info(
+    resolved: ResolvedAttribute,
+    symbol_table: SymbolTable | None = None,
+    repository: ModelRepository | None = None,
+) -> GeometryColumnInfo:
+    """The SFA type and SRID of a CoordType/LineType attribute's column, or why it has none (CRS never guessed)."""
     if resolved.type_kind == "CoordType":
         coord_type = resolved.type_instance
         sfa = "Point"
@@ -43,17 +62,21 @@ def _geometry_column_info(resolved: ResolvedAttribute) -> tuple[str, int, None] 
         kind = getattr(line_type, "Kind", None)
         sfa = "LineString" if kind in ("Polyline", "DirectedPolyline") else "Polygon"
     else:
-        return None, None, "not a geometry type"
-    if coord_type is None:
-        return None, None, "vertex CoordType not resolved"
+        return GeometryColumnInfo(None, None, ("SQL-GEOM-NO-CRS", "not a geometry type"))
+    resolution = resolve_crs(coord_type, symbol_table=symbol_table, repository=repository or _REPOSITORY.get())
+    if resolution.epsg is None:
+        rule = reason_rule(resolution.reason or "", "SQL")
+        message = resolution.detail
+        if rule == "SQL-GEOM-NO-CRS":
+            message += " - provide the geometry base model via --repo"
+            if resolution.reason == "generic-unbound":
+                message = message.replace("base model via", "base model or a CONTEXT via")
+        return GeometryColumnInfo(None, None, (rule, message))
     if len(coord_axes(coord_type)) >= 3:
         sfa += "Z"
     if bool(getattr(resolved.type_instance, "Multi", False)):
         sfa = "Multi" + sfa
-    srid = _srid(coord_type)
-    if srid is None:
-        return None, None, "no resolved CRS (!!@CRS meta-attribute)"
-    return sfa, int(srid), None
+    return GeometryColumnInfo(sfa, resolution.epsg, None, resolution.warnings)
 
 
 def _scalar_sql_type(resolved: ResolvedAttribute) -> str | None:

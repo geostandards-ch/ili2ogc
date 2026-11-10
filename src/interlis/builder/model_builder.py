@@ -308,6 +308,7 @@ class InterlisModelBuilder(
             meta = self.registry.new_instance("IlisMeta16.ModelData.MetaAttribute")
             meta.Name = name
             meta.Value = value
+            meta._line_gap = line - comment_line
             self.attachment.attach(
                 instance,
                 "MetaAttribute",
