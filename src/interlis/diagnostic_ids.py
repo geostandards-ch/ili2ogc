@@ -146,9 +146,9 @@ REGISTRY: dict[str, tuple[str, str]] = {
         "B",
         "a CONTEXT binds a generic domain to several OR-ed concrete domains - choosing one would invent a CRS",
     ),
-    "JSONFG-INCREMENTAL-UNSUPPORTED": (
-        "A",
-        "an incremental transfer's UPDATE/DELETE objects are emitted as plain features (no change-set output yet)",
+    "JSONFG-DELETEOBJECT-NO-COLLECTION": (
+        "B",
+        "a DeleteObject names no class, so no OGC API collection to address its DELETE to - left out",
     ),
     "JSONFG-VIEW-INSPECTION-GAP": ("A", "an INSPECTION VIEW's '-> attribute' path was not built by the model builder"),
     "JSONFG-VIEW-FORMATION-UNSUPPORTED": (

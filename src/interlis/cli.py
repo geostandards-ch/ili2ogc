@@ -56,7 +56,7 @@ from interlis.runtime.parse import meta_attribute_comments_in_file, parse_file
 from interlis.xtf.crs import fallback_crs
 from interlis.xtf.jsonfg_validate import validate_jsonfg
 from interlis.xtf.model_resolution import header_completeness, header_model_lookup, root_model_names
-from interlis.xtf.parse import iter_objects, parse_xtf, read_skeleton
+from interlis.xtf.parse import is_incremental, iter_objects, parse_xtf, read_skeleton
 from interlis.xtf.validate import validate_stream, validate_transfer
 
 _DEV_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -963,14 +963,11 @@ def _stream_feature_collection(
     repository: ModelRepository | None,
     include_child_rows: bool,
     unmapped: list,
-    operations: dict[str, int],
 ) -> None:
     """Write `xtf_path` as a JSON-FG FeatureCollection one Feature at a time, in two passes (flat memory)."""
 
     def objects():
         for _basket, obj in iter_objects(xtf_path):
-            if obj.operation in ("UPDATE", "DELETE"):
-                operations[obj.operation] = operations.get(obj.operation, 0) + 1
             yield obj
 
     def features(sink: list | None):
@@ -991,7 +988,6 @@ def _stream_feature_collection(
         if "coordRefSys" in feature:
             crs_values.add(feature["coordRefSys"])
         place_types |= _jsonfg_mod.place_type_names(feature.get("place"))
-    operations.clear()
     conforms_to = [_jsonfg_mod.CONF_CORE, _jsonfg_mod.CONF_TYPES_SCHEMAS]
     if place_types & _jsonfg_mod.CIRCULAR_ARC_TYPES:
         conforms_to.append(_jsonfg_mod.CONF_CIRCULAR_ARCS)
@@ -1014,6 +1010,24 @@ def _stream_feature_collection(
             out.write(("" if first else ",") + "\n" + json.dumps(feature, ensure_ascii=False))
             first = False
         out.write("\n  ]\n}\n")
+
+
+def _write_change_requests(objects, output: str | None, *, symbol_table, repository, unmapped: list) -> list[str]:
+    """Write `{"requests": [...]}`, one OGC API Features Part 4 request per object, as they are produced.
+
+    Returns the TIDs of the `DeleteObject`s that had no collection to be addressed to.
+    """
+    skipped: list[str] = []
+    with open(output, "w", encoding="utf-8") if output else contextlib.nullcontext(sys.stdout) as out:
+        out.write('{\n  "requests": [')
+        first = True
+        for request in _jsonfg_mod.iter_change_requests(
+            objects, symbol_table=symbol_table, repository=repository, unmapped=unmapped, skipped=skipped
+        ):
+            out.write(("" if first else ",") + "\n" + json.dumps(request, ensure_ascii=False))
+            first = False
+        out.write("\n  ]\n}\n")
+    return skipped
 
 
 @_with_crs_fallback
@@ -1084,6 +1098,21 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
         builder.build(tree, meta_attributes=meta_attribute_comments_in_file(model_path))
     bag.extend(builder_warnings_to_diagnostics(caught, file=str(model_path)))
 
+    unmapped: list[_jsonfg_mod.UnmappedValue] = []
+    if is_incremental(xtf_path if args.stream else transfer):
+        if args.lang:
+            _error("--lang cannot be combined with an incremental transfer (it writes requests, not a collection).")
+            return ExitCode.USAGE
+        objects = (
+            (o for _b, o in iter_objects(xtf_path)) if args.stream else (o for b in transfer.baskets for o in b.objects)
+        )
+        skipped = _write_change_requests(
+            objects, args.output, symbol_table=builder.symbol_table, repository=repository, unmapped=unmapped
+        )
+        bag.extend(_jsonfg_mod.change_diagnostics(skipped, file=str(xtf_path)))
+        bag.extend(_jsonfg_mod.collect_diagnostics(unmapped, file=str(xtf_path)))
+        return _finish(bag, args)
+
     candidate_views = [
         instance
         for instance in builder.symbol_table.all_registered()
@@ -1097,12 +1126,10 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
             continue
         views.append(view)
 
-    unmapped: list[_jsonfg_mod.UnmappedValue] = []
     if args.stream and views:
         _warn("--stream: the model has VIEWs, which need every object - not streamed.")
         transfer, args.stream = parse_xtf(xtf_path), False
     if args.stream:
-        operations: dict[str, int] = {}
         _stream_feature_collection(
             xtf_path,
             args.output,
@@ -1110,17 +1137,9 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
             repository=repository,
             include_child_rows=args.include_child_rows,
             unmapped=unmapped,
-            operations=operations,
         )
-        incremental = _jsonfg_mod.incremental_diagnostic_for(operations, file=str(xtf_path))
-        if incremental is not None:
-            bag.add(incremental)
         bag.extend(_jsonfg_mod.collect_diagnostics(unmapped, file=str(xtf_path)))
         return _finish(bag, args)
-    incremental = _jsonfg_mod.incremental_diagnostic(transfer, file=str(xtf_path))
-    if incremental is not None:
-        bag.add(incremental)
-
     collection = transfer_to_feature_collection(
         transfer,
         symbol_table=builder.symbol_table,
@@ -1683,7 +1702,13 @@ def main(argv: list[str] | None = None) -> int:
         "convert-jsonfg",
         help="Convert an .xtf transfer to a JSON-FG FeatureCollection.",
     )
-    convert_jsonfg_parser.add_argument("xtf", help="Path to the .xtf file to convert.")
+    convert_jsonfg_parser.add_argument(
+        "xtf",
+        help="Path to the .xtf file to convert. An incremental transfer (UPDATE baskets, UPDATE/DELETE objects) "
+        'is written as {"requests": [...]}: OGC API Features Part 4 requests in file order (INSERT = POST '
+        "/collections/{class}/items, UPDATE = PUT .../items/{tid}, DELETE = DELETE .../items/{tid}), each POST/PUT "
+        "carrying its JSON-FG Feature.",
+    )
     convert_jsonfg_parser.add_argument(
         "--crs",
         type=_parse_epsg,

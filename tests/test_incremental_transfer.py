@@ -1,5 +1,6 @@
 """Incremental transfers (INSERT/UPDATE/DELETE objects): replayed like REST calls by `import-xtf`."""
 
+import json
 from pathlib import Path
 
 from interlis.cli import main
@@ -90,10 +91,39 @@ def test_validate_skips_attribute_checks_of_a_delete(tmp_path: Path):
     assert code == 0, out.read_text(encoding="utf-8") if out.exists() else ""
 
 
-def test_convert_jsonfg_warns_that_operations_are_not_carried(tmp_path: Path, capsys):
+def test_convert_jsonfg_writes_part4_requests(tmp_path: Path):
     xtf = _setup(tmp_path)
-    main(["convert-jsonfg", str(xtf), "--model", str(tmp_path / "M.ili"), "-o", str(tmp_path / "o.json")])
-    assert "JSONFG-INCREMENTAL-UNSUPPORTED" in capsys.readouterr().err
+    out = tmp_path / "o.json"
+    main(["convert-jsonfg", str(xtf), "--model", str(tmp_path / "M.ili"), "-o", str(out)])
+    requests = json.loads(out.read_text(encoding="utf-8"))["requests"]
+    assert [(r["method"], r["href"]) for r in requests] == [
+        ("POST", "/collections/A/items"),
+        ("PUT", "/collections/A/items/old"),
+        ("DELETE", "/collections/A/items/gone"),
+    ]
+    assert requests[0]["body"]["id"] == "new" and requests[0]["body"]["properties"] == {"Name": "n"}
+    assert requests[1]["body"]["properties"] == {"Name": "renamed"} and "body" not in requests[2]
+    assert requests[0]["headers"]["Content-Type"] == "application/vnd.ogc.fg+json"
+
+
+def test_convert_jsonfg_stream_writes_the_same_requests(tmp_path: Path):
+    xtf = _setup(tmp_path)
+    whole, streamed = tmp_path / "w.json", tmp_path / "s.json"
+    base = ["convert-jsonfg", str(xtf), "--model", str(tmp_path / "M.ili")]
+    main([*base, "-o", str(whole)])
+    main([*base, "--stream", "-o", str(streamed)])
+    assert streamed.read_text(encoding="utf-8") == whole.read_text(encoding="utf-8")
+
+
+def test_a_complete_transfer_is_still_a_feature_collection(tmp_path: Path):
+    xtf = _setup(tmp_path)
+    xtf.write_text(
+        _XTF.replace(' OPERATION="UPDATE"', "").replace(' OPERATION="DELETE"', "").replace(' KIND="UPDATE"', ""),
+        encoding="utf-8",
+    )
+    out = tmp_path / "o.json"
+    main(["convert-jsonfg", str(xtf), "--model", str(tmp_path / "M.ili"), "-o", str(out)])
+    assert json.loads(out.read_text(encoding="utf-8"))["type"] == "FeatureCollection"
 
 
 _XTF24 = """<?xml version="1.0" encoding="UTF-8"?>
@@ -129,3 +159,14 @@ def test_import_deletes_a_delete_object_from_whichever_table_holds_it(tmp_path: 
     sql = out.read_text(encoding="utf-8")
     assert """DELETE FROM "a" WHERE "t_ili_tid" = 'gone'""" in sql
     assert "404 Not Found: DeleteObject gone" in sql
+
+
+def test_convert_jsonfg_leaves_out_a_delete_object_with_a_note(tmp_path: Path, capsys):
+    (tmp_path / "M.ili").write_text(_MODEL, encoding="utf-8")
+    xtf = tmp_path / "d.xtf"
+    xtf.write_text(_XTF24, encoding="utf-8")
+    out = tmp_path / "o.json"
+    main(["convert-jsonfg", str(xtf), "--model", str(tmp_path / "M.ili"), "-o", str(out)])
+    requests = json.loads(out.read_text(encoding="utf-8"))["requests"]
+    assert [r["method"] for r in requests] == ["POST"]
+    assert "JSONFG-DELETEOBJECT-NO-COLLECTION" in capsys.readouterr().err
