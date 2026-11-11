@@ -212,3 +212,26 @@ def test_convert_sql_basket_trigger_is_opt_in_and_postgresql_only(tmp_path: Path
     assert 'BEFORE INSERT ON "a"' in sql
     assert "t_ili2db_default_basket('M.T')" in sql
     assert main(["convert-sql", str(tmp_path / "M.ili"), "--dialect", "gpkg", "--basket-trigger"]) != 0
+
+
+def test_import_deletes_a_link_without_oid_by_the_objects_it_joins(tmp_path: Path):
+    (tmp_path / "L.ili").write_text(
+        'INTERLIS 2.3;\nMODEL L AT "http://x" VERSION "1" =\n  TOPIC T =\n'
+        "    CLASS A = Name : TEXT*10; END A;\n    CLASS B = Name : TEXT*10; END B;\n"
+        "    ASSOCIATION AB =\n      RA -- {0..*} A;\n      RB -- {0..*} B;\n    END AB;\n  END T;\nEND L.\n",
+        encoding="utf-8",
+    )
+    xtf = tmp_path / "l.xtf"
+    xtf.write_text(
+        '<?xml version="1.0" encoding="UTF-8"?><TRANSFER xmlns="http://www.interlis.ch/INTERLIS2.3"><HEADERSECTION '
+        'SENDER="x" VERSION="2.3"><MODELS><MODEL NAME="L" VERSION="1" URI="http://x"></MODEL></MODELS></HEADERSECTION>'
+        '<DATASECTION><L.T BID="b1" KIND="UPDATE"><L.T.AB OPERATION="DELETE"><RA REF="a1"></RA><RB REF="b2"></RB>'
+        "</L.T.AB></L.T></DATASECTION></TRANSFER>",
+        encoding="utf-8",
+    )
+    out = tmp_path / "o.sql"
+    main(["import-xtf", str(xtf), "--model", str(tmp_path / "L.ili"), "--dataset", "ds", "-o", str(out)])
+    sql = out.read_text(encoding="utf-8")
+    assert 'DELETE FROM "ab" WHERE "ra" = (SELECT T_Id FROM "a" WHERE "t_ili_tid" = \'a1\'' in sql
+    assert """AND "rb" = (SELECT T_Id FROM "b" WHERE "t_ili_tid" = 'b2'""" in sql
+    assert "= NULL" not in sql
