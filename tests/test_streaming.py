@@ -88,10 +88,55 @@ def test_validate_stream_reports_what_validate_reports(tmp_path: Path, capsys):
     assert whole == streamed and "already used by" in whole and "MANDATORY" in whole.upper()
 
 
-def test_validate_stream_says_constraints_are_skipped(tmp_path: Path, capsys):
-    (tmp_path / "M.ili").write_text(_MODEL, encoding="utf-8")
-    main(["validate-xtf", str(_xtf(tmp_path / "a.xtf", 1)), "--model", str(tmp_path / "M.ili"), "--stream"])
-    assert "CONSTRAINTs" in capsys.readouterr().err
+_CONSTRAINT_MODEL = """INTERLIS 2.4;
+MODEL M AT "http://x" VERSION "1" =
+  TOPIC T =
+    CLASS A =
+      Name : MANDATORY TEXT*20;
+      Age : 0 .. 120;
+      MANDATORY CONSTRAINT Age >= 18;
+      UNIQUE Name;
+    END A;
+    CLASS B =
+      Of : MANDATORY REFERENCE TO A;
+      MANDATORY CONSTRAINT Of->Name == "n0";
+    END B;
+  END T;
+END M.
+"""
+
+_CONSTRAINT_XTF = (
+    '<?xml version="1.0"?><TRANSFER xmlns="http://www.interlis.ch/INTERLIS2.3"><HEADERSECTION SENDER="x" VERSION="2.3">'
+    '<MODELS><MODEL NAME="M" VERSION="1" URI="http://x"></MODEL></MODELS></HEADERSECTION><DATASECTION><M.T BID="b1">'
+    '<M.T.A TID="a0"><Name>n0</Name><Age>30</Age></M.T.A>'
+    '<M.T.A TID="a1"><Name>n0</Name><Age>10</Age></M.T.A>'
+    '<M.T.B TID="x"><Of REF="a0"></Of></M.T.B>'
+    "</M.T></DATASECTION></TRANSFER>"
+)
+
+
+def _validate(tmp_path: Path, capsys, *extra: str) -> str:
+    (tmp_path / "M.ili").write_text(_CONSTRAINT_MODEL, encoding="utf-8")
+    xtf = tmp_path / "c.xtf"
+    xtf.write_text(_CONSTRAINT_XTF, encoding="utf-8")
+    main(["validate-xtf", str(xtf), "--model", str(tmp_path / "M.ili"), "-v", *extra])
+    return capsys.readouterr().out
+
+
+def test_validate_stream_evaluates_the_constraints_that_need_no_other_object(tmp_path: Path, capsys):
+    whole = _validate(tmp_path, capsys)
+    streamed = _validate(tmp_path, capsys, "--stream")
+    kept = ("is not satisfied", "is violated")
+    assert [line for line in whole.splitlines() if any(k in line for k in kept) and "Of->Name" not in line] == [
+        line for line in streamed.splitlines() if any(k in line for k in kept)
+    ]
+    assert "Age >= 18" in streamed and "UNIQUE Name" in streamed
+
+
+def test_validate_stream_says_what_it_could_not_evaluate(tmp_path: Path, capsys):
+    streamed = _validate(tmp_path, capsys, "--stream")
+    assert "not available with --stream" in streamed
+    assert "Of->Name" not in "".join(line for line in streamed.splitlines() if "is not satisfied" in line)
 
 
 def test_import_stream_writes_the_same_sql(tmp_path: Path):

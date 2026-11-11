@@ -21,6 +21,7 @@ fully checkable. A `UNIQUE (LOCAL)` declared on a STRUCTURE is not checked
 (structure elements are not objects of the transfer).
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -200,27 +201,28 @@ def _unique_description(constraint: MetaInstance) -> str:
     return f"UNIQUE {', '.join(paths)}"
 
 
-def _check_unique(
-    constraint: MetaInstance,
-    members: list[tuple[XtfBasket, XtfObject]],
-    by_tid: dict[str, XtfObject],
-    report: _Report,
-) -> None:
-    kind = constraint.Kind
-    description = _unique_description(constraint)
-    first_seen: dict[tuple[Any, tuple[Any, ...]], str | None] = {}
-    for basket, obj in members:
+class _UniqueState:
+    """The keys one `UNIQUE` constraint has seen so far, fed one object at a time."""
+
+    def __init__(self, constraint: MetaInstance) -> None:
+        self.constraint = constraint
+        self.description = _unique_description(constraint)
+        self.first_seen: dict[tuple[Any, tuple[Any, ...]], str | None] = {}
+
+    def feed(self, basket: XtfBasket, obj: XtfObject, by_tid: dict[str, XtfObject], report: _Report) -> bool:
+        """Check `obj` against the keys seen; `False` when the constraint cannot be evaluated (reported)."""
+        constraint = self.constraint
         try:
             if constraint.Where is not None and not _truth(constraint.Where, _ObjectScope(obj, by_tid)):
-                continue
+                return True
             key = tuple(_path_value(obj, list(path.PathEls), by_tid) for path in constraint.UniqueDef)
         except UnsupportedExpressionError as exc:
-            report.skip(constraint, obj.qualified_class, description, str(exc))
-            return
+            report.skip(constraint, obj.qualified_class, self.description, str(exc))
+            return False
         if any(part is _UNDEFINED for part in key):
-            continue
-        scope = (basket.bid if kind == "BasketU" else None, key)
-        if scope in first_seen:
+            return True
+        scope = (basket.bid if constraint.Kind == "BasketU" else None, key)
+        if scope in self.first_seen:
             report.issues.append(
                 ValidationIssue(
                     "error",
@@ -228,11 +230,25 @@ def _check_unique(
                     obj.tid,
                     obj.qualified_class,
                     None,
-                    f"{description} is violated: {_format_key(key)} is already used by object {first_seen[scope]!r}",
+                    f"{self.description} is violated: {_format_key(key)} is already used by object "
+                    f"{self.first_seen[scope]!r}",
                 )
             )
         else:
-            first_seen[scope] = obj.tid
+            self.first_seen[scope] = obj.tid
+        return True
+
+
+def _check_unique(
+    constraint: MetaInstance,
+    members: list[tuple[XtfBasket, XtfObject]],
+    by_tid: dict[str, XtfObject],
+    report: _Report,
+) -> None:
+    state = _UniqueState(constraint)
+    for basket, obj in members:
+        if not state.feed(basket, obj, by_tid, report):
+            return
 
 
 def _format_key(key: tuple[Any, ...]) -> str:
@@ -602,3 +618,71 @@ def _visit_simple(
     if satisfied is not None:
         entry.evaluated += 1
         entry.satisfied += int(satisfied)
+
+
+class _StreamIndex(dict):
+    """The `by_tid` of a streamed check: no target object is at hand, so following a reference is not evaluable."""
+
+    def __contains__(self, key: object) -> bool:
+        raise UnsupportedExpressionError(
+            "it follows a reference, which needs the target object (not available with --stream)"
+        )
+
+    __getitem__ = __contains__  # type: ignore[assignment]
+
+
+def check_stream_constraints(
+    objects: Iterable[tuple[XtfBasket, XtfObject]],
+    *,
+    symbol_table: SymbolTable,
+    repository: ModelRepository | None = None,
+) -> list[ValidationIssue]:
+    """The constraints `check_transfer_constraints` can check holding one object at a time, in one pass.
+
+    Evaluated: MANDATORY and plausibility constraints that read the object's own attributes, `UNIQUE` (memory grows
+    with the distinct keys, not the objects) and `UNIQUE (LOCAL)`. Reported as not evaluated, once per class: any
+    constraint following a reference, EXISTENCE, SET, and the role cardinalities, which need other objects.
+    """
+    by_tid = _StreamIndex()
+    report = _Report()
+    cache: dict[str, list[MetaInstance]] = {}
+    unique: dict[int, _UniqueState] = {}
+    plausibility: dict[int, _Plausibility] = {}
+    for basket, obj in objects:
+        if obj.operation == "DELETE":
+            continue
+        scope = _ObjectScope(obj, by_tid)
+        for constraint in _constraints_of(obj, cache, symbol_table, repository):
+            if id(constraint) in report.skipped:
+                continue
+            kind = _kind(constraint)
+            if kind == "SimpleConstraint":
+                _visit_simple(constraint, obj, basket, scope, report, plausibility)
+            elif kind == "UniqueConstraint":
+                if constraint.Kind == "LocalU":
+                    _check_local_unique(constraint, obj, basket, report)
+                else:
+                    unique.setdefault(id(constraint), _UniqueState(constraint)).feed(basket, obj, by_tid, report)
+            elif kind == "SetConstraint":
+                report.skip(constraint, obj.qualified_class, "SET CONSTRAINT", "set functions are not evaluated")
+            elif kind == "ExistenceConstraint":
+                label = _constraint_label(constraint).replace("constraint", "EXISTENCE CONSTRAINT", 1)
+                report.skip(
+                    constraint,
+                    obj.qualified_class,
+                    label,
+                    "it needs the objects of the required class (not available with --stream)",
+                )
+    report.issues.extend(issue for entry in plausibility.values() if (issue := _plausibility_issue(entry)))
+    report.issues.extend(report.not_evaluated.values())
+    report.issues.append(
+        ValidationIssue(
+            "info",
+            "",
+            None,
+            "",
+            None,
+            "role cardinalities not evaluated: they need every link (not available with --stream)",
+        )
+    )
+    return report.issues

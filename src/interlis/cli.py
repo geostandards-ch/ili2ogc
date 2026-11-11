@@ -796,9 +796,13 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
     catalogs = [parse_xtf(Path(c)) for c in args.catalog]
     if args.stream:
-        if not args.no_constraints:
-            _warn("--stream: the model's CONSTRAINTs need whole populations and are not evaluated.")
-        issues = validate_stream(xtf_path, symbol_table=builder.symbol_table, repository=repository, catalogs=catalogs)
+        issues = validate_stream(
+            xtf_path,
+            symbol_table=builder.symbol_table,
+            repository=repository,
+            catalogs=catalogs,
+            check_constraints=not args.no_constraints,
+        )
     else:
         issues = validate_transfer(
             transfer,
@@ -1721,8 +1725,10 @@ def main(argv: list[str] | None = None) -> int:
     validate_parser.add_argument(
         "--stream",
         action="store_true",
-        help="Read the transfer twice and hold one object at a time (flat memory). The model's CONSTRAINTs are "
-        "not evaluated: they need whole populations.",
+        help="Read the transfer a few times and hold one object at a time (flat memory). CONSTRAINTs that need no "
+        "other object are evaluated (MANDATORY and plausibility on the object's own attributes, UNIQUE - memory "
+        "grows with its distinct keys); those following a reference, EXISTENCE, SET and role cardinalities are "
+        "reported as not evaluated.",
     )
     validate_parser.add_argument("-q", "--quiet", action="store_true", help="Only print the final summary.")
     validate_parser.add_argument(
