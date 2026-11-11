@@ -249,7 +249,12 @@ def transfer_inserts(
             cls, table_name, home_table = found
             operation = obj.operation or "INSERT"
             incremental = incremental or operation in ("UPDATE", "DELETE")
-            values = {} if operation == "DELETE" else members_value(cls, obj.attributes, symbol_table=home_table)
+            by_roles = not by_name[table_name].has_tid
+            values = (
+                {}
+                if operation == "DELETE" and not by_roles
+                else members_value(cls, obj.attributes, symbol_table=home_table)
+            )
             row = _Row(by_name[table_name], next_id(), basket_id, values, tid=obj.tid, operation=operation)
             if obj.tid is not None and operation == "INSERT":
                 located[obj.tid] = (table_name, row.t_id)
@@ -319,9 +324,37 @@ def transfer_inserts(
     unresolved = 0
     counts: dict[str, int] = {}
 
+    def insert_by_roles(row: _Row) -> None:
+        """DELETE of a link without OID: it is the one joining the objects its roles name (UPDATE has no identity)."""
+        if row.operation == "UPDATE":
+            notes.append(f"UPDATE of a link in {row.table.name} skipped: a link without OID cannot be identified")
+            return
+        references = {fk.columns[0]: fk.ref_table for fk in row.table.foreign_keys if len(fk.columns) == 1}
+        conditions = []
+        for column in row.table.columns:
+            value = _at(row.values, column.source) if column.source else None
+            if column.name in references and isinstance(value, str):
+                conditions.append(
+                    f"{_quote(column.name)} = (SELECT T_Id FROM {_quote(references[column.name])} "
+                    f"WHERE {_quote(TID_COLUMN)} = {_sql_literal(value)} AND {scope})"
+                )
+        if not conditions:
+            notes.append(f"DELETE of a link in {row.table.name} skipped: it names no referenced object")
+            return
+        where = " AND ".join(conditions)
+        statements.append(
+            _guard_delete(
+                f"{_quote(row.table.name)} WHERE {where} AND {scope}", f"404 Not Found: DELETE {row.table.name}"
+            )
+        )
+        counts[row.table.name] = counts.get(row.table.name, 0) + 1
+
     def insert(row: _Row, basket: int, parent_ref: str | None = None) -> None:
         nonlocal unresolved
         update = row.operation == "UPDATE"
+        if not row.table.has_tid and row.operation in ("UPDATE", "DELETE") and not row.table.parent:
+            insert_by_roles(row)
+            return
         if row.operation == "DELETE":
             statements.append(
                 _guard_delete(of_tid(row), f"404 Not Found: DELETE {row.table.name} {row.tid}"),
