@@ -1184,11 +1184,13 @@ def validate_stream(
     symbol_table: SymbolTable,
     repository: ModelRepository | None = None,
     catalogs: Iterable[XtfTransfer] = (),
+    check_constraints: bool = True,
 ) -> list[ValidationIssue]:
-    """`validate_transfer` without its CONSTRAINTs, reading `path` twice so only one object is held at a time.
+    """`validate_transfer` reading `path` two or three times so only one object is held at a time.
 
     The first pass keeps a stub (TID and class) per object to resolve references and spot a duplicated TID; the
-    second validates each object against the schema. A CONSTRAINT looks at whole populations, so none is evaluated.
+    second validates each object against the schema and, with `check_constraints`, the constraints that need no
+    other object (`check_stream_constraints` says which are left out).
     """
     tid_index: dict[str, XtfObject] = {}
     first_seen: dict[str, str] = {}
@@ -1224,4 +1226,9 @@ def validate_stream(
                 schema_cache=schema_cache,
             )
         )
+    if check_constraints:
+        # Deferred: constraints.py imports convert.jsonfg, which itself imports this module.
+        from interlis.xtf.constraints import check_stream_constraints
+
+        issues.extend(check_stream_constraints(iter_objects(path), symbol_table=symbol_table, repository=repository))
     return issues
