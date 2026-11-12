@@ -1355,6 +1355,9 @@ def cmd_convert_sld(args: argparse.Namespace) -> int:
     is skipped with a diagnostic rather than aborting every other GRAPHIC
     in the same model.
     """
+    if args.dpi and args.paper_units:
+        _error("--dpi and --paper-units both say how to write paper lengths: use one.")
+        return ExitCode.USAGE
     model_path = Path(args.model)
     if not model_path.exists():
         _error(f".ili file not found: {model_path}")
@@ -1413,7 +1416,11 @@ def cmd_convert_sld(args: argparse.Namespace) -> int:
             refused += 1
             continue
         try:
-            with _cartosym_mod.paper_as_pixels(args.dpi or None):
+            with (
+                _cartosym_mod.paper_as_pixels(args.dpi or None)
+                if not args.paper_units
+                else _cartosym_mod.paper_as_millimetres()
+            ):
                 rendered[name] = _cartosym_mod.write_sld(_cartosym_mod.graphic_to_style(graphic, sign_library))
         except (NotImplementedError, _cartosym_mod.ScaleRangeError) as exc:
             _warn(f"GRAPHIC {name!r}: {exc} - skipped")
@@ -1954,6 +1961,13 @@ def main(argv: list[str] | None = None) -> int:
         help="For a symbology whose lengths are metres on paper at scale 1.0 (0.0002 = a 0.2 mm line): write them as "
         "pixels at this resolution (96: 0.2 mm = 0.756 px; dashes become DLength x width): an SLD number has no unit "
         "and the raw metres draw nothing. Default 0 keeps the raw numbers (right for models that give ground metres).",
+    )
+    convert_sld_parser.add_argument(
+        "--paper-units",
+        action="store_true",
+        help="For a symbology whose lengths are metres on paper at scale 1.0: write them as millimetres (0.0002 -> "
+        "0.2 mm), which the SLD writer turns into pixels at 0.28 mm per pixel; dashes become DLength x width. Use "
+        "--dpi instead to pick another resolution. Default keeps the raw numbers, as ground metres.",
     )
     convert_sld_parser.set_defaults(func=cmd_convert_sld)
 

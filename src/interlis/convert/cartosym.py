@@ -83,6 +83,9 @@ def color_to_rgb(lum: float, c: float, h: float) -> RGBColor:
 
 
 _PX_PER_M: float | None = None
+_MM_PER_M: float | None = None
+# pycartosym writes a millimetre length as pixels at this pixel size (CartoSym Part 1 default); dashes are whole pixels.
+_MM_PER_PIXEL = 0.28
 
 
 @contextmanager
@@ -103,11 +106,28 @@ def paper_as_pixels(dpi: float | None) -> Iterator[None]:
         _PX_PER_M = previous
 
 
+@contextmanager
+def paper_as_millimetres() -> Iterator[None]:
+    """Write every `StandardSymbology` length as millimetres, inside the block (metres on paper at scale 1.0).
+
+    Millimetres are a screen-space unit every CartoSym renderer supports, unlike `m`, which is a ground unit. The SLD
+    writer turns them into pixels at its own pixel size (0.28 mm), so no resolution has to be chosen here.
+    """
+    global _MM_PER_M
+    previous, _MM_PER_M = _MM_PER_M, 1000.0
+    try:
+        yield
+    finally:
+        _MM_PER_M = previous
+
+
 def meters(value: float | None) -> UnitValue | None:
     if value is None:
         return None
     if _PX_PER_M:
         return UnitValue(value=value * _PX_PER_M, unit=UnitType.PIXELS)
+    if _MM_PER_M:
+        return UnitValue(value=value * _MM_PER_M, unit=UnitType.MILLIMETERS)
     return UnitValue(value=value, unit=UnitType.METERS)
 
 
@@ -116,9 +136,11 @@ def degrees(value: float | None) -> Angle | None:
 
 
 def _dash_pixels(dash_pattern: list[float], width: float | None) -> list[int]:
-    """Dash lengths as integers: `DLength` x width in pixels under `paper_as_pixels`, else rounded as is."""
+    """Dash lengths as integers: `DLength` x width in pixels under `paper_as_pixels` or `paper_as_millimetres`."""
     if _PX_PER_M and width:
         return [max(1, round(d * width * _PX_PER_M)) for d in dash_pattern]
+    if _MM_PER_M and width:
+        return [max(1, round(d * width * _MM_PER_M / _MM_PER_PIXEL)) for d in dash_pattern]
     return [round(d) for d in dash_pattern]
 
 
