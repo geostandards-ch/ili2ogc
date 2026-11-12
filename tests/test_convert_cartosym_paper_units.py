@@ -7,7 +7,7 @@ from pycartosym.models.types import UnitType
 
 from interlis.cli import main
 from interlis.cli_style import ExitCode
-from interlis.convert.cartosym import meters, paper_as_pixels, polyline_sign_to_stroke
+from interlis.convert.cartosym import meters, paper_as_millimetres, paper_as_pixels, polyline_sign_to_stroke
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "cartosym"
 
@@ -41,3 +41,22 @@ def test_convert_sld_dpi_writes_pixel_widths(tmp_path, capsys):
     assert f'name="stroke-width">{4 / 0.0254 * 96}' in capsys.readouterr().out
     assert main(args + ["--graphic", "Zone_Outline"]) == ExitCode.OK
     assert 'name="stroke-width">4<' in capsys.readouterr().out
+
+
+def test_paper_metres_become_millimetres():
+    with paper_as_millimetres():
+        value = meters(0.0002)
+        stroke = polyline_sign_to_stroke(width=0.0002, dash_pattern=[7.5, 2.5])  # 1.5 / 0.5 mm
+    assert value.unit == UnitType.MILLIMETERS and value.value == pytest.approx(0.2)
+    assert stroke.dash_pattern == [5, 2]  # 1.5 mm and 0.5 mm at 0.28 mm per pixel
+    assert meters(0.0002).unit == UnitType.METERS
+
+
+def test_convert_sld_paper_units_writes_pixels_at_the_writers_pixel_size(capsys):
+    model = _FIXTURES / "surface_border_example.ili"
+    args = ["convert-sld", str(model), "--repo", str(_FIXTURES / "scale_repo")]
+    args += ["--sign-xtf", str(_FIXTURES / "surface_border_example.xtf"), "--graphic", "Zone_Outline"]
+    assert main(args + ["--paper-units"]) == ExitCode.OK
+    out = capsys.readouterr().out
+    assert f'name="stroke-width">{round(4000 / 0.28, 4)}' in out and "units/pixel" in out
+    assert main(args + ["--paper-units", "--dpi", "96"]) == ExitCode.USAGE
