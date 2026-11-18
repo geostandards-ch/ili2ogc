@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS" xmlns="http://www.interlis.ch/xtf/2.4/TestProjectionPaths">
+  <ili:headersection sender="test-fixture" version="2.4">
+    <ili:models>
+      <ili:model>TestProjectionPaths</ili:model>
+    </ili:models>
+  </ili:headersection>
+  <ili:datasection>
+    <Base ili:bid="b1">
+      <Type ili:tid="t1"><Code>A</Code><Label>Alpha</Label></Type>
+      <Type ili:tid="t2"><Code>B</Code><Label>Beta</Label></Type>
+      <Owner ili:tid="o1"><Title>Lausanne</Title></Owner>
+      <Feature ili:tid="f1">
+        <Name>one</Name>
+        <Owner ili:ref="o1"/>
+        <Info><Info><ValidFrom>2020-01-01</ValidFrom><ValidUntil>2030-01-01</ValidUntil></Info></Info>
+        <Kind><TypeRef><Reference ili:ref="t2"/></TypeRef></Kind>
+        <Category ili:ref="t1"/>
+      </Feature>
+      <Feature ili:tid="f2">
+        <Name>two</Name>
+        <Owner ili:ref="o1"/>
+        <Info><Info><ValidFrom>2021-05-05</ValidFrom></Info></Info>
+        <Kind><TypeRef><Reference ili:ref="t1"/></TypeRef></Kind>
+        <Category ili:ref="t2"/>
+      </Feature>
+      <Feature ili:tid="f3">
+        <Name>three</Name>
+        <Owner ili:ref="o1"/>
+        <Kind><TypeRef><Reference ili:ref="missing-type"/></TypeRef></Kind>
+        <Category ili:ref="missing-category"/>
+      </Feature>
+    </Base>
+  </ili:datasection>
+</ili:transfer>

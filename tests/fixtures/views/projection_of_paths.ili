@@ -1,0 +1,63 @@
+INTERLIS 2.3;
+
+!! Untyped VIEW attributes whose path has three or more elements: through an
+!! embedded association role (Category), a REFERENCE TO attribute (Owner),
+!! a STRUCTURE (Info), a STRUCTURE wrapping a REFERENCE TO (Kind). Their
+!! types come from the last attribute of each path.
+
+MODEL TestProjectionPaths AT "http://www.interlis.ch/ili2c/tests/" VERSION "1" =
+
+  TOPIC Base =
+    CLASS Type =
+      Code: TEXT*10;
+      Label: TEXT*40;
+    END Type;
+    CLASS Owner =
+      Title: TEXT*40;
+    END Owner;
+    STRUCTURE Info =
+      ValidFrom: TEXT*20;
+      ValidUntil: TEXT*20;
+    END Info;
+    STRUCTURE TypeRef =
+      Reference: REFERENCE TO Type;
+    END TypeRef;
+    CLASS Feature =
+      Name: TEXT*40;
+      Owner: REFERENCE TO Owner;
+      Info: Info;
+      Kind: TypeRef;
+    END Feature;
+    ASSOCIATION FeatureCategory =
+      Features -- {0..*} Feature;
+      Category -<> {1} Type;
+    END FeatureCategory;
+  END Base;
+
+  TOPIC Views =
+    DEPENDS ON TestProjectionPaths.Base;
+
+    VIEW Flat
+      PROJECTION OF F ~ TestProjectionPaths.Base.Feature;
+      =
+      ATTRIBUTE
+        FeatureName := F -> Name;
+        OwnerName := F -> Owner -> Title;
+        ValidFrom := F -> Info -> ValidFrom;
+        ValidUntil := F -> Info -> ValidUntil;
+        KindLabel := F -> Kind -> Reference -> Label;
+        CategoryCode := F -> Category -> Code;
+    END Flat;
+
+    VIEW Pair
+      JOIN OF F ~ TestProjectionPaths.Base.Feature, O ~ TestProjectionPaths.Base.Owner;
+      WHERE F -> Owner == O;
+      =
+      ATTRIBUTE
+        FeatureName := F -> Name;
+        CategoryCode := F -> Category -> Code;
+        OwnerName := O -> Title;
+    END Pair;
+  END Views;
+
+END TestProjectionPaths.

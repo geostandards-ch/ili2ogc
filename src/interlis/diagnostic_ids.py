@@ -131,6 +131,10 @@ REGISTRY: dict[str, tuple[str, str]] = {
         "B",
         "a DeleteObject names no class, so no OGC API collection to address its DELETE to - left out",
     ),
+    "JSONFG-VIEW-PATH-UNRESOLVED": (
+        "C",
+        "a VIEW attribute path crosses a reference whose target is not in the transfer - pass it via --catalog",
+    ),
     "JSONFG-VIEW-INSPECTION-GAP": ("A", "an INSPECTION VIEW's '-> attribute' path was not built by the model builder"),
     "JSONFG-VIEW-FORMATION-UNSUPPORTED": (
         "B",

@@ -964,6 +964,9 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
     if not xtf_path.exists():
         _error(f".xtf file not found: {xtf_path}")
         return ExitCode.NOT_FOUND
+    if missing := next((c for c in args.catalog if not Path(c).exists()), None):
+        _error(f"--catalog file not found: {missing}")
+        return ExitCode.NOT_FOUND
 
     if args.stream and (args.lang or args.feature_schema_url):
         _error("--stream cannot be combined with --lang or --feature-schema-url (they need the whole collection).")
@@ -1054,6 +1057,7 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
         schema_url=args.feature_schema_url,
         include_child_rows=args.include_child_rows,
         unmapped=unmapped,
+        catalogs=[parse_xtf(Path(c)) for c in args.catalog],
     )
     bag.extend(_jsonfg_mod.collect_diagnostics(unmapped, file=str(xtf_path)))
     if args.lang:
@@ -1629,6 +1633,14 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         metavar="DIR",
         help="Directory of .ili models to resolve the schema's IMPORTS (repeatable).",
+    )
+    convert_jsonfg_parser.add_argument(
+        "--catalog",
+        action="append",
+        default=[],
+        metavar="FILE.xtf",
+        help="Additional catalogue .xtf file (repeatable) - its objects also count for reference resolution "
+        "(a VIEW attribute that follows a reference into a catalogue not included in the main transfer).",
     )
     convert_jsonfg_parser.add_argument(
         "-o",

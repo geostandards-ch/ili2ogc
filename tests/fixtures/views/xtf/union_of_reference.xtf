@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS" xmlns="http://www.interlis.ch/xtf/2.4/TestUnionReference">
+  <ili:headersection sender="test-fixture" version="2.4">
+    <ili:models>
+      <ili:model>TestUnionReference</ili:model>
+    </ili:models>
+  </ili:headersection>
+  <ili:datasection>
+    <Base ili:bid="b1">
+      <D ili:tid="d1"><Name>delta</Name></D>
+      <C1 ili:tid="c1"><RefD ili:ref="d1"/></C1>
+      <C1 ili:tid="c1b"><RefD ili:ref="nowhere"/></C1>
+      <C2 ili:tid="c2"><Attr2>gamma</Attr2></C2>
+    </Base>
+  </ili:datasection>
+</ili:transfer>

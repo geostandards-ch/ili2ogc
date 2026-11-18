@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS" xmlns="http://www.interlis.ch/xtf/2.4/TestProjectionPaths">
+  <ili:headersection sender="test-fixture" version="2.4">
+    <ili:models>
+      <ili:model>TestProjectionPaths</ili:model>
+    </ili:models>
+  </ili:headersection>
+  <ili:datasection>
+    <Base ili:bid="catalogue">
+      <Type ili:tid="missing-type"><Code>C</Code><Label>Gamma</Label></Type>
+      <Type ili:tid="missing-category"><Code>D</Code><Label>Delta</Label></Type>
+    </Base>
+  </ili:datasection>
+</ili:transfer>

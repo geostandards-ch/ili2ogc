@@ -5,7 +5,7 @@ Geometry goes to "place" ("geometry" stays `null`, no reprojection); references 
 
 import contextlib
 import json
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
@@ -1124,10 +1124,40 @@ def _join_combinations(
     return combos
 
 
-def _project_object_under_view_names(view: MetaInstance, obj: XtfObject) -> XtfObject:
+def _path_refs(factor: MetaInstance) -> list[str | None]:
+    return [getattr(el, "Ref", None) for el in (getattr(factor, "PathEls", None) or [])]
+
+
+def _path_nodes(
+    refs: list[str | None],
+    root: XtfObject | None,
+    by_tid: dict[str, XtfObject] | None,
+    name: str,
+    unresolved: dict[str, tuple[str, int]] | None,
+) -> list[RawNode]:
+    """Nodes a view attribute path of three or more elements (`Alias -> a -> b ...`) denotes on `root`.
+
+    A hop that cannot be followed gives no nodes and is counted under `name` in `unresolved`.
+    """
+    nodes, why = _follow_path(refs[1:], root, by_tid or {})
+    if why is not None and unresolved is not None:
+        first, count = unresolved.get(name, (why, 0))
+        unresolved[name] = (first, count + 1)
+    return nodes
+
+
+def _project_object_under_view_names(
+    view: MetaInstance,
+    obj: XtfObject,
+    by_tid: dict[str, XtfObject] | None = None,
+    *,
+    roots: dict[str, XtfObject | None] | None = None,
+    unresolved: dict[str, tuple[str, int]] | None = None,
+) -> XtfObject:
     """Rename `obj`'s attributes to the names the view gives them (`Name := <alias> -> <attr>`).
 
-    Identity attributes (`ALL OF`) are left unchanged.
+    A path of three or more elements follows structures and references from the object its alias names (`roots`,
+    else `obj`). Identity attributes (`ALL OF`) are left unchanged.
     """
     remapped: dict[str, list[RawNode]] = dict(obj.attributes)
     for attr in getattr(view, "ClassAttribute", None) or []:
@@ -1140,7 +1170,13 @@ def _project_object_under_view_names(view: MetaInstance, obj: XtfObject) -> XtfO
             continue
         if getattr(factor, "Inspection", None):
             continue
-        refs = [getattr(el, "Ref", None) for el in (getattr(factor, "PathEls", None) or [])]
+        refs = _path_refs(factor)
+        if len(refs) >= 3 and refs[0]:
+            remapped.pop(out_name, None)
+            root = obj if roots is None else roots.get(refs[0].lower())
+            if nodes := _path_nodes(refs, root, by_tid, out_name, unresolved):
+                remapped[out_name] = nodes
+            continue
         source = refs[-1] if len(refs) == 2 and refs[-1] else (refs[0] if len(refs) == 1 else None)
         if source is None or source == out_name:
             continue
@@ -1167,11 +1203,18 @@ def _merge_join_combo(combo: list[XtfObject | None], view_name: str) -> XtfObjec
     return XtfObject(tid="_".join(tid_parts) or None, qualified_class=view_name, attributes=attributes)
 
 
-def _union_projected_object(view: MetaInstance, base_index: int, n_bases: int, obj: XtfObject) -> XtfObject:
+def _union_projected_object(
+    view: MetaInstance,
+    base_index: int,
+    n_bases: int,
+    obj: XtfObject,
+    by_tid: dict[str, XtfObject] | None = None,
+    unresolved: dict[str, tuple[str, int]] | None = None,
+) -> XtfObject:
     """Re-key one UNION-base object's wire attributes under the union-view attribute names.
 
     An explicit assignment has one source per base in declaration order (`Attr := C1->A, C2->B`), so base `i`'s `A`
-    is copied to `Attr`; an `ALL OF` attribute passes through; a source that is not a one-hop path is skipped.
+    is copied to `Attr`; an `ALL OF` attribute passes through; a longer path is followed like a PROJECTION's.
     """
     remapped: dict[str, list[RawNode]] = dict(obj.attributes)
     for attr in getattr(view, "ClassAttribute", None) or []:
@@ -1183,9 +1226,13 @@ def _union_projected_object(view: MetaInstance, base_index: int, n_bases: int, o
         factor = derivates[base_index]
         if not factor._qualified_class.endswith("PathOrInspFactor") or getattr(factor, "Inspection", None):
             continue
-        refs = [getattr(el, "Ref", None) for el in (getattr(factor, "PathEls", None) or [])]
-        source = refs[-1] if len(refs) == 2 and refs[-1] else (refs[0] if len(refs) == 1 else None)
+        refs = _path_refs(factor)
         remapped.pop(out_name, None)
+        if len(refs) >= 3:
+            if nodes := _path_nodes(refs, obj, by_tid, out_name, unresolved):
+                remapped[out_name] = nodes
+            continue
+        source = refs[-1] if len(refs) == 2 and refs[-1] else (refs[0] if len(refs) == 1 else None)
         if source and source in obj.attributes:
             remapped[out_name] = obj.attributes[source]
     qname = getattr(view, "Name", None) or obj.qualified_class
@@ -1227,12 +1274,23 @@ def _resolved_objects_of(
     return out
 
 
+def _reference_index(
+    resolved_objects: list[tuple[XtfObject, MetaInstance]], catalogs: Sequence[XtfTransfer]
+) -> dict[str, XtfObject]:
+    """Every object of the transfer by TID, plus all objects of the `catalogs` (whatever their class)."""
+    index = {obj.tid: obj for obj, _cls in resolved_objects if obj.tid is not None}
+    for catalog in catalogs:
+        index.update((o.tid, o) for b in catalog.baskets for o in b.objects if o.tid is not None)
+    return index
+
+
 def _view_combos(
     view: MetaInstance,
     transfer: XtfTransfer,
     *,
     symbol_table: SymbolTable,
     repository: ModelRepository | None = None,
+    catalogs: Sequence[XtfTransfer] = (),
 ) -> tuple[list[MetaInstance], list[list[XtfObject | None]], dict[str, XtfObject]]:
     """Shared PROJECTION/AGGREGATION/JOIN setup: resolve bases, their matching objects, and WHERE-filtered combos.
 
@@ -1248,7 +1306,7 @@ def _view_combos(
     ]
     where = getattr(view, "Where", None)
     aliases = [_view_alias(base) for base in bases]
-    by_tid = {obj.tid: obj for obj, _cls in resolved_objects if obj.tid is not None}
+    by_tid = _reference_index(resolved_objects, catalogs)
 
     def _passes_where(combo: list[XtfObject | None]) -> bool:
         if where is None:
@@ -1283,25 +1341,56 @@ def _aggregation_mixes_count_and_plain(columns: list[MetaInstance]) -> bool:
     return any(counts) and not all(counts)
 
 
+def _child_nodes(nodes: list[RawNode], name: str) -> list[RawNode]:
+    """Children called `name` of `nodes`, directly or under the class tag a STRUCTURE wraps its members in."""
+    found = [c for n in nodes for c in n.children if c.tag == name]
+    return found or [g for n in nodes for c in n.children for g in c.children if g.tag == name]
+
+
+def _follow_path(
+    refs: list[str | None], root: XtfObject | None, by_tid: dict[str, XtfObject]
+) -> tuple[list[RawNode], str | None]:
+    """Evaluate `a -> b (-> c)*` (the alias already dropped) on `root` into `(nodes, why it could not be followed)`.
+
+    A hop that is a member of the STRUCTURE just entered is descended into; any other non-final hop is a reference
+    followed through `by_tid`. An absent value gives no nodes (a LEFT JOIN's NULL); an unresolved target is reported.
+    """
+    current, nodes, in_object = root, [], True
+    for i, name in enumerate(refs):
+        if name is None:
+            return [], None
+        if in_object:
+            if current is None:
+                return [], None
+            nodes = current.attributes.get(name) or []
+        else:
+            nodes = _child_nodes(nodes, name)
+        if i == len(refs) - 1:
+            return list(nodes), None
+        if not nodes:
+            return [], None
+        next_name = refs[i + 1]
+        in_object = not (next_name and _child_nodes(nodes, next_name))
+        if in_object:
+            target = extract_reference(nodes[0])
+            if target is None:  # a structure without that optional member, or an empty element: a NULL
+                scalar = nodes[0].text and not nodes[0].children
+                return [], f"{name!r} is a scalar, not a reference or structure" if scalar else None
+            current = by_tid.get(target)
+            if current is None:
+                return [], f"reference target {target!r} is not in the transfer"
+    return [], None
+
+
 def _factor_nodes(factor: MetaInstance, alias: str, obj: XtfObject, by_tid: dict[str, XtfObject]) -> list[RawNode]:
     """Evaluate a view attribute path (`Alias -> a (-> b)*`) on `obj` into the wire nodes it denotes.
 
-    Every hop but the last must be a reference; an unresolved hop yields no
-    nodes (the SQL translation's LEFT JOIN yields NULL there).
+    An unresolved hop yields no nodes (the SQL translation's LEFT JOIN yields NULL there).
     """
-    refs = [getattr(el, "Ref", None) for el in (getattr(factor, "PathEls", None) or [])]
+    refs = _path_refs(factor)
     if len(refs) > 1 and refs[0] and refs[0].lower() == alias.lower():
         refs = refs[1:]
-    current: XtfObject | None = obj
-    for i, name in enumerate(refs):
-        if name is None or current is None:
-            return []
-        nodes = current.attributes.get(name) or []
-        if i == len(refs) - 1:
-            return list(nodes)
-        target = extract_reference(nodes[0]) if nodes else None
-        current = by_tid.get(target) if target else None
-    return []
+    return _follow_path(refs, obj, by_tid)[0]
 
 
 def _constant_nodes(factor: MetaInstance, name: str) -> list[RawNode]:
@@ -1366,12 +1455,30 @@ def _aggregation_objects(
     return out
 
 
+def _join_roots(aliases: list[str | None], combo: list[XtfObject | None]) -> dict[str, XtfObject | None]:
+    """The object each base alias of one JOIN OF combination names (`None` for an `OR NULL` miss)."""
+    return {alias.lower(): obj for alias, obj in zip(aliases, combo) if alias}
+
+
+def _record_unresolved_paths(view: MetaInstance, unresolved: dict[str, tuple[str, int]]) -> None:
+    """Report, once per view attribute, a path that could not be followed for some object."""
+    by_name = {getattr(a, "Name", None): a for a in getattr(view, "ClassAttribute", None) or []}
+    with _feature_scope(getattr(view, "Name", None) or "View", None):
+        for name, (why, count) in unresolved.items():
+            _record(
+                "JSONFG-VIEW-PATH-UNRESOLVED",
+                by_name[name],
+                f"{why} ({count} object(s)); the value is left out - pass the transfer holding it via --catalog",
+            )
+
+
 def evaluate_view_objects(
     view: MetaInstance,
     transfer: XtfTransfer,
     *,
     symbol_table: SymbolTable,
     repository: ModelRepository | None = None,
+    catalogs: Sequence[XtfTransfer] = (),
 ) -> list[XtfObject]:
     """Evaluate `view` into `XtfObject`s keyed by the view's own attribute names.
 
@@ -1404,18 +1511,27 @@ def evaluate_view_objects(
             )
             return elements
         n_bases = len(bases)
+        by_tid = _reference_index(resolved_objects, catalogs)
         return [
-            _union_projected_object(view, base_index, n_bases, obj)
+            _union_projected_object(view, base_index, n_bases, obj, by_tid)
             for base_index, objs in enumerate(objects_by_base)
             for obj in objs
         ]
 
-    bases, combos, by_tid = _view_combos(view, transfer, symbol_table=symbol_table, repository=repository)
+    bases, combos, by_tid = _view_combos(
+        view, transfer, symbol_table=symbol_table, repository=repository, catalogs=catalogs
+    )
     if kind == "Aggregation":
         return _aggregation_objects(view, bases, combos, by_tid)
     if kind == "Join":
-        return [_project_object_under_view_names(view, _merge_join_combo(combo, view_name)) for combo in combos]
-    return [_project_object_under_view_names(view, combo[0]) for combo in combos if combo[0] is not None]
+        aliases = [_view_alias(b) for b in bases]
+        return [
+            _project_object_under_view_names(
+                view, _merge_join_combo(combo, view_name), by_tid, roots=_join_roots(aliases, combo)
+            )
+            for combo in combos
+        ]
+    return [_project_object_under_view_names(view, combo[0], by_tid) for combo in combos if combo[0] is not None]
 
 
 def evaluate_view(
@@ -1425,9 +1541,11 @@ def evaluate_view(
     symbol_table: SymbolTable,
     repository: ModelRepository | None = None,
     standalone: bool = False,
+    catalogs: Sequence[XtfTransfer] = (),
 ) -> list[dict[str, Any]]:
     """Evaluate `view` against `transfer` into JSON-FG Features, whatever its formation kind.
 
+    A view attribute path may follow references into `catalogs` (further transfers whose objects are only looked up).
     Raises `ValueError` if the view is unsupported (callers check `unsupported_view_reason` first).
     """
     reason = unsupported_view_reason(view)
@@ -1457,9 +1575,11 @@ def evaluate_view(
                 repository,
             )
         n_bases = len(bases)
-        return [
+        by_tid = _reference_index(resolved_objects, catalogs)
+        unresolved: dict[str, tuple[str, int]] = {}
+        features = [
             object_to_feature(
-                _union_projected_object(view, base_index, n_bases, obj),
+                _union_projected_object(view, base_index, n_bases, obj, by_tid, unresolved),
                 view,
                 standalone=standalone,
                 symbol_table=symbol_table,
@@ -1468,8 +1588,13 @@ def evaluate_view(
             for base_index, objs in enumerate(objects_by_base)
             for obj in objs
         ]
+        _record_unresolved_paths(view, unresolved)
+        return features
 
-    bases, combos, by_tid = _view_combos(view, transfer, symbol_table=symbol_table, repository=repository)
+    bases, combos, by_tid = _view_combos(
+        view, transfer, symbol_table=symbol_table, repository=repository, catalogs=catalogs
+    )
+    unresolved = {}
 
     if kind == "Aggregation":
         count_columns = _count_column_names(view)
@@ -1484,9 +1609,9 @@ def evaluate_view(
         return aggregated
 
     if kind == "Projection":
-        return [
+        features = [
             object_to_feature(
-                _project_object_under_view_names(view, combo[0]),
+                _project_object_under_view_names(view, combo[0], by_tid, unresolved=unresolved),
                 view,
                 standalone=standalone,
                 symbol_table=symbol_table,
@@ -1495,11 +1620,20 @@ def evaluate_view(
             for combo in combos
             if combo[0] is not None
         ]
+        _record_unresolved_paths(view, unresolved)
+        return features
 
+    aliases = [_view_alias(b) for b in bases]
     features = []
     for combo in combos:
         feature = object_to_feature(
-            _project_object_under_view_names(view, _merge_join_combo(combo, view_name)),
+            _project_object_under_view_names(
+                view,
+                _merge_join_combo(combo, view_name),
+                by_tid,
+                roots=_join_roots(aliases, combo),
+                unresolved=unresolved,
+            ),
             view,
             standalone=standalone,
             symbol_table=symbol_table,
@@ -1509,6 +1643,7 @@ def evaluate_view(
         if members:
             feature["x-join-members"] = members
         features.append(feature)
+    _record_unresolved_paths(view, unresolved)
     return features
 
 
@@ -1855,11 +1990,13 @@ def transfer_to_feature_collection(
     schema_url: str | None = None,
     include_child_rows: bool = False,
     unmapped: list[UnmappedValue] | None = None,
+    catalogs: Sequence[XtfTransfer] = (),
 ) -> dict[str, Any]:
     """Convert every resolvable object of `transfer` into one JSON-FG FeatureCollection.
 
-    Objects whose class does not resolve are skipped. A "featureType" or "coordRefSys" shared by all
-    Features is moved onto the collection. `unmapped` collects values that were left untyped or dropped.
+    Objects whose class does not resolve are skipped. A "featureType" or "coordRefSys" shared by all Features is
+    moved onto the collection. `unmapped` collects values left untyped or dropped; `catalogs` are further transfers
+    a VIEW path may follow references into.
     """
     with _recording(unmapped):
         return _transfer_to_feature_collection(
@@ -1869,6 +2006,7 @@ def transfer_to_feature_collection(
             views=views,
             schema_url=schema_url,
             include_child_rows=include_child_rows,
+            catalogs=catalogs,
         )
 
 
@@ -1932,6 +2070,7 @@ def _transfer_to_feature_collection(
     views: list[MetaInstance] | None = None,
     schema_url: str | None = None,
     include_child_rows: bool = False,
+    catalogs: Sequence[XtfTransfer] = (),
 ) -> dict[str, Any]:
     features = list(
         _object_features(
@@ -1944,7 +2083,9 @@ def _transfer_to_feature_collection(
 
     for view in views or []:
         features.extend(
-            evaluate_view(view, transfer, symbol_table=symbol_table, repository=repository, standalone=False)
+            evaluate_view(
+                view, transfer, symbol_table=symbol_table, repository=repository, standalone=False, catalogs=catalogs
+            )
         )
 
     conforms_to = [CONF_CORE, CONF_TYPES_SCHEMAS]
@@ -2098,7 +2239,11 @@ def change_diagnostics(skipped: list[str], *, file: str | None = None):
     ]
 
 
-_REPO_HELP = frozenset({"JSONFG-MULTIVALUE-UNRESOLVED", "JSONFG-GEOM-NO-CRS"})
+_HELP = {
+    "JSONFG-MULTIVALUE-UNRESOLVED": "pass its model's directory to --repo",
+    "JSONFG-GEOM-NO-CRS": "pass its model's directory to --repo",
+}
+_NOTE_RULES = frozenset({"JSONFG-VIEW-PATH-UNRESOLVED"})  # missing input, but never worth a warning
 
 
 def collect_diagnostics(unmapped: list[UnmappedValue], *, file: str | None = None):
@@ -2110,14 +2255,14 @@ def collect_diagnostics(unmapped: list[UnmappedValue], *, file: str | None = Non
 
     out: list[Diagnostic] = []
     for event in unmapped:
-        resolvable = REGISTRY[event.rule][0] == "C"
+        resolvable = REGISTRY[event.rule][0] == "C" and event.rule not in _NOTE_RULES
         out.append(
             Diagnostic(
                 "warning" if resolvable else "note",
                 event.rule,
                 f"{event.element_path}: {event.detail}",
                 Location(file=file, element_path=event.element_path, tid=event.tid),
-                help="pass its model's directory to --repo" if event.rule in _REPO_HELP else None,
+                help=_HELP.get(event.rule),
             )
         )
     return out

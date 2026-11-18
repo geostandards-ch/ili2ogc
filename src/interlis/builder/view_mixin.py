@@ -328,8 +328,8 @@ class _ViewBuildingMixin(_Base):
     def _apply_pending_view_bare_attr_types(self) -> None:
         """Resolve `Type` for every bare `Name := expression` view attribute recorded earlier.
 
-        The expression's path elements are followed through the base view, its attributes, then association roles;
-        only the last element can give the type. If anything is unresolvable, `Type` stays unset.
+        A path is followed through the base view's attributes (a REFERENCE TO or STRUCTURE continues into its class)
+        and association roles; only the last element gives the type. If anything is unresolvable, `Type` stays unset.
         """
         pending = self._pending_view_bare_attrs
         self._pending_view_bare_attrs = []
@@ -345,14 +345,13 @@ class _ViewBuildingMixin(_Base):
                     rule="viewAttributes",
                 )
 
-    @classmethod
-    def _resolve_view_attribute_type(cls, view: MetaInstance, expr: MetaInstance) -> MetaInstance | None:
+    def _resolve_view_attribute_type(self, view: MetaInstance, expr: MetaInstance) -> MetaInstance | None:
         if not expr._qualified_class.endswith("PathOrInspFactor"):
             return None
         path_els = list(getattr(expr, "PathEls", None) or [])
         if len(path_els) < 2:
             return None
-        base = cls._find_renamed_base_view(view, getattr(path_els[0], "Ref", None))
+        base = self._find_renamed_base_view(view, getattr(path_els[0], "Ref", None))
         if base is None or not isinstance(base.BaseView, MetaInstance):
             return None
         current: MetaInstance = base.BaseView
@@ -362,17 +361,41 @@ class _ViewBuildingMixin(_Base):
             if ref is None:
                 return None
             is_last = i == last_index
-            found_attr = cls._find_class_attribute(current, ref)
+            found_attr = self._find_class_attribute(current, ref)
             if found_attr is not None:
-                return found_attr.Type if is_last and isinstance(found_attr.Type, MetaInstance) else None
-            if is_last:
+                if is_last:
+                    return found_attr.Type if isinstance(found_attr.Type, MetaInstance) else None
+                target = self._hop_target_class(found_attr.Type)
+            elif is_last:
                 return None  # a role alone (no trailing attribute) has no scalar Type
-            role = cls._find_association_role(current, ref)
-            target = cls._role_target_class(role) if role is not None else None
+            else:
+                role = self._find_association_role(current, ref) or self._embedded_role(current, ref)
+                target = self._role_target_class(role) if role is not None else None
             if target is None:
                 return None
             current = target
         return None
+
+    @staticmethod
+    def _hop_target_class(attr_type: MetaInstance | None) -> MetaInstance | None:
+        """The class a non-final path hop continues into: a REFERENCE TO target, or a STRUCTURE's own members."""
+        if not isinstance(attr_type, MetaInstance):
+            return None
+        if attr_type._qualified_class.rsplit(".", 1)[-1] == "ReferenceType":
+            base = getattr(attr_type, "BaseClass", None)
+            base = base[0] if isinstance(base, list) and base else base
+            return base if isinstance(base, MetaInstance) else None
+        return attr_type if getattr(attr_type, "Kind", None) == "Structure" else None
+
+    def _embedded_role(self, cls_instance: MetaInstance, name: str) -> MetaInstance | None:
+        """The role of an embedded association (a foreign key on `cls_instance`) called `name`.
+
+        The association may be declared in this model or in an imported one, so every loaded table is searched.
+        """
+        from interlis.xtf.schema import embedded_roles_of  # lazy: xtf.schema imports this package
+
+        tables = [self.symbol_table, *self.repository.loaded_models().values()]
+        return next((r for t in tables if (r := embedded_roles_of(cls_instance, t).get(name)) is not None), None)
 
     @staticmethod
     def _find_class_attribute(cls_or_assoc: MetaInstance, name: str) -> MetaInstance | None:
