@@ -1,18 +1,11 @@
-"""SQL identifier naming: lowercase folding, length truncation, reserved-word quoting.
-
-Every table/column/constraint/view name funnels through these helpers so
-PostgreSQL's own folding and GDAL's laundering agree with what gets
-written here. Pure leaf module.
-"""
+"""SQL identifier naming: lowercase folding, length truncation, reserved-word quoting. Pure leaf module."""
 
 from __future__ import annotations
 
 import hashlib
 
-# ili2db's technical columns: every table is keyed by a surrogate `t_id`
-# (one sequence for the whole schema, so ids are unique across tables) that
-# every FOREIGN KEY targets, belongs to a basket (`t_basket`), and keeps the
-# transferred TID in `t_ili_tid` - several datasets can share one schema.
+# ili2db's technical columns: a schema-wide surrogate `t_id` (the FK target), `t_basket`, and the transferred TID
+# in `t_ili_tid`, so several datasets can share one schema.
 OID_COLUMN = "t_id"
 BASKET_COLUMN = "t_basket"
 TID_COLUMN = "t_ili_tid"
@@ -36,22 +29,12 @@ def _dedup_name(base: str, used: set[str]) -> str:
 
 
 def _sql_identifier(name: str) -> str:
-    """Lowercase an INTERLIS `Name` into the identifier PostgreSQL/GDAL would independently produce.
-
-    Both fold to lowercase anyway (PostgreSQL's unquoted-identifier rule,
-    GDAL's field-name laundering on `-append`) - writing it lowercase
-    upfront avoids relying on either implicitly.
-    """
+    """Lowercase an INTERLIS `Name` into the identifier PostgreSQL/GDAL would produce anyway."""
     return name.lower()
 
 
 def _truncate_identifier(name: str) -> str:
-    """Truncate `name` to PostgreSQL's identifier limit, collision-safe.
-
-    A naive `name[:63]` lets 2 different long names sharing a prefix
-    collide (real corpus case: `LWB_Bewirtschaftungseinheiten_V3_0`) -
-    a hash-of-full-name tail avoids that deterministically.
-    """
+    """Truncate `name` to PostgreSQL's identifier limit with a hash tail, avoiding prefix collisions."""
     if len(name) <= _MAX_IDENTIFIER_LENGTH:
         return name
     digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]  # noqa: S324 - collision-avoidance, not security
@@ -60,9 +43,7 @@ def _truncate_identifier(name: str) -> str:
 
 
 def _quote(name: str) -> str:
-    """Double-quote a table/column identifier (ANSI SQL) - a real corpus `Class` can be named after a
-    reserved word (e.g. `Union`), a syntax error unquoted in both dialects.
-    """
+    """Double-quote a table/column identifier (ANSI SQL), so a reserved word such as `Union` is safe."""
     return f'"{name}"'
 
 

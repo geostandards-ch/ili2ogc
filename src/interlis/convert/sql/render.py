@@ -36,12 +36,10 @@ def render_postgresql(
     *,
     basket_trigger: bool = False,
 ) -> str:
-    """Render `tables` as PostgreSQL DDL text - `CREATE TABLE` (with inline `UNIQUE`) then `ALTER TABLE ... ADD
-    CONSTRAINT ... FOREIGN KEY`.
+    """Render `tables` as PostgreSQL DDL: `CREATE TABLE`, then `ALTER TABLE ... ADD CONSTRAINT FOREIGN KEY`.
 
-    FKs are added via a separate `ALTER TABLE` pass after every `CREATE
-    TABLE` - sidesteps forward-reference ordering entirely instead of
-    topologically sorting. `basket_trigger` adds a trigger per class table that fills a missing `t_basket`.
+    FKs go in a separate pass to avoid forward-reference ordering. `basket_trigger` adds a trigger per class table
+    that fills a missing `t_basket`.
     """
     statements: list[str] = meta_table_ddl(gpkg=False)
     union_views = [t for t in tables if t.union_of]
@@ -130,16 +128,10 @@ def _gpkg_base_geometry_type(geometry_type: str) -> tuple[str, bool]:
 
 
 def render_gpkg(tables: list[Table], views: tuple[SqlView, ...] = (), meta: Ili2dbMeta | None = None) -> str:
-    """Render `tables` as SQLite/GeoPackage DDL text - everything inline at `CREATE TABLE` time, plus the GeoPackage
-    bootstrap rows.
+    """Render `tables` as SQLite/GeoPackage DDL (all inline at `CREATE TABLE`) plus GeoPackage bootstrap rows.
 
-    Assumes the target `.gpkg` already has GDAL's standard GeoPackage
-    system tables in place - this only ADDS rows/tables to it. `FOREIGN
-    KEY` is declared INLINE (SQLite can't `ALTER TABLE` one in later).
-    CAUTION: `gpkg_spatial_ref_sys.definition` (the SRS WKT) is a LOUD
-    placeholder, not a real WKT string (no GDAL/PROJ dependency here) -
-    verify/replace it via an authoritative source before treating the
-    result as fully spec-compliant.
+    Assumes the target `.gpkg` already has GDAL's GeoPackage system tables. `gpkg_spatial_ref_sys.definition` is a
+    placeholder, not a real WKT (no PROJ dependency): replace it before treating the result as spec-compliant.
     """
     statements: list[str] = meta_table_ddl(gpkg=True)
     srids: set[int] = set()
@@ -308,13 +300,10 @@ _NOTE_RULE_RE = re.compile(r"^\[([A-Z0-9-]+)\]\s*(.*)$", re.DOTALL)
 def collect_diagnostics(
     tables: list[Table], views: tuple[SqlView, ...] = (), *, file: str | None = None, dialect: str = "postgresql"
 ):
-    """Turn every `Table`/`SqlView` `-- NOTE` back into a `Diagnostic` - the same objects, a third rendering.
+    """Turn every `Table`/`SqlView` `-- NOTE` back into a `Diagnostic`.
 
-    Each note is already `[RULE-ID] message` (`diagnostic_ids.note`), so
-    the id, the class (A/B/C -> note/warning) and the message come straight
-    back out. The `.sql` keeps its self-describing `-- NOTE` lines; this is
-    what feeds `--output-format sarif` and the exit code. `dialect="gpkg"`
-    also reports the views GeoPackage cannot carry (`gpkg_views`).
+    Each note is already `[RULE-ID] message`, so id, class (A/B/C -> note/warning) and message come straight back
+    out; this feeds `--output-format sarif` and the exit code. `dialect="gpkg"` also reports views it cannot carry.
     """
     from interlis.diagnostic_ids import REGISTRY
     from interlis.diagnostics import Diagnostic, Location, severity_for_class

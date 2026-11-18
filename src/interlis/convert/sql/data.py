@@ -1,10 +1,6 @@
-"""`interlis import-xtf`: the objects of XTF transfers as PostgreSQL `INSERT`s into the schema `convert-sql` creates.
+"""`interlis import-xtf`: turn XTF transfers into PostgreSQL `INSERT`s for the schema `convert-sql` creates.
 
-ili2db's data layout: one `T_ILI2DB_DATASET` row, one `T_ILI2DB_BASKET` row per basket, each object in its class
-table with its basket and TID, references as the target's `t_id`, BAG/LIST elements (multilingual texts included)
-in their child tables, geometries from the decoded GeoJSON with arcs stroked and parts gathered into Multi*.
-Ids are taken from `t_ili2db_seq` in one block, so the script can run against a schema that already holds data;
-foreign keys are DEFERRABLE, so rows go in any order inside the transaction.
+Follows the ili2db data layout; foreign keys are DEFERRABLE, so rows can be in any order.
 """
 
 from __future__ import annotations
@@ -179,17 +175,8 @@ def transfer_inserts(
 ) -> tuple[str, dict[str, int], list[str]]:
     """Return `(sql, rows per table, notes)` for every object of `transfers`, as one dataset.
 
-    `transfers` are parsed transfers, or paths read in two passes (flat memory: one pass numbers the objects and
-    indexes their TIDs, the second renders each statement straight into `out`, which then gets the SQL, not `sql`).
-
-    A transfer holding `UPDATE`/`DELETE` objects, or a basket of KIND `UPDATE`/`INCREMENTAL`, is incremental and is
-    replayed like a sequence of REST calls on an EXISTING dataset (`dataset` must name it): `INSERT` = POST (409 if
-    the TID is already there), `UPDATE` = PUT (the object is replaced in place, 404 if absent), `DELETE` = DELETE
-    (404 if absent). A failing call aborts and rolls back the whole transaction. A full transfer is a POST of a
-    new dataset: 409 if `dataset` already exists.
-    `table_of(qualified_class)` gives an object's class, its table and the symbol table declaring the class (for its
-    embedded association roles), `None` when that class has no table here.
-    A reference to an object absent from the transfers stays NULL (noted).
+    An incremental transfer is replayed on an existing `dataset` (INSERT, UPDATE, DELETE); a failing call rolls
+    back the transaction. A reference to an object absent from the transfers stays NULL, with a note.
     """
     if transfers and isinstance(transfers[0], Path) and out is None:
         raise ValueError("reading paths requires an `out` stream")

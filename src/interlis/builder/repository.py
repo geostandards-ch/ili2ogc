@@ -1,15 +1,7 @@
-"""Multi-file resolution (IMPORTS).
+"""Multi-file resolution (IMPORTS): load an imported model on demand from local directories.
 
-Loads an imported model on demand from a set of local directories, so
-qualified references (e.g. `GeometryCHLV95_V2.Coord2`) resolve to the real
-instance rather than an `UnresolvedNamedReference`.
-
-Deliberately local-only scope (never network during a build - the corpus
-must be downloaded beforehand, see README) and never merged into a global
-symbol table (see ForwardRefResolver/SymbolTable): each loaded model keeps
-its OWN isolated SymbolTable, to never introduce a short-name ambiguity
-BETWEEN unrelated models (only full-qualified-name resolution, in the
-explicitly targeted model's table, crosses files).
+Never touches the network during a build. Each loaded model keeps its own isolated SymbolTable, so short names
+never become ambiguous between unrelated models; only fully qualified names cross files.
 """
 
 import re
@@ -19,13 +11,8 @@ from typing import Any
 from interlis.builder.errors import BuildError
 from interlis.runtime.parse import meta_attribute_comments, meta_attribute_comments_in_file, parse_file, parse_text
 
-# Matches the real grammar (`modeldef`, vendor/interlis-antlr4/InterlisParser.g4):
-# `CONTRACTED? (TYPE | REFSYSTEM | SYMBOLOGY)? MODEL Name ...` - MODEL is
-# ALWAYS directly followed by the real Name regardless of the optional
-# prefix keyword in front (or its absence), so a single keyword is enough
-# to search for. (An earlier version matched `(?:MODEL|REFSYSTEM)` as if
-# either keyword could directly precede the Name, which silently broke
-# indexing for e.g. `REFSYSTEM MODEL CoordSys`.)
+# `CONTRACTED? (TYPE | REFSYSTEM | SYMBOLOGY)? MODEL Name`: MODEL is always directly followed by the Name,
+# whatever optional keyword precedes it.
 _MODEL_NAME_RE = re.compile(r"\bMODEL\s+([A-Za-z_][A-Za-z0-9_]*)")
 
 # Strings, block comments and line comments, in one alternation so that a `!!` or `/*` inside a string
@@ -38,16 +25,8 @@ def _strip_strings_and_comments(text: str) -> str:
     return _STRING_OR_COMMENT_RE.sub(" ", text)
 
 
-# The predefined "INTERLIS" namespace model, built via the real parse+build
-# pipeline rather than hand-crafted Python instances (same guarantees as
-# any other model). ANYOID/UUIDOID/BOOLEAN cannot be declared as an
-# ordinary DOMAIN here - they are reserved lexer tokens in the grammar,
-# so `DOMAIN ANYOID = ...` is a syntax error; where a real attribute needs
-# one, InterlisModelBuilder synthesizes the equivalent type at resolution
-# time instead (see `_predefined_type`). GregorianYear/XMLDate/XMLTime/
-# XMLDateTime/INTERLIS_1_DATE ARE ordinary names and so are declared here
-# directly - added because real corpus models reference them (eCH-0031
-# SS3.8.7) and previously resolved to an unchecked/unsupported type.
+# The predefined "INTERLIS" namespace, built through the normal pipeline. ANYOID/UUIDOID/BOOLEAN are
+# reserved tokens, so the builder synthesizes them (`_predefined_type`); the rest are declared here.
 _PREDEFINED_MODEL_INTERNAL_NAME = "PredefinedInterlisNamespace"
 _PREDEFINED_INTERLIS_SOURCE = f"""\
 INTERLIS 2.4;
@@ -70,13 +49,9 @@ _BUILTIN_SOURCES = {"INTERLIS": _PREDEFINED_INTERLIS_SOURCE}
 
 
 class ModelRepository:
-    """Index a set of directories by declared MODEL/REFSYSTEM name.
+    """Index a set of directories by declared MODEL/REFSYSTEM name, via a text scan (not a full parse).
 
-    A lightweight text scan, not a full ANTLR parse - a file's name or the
-    <Name> in an external index like ilimodels.xml doesn't necessarily
-    match the MODEL name actually declared (confirmed on the real
-    models.geo.admin.ch corpus: an "obsolete/..." file can declare a MODEL
-    with a name entirely different from its file name).
+    The declared name cannot be taken from the file name, which may differ from it.
     """
 
     def __init__(self, search_dirs: list[Path]):
@@ -88,47 +63,25 @@ class ModelRepository:
                 except OSError:
                     continue
                 for match in _MODEL_NAME_RE.finditer(_strip_strings_and_comments(text)):
-                    # first found wins (heuristic: a text-scan false
-                    # positive, e.g. inside a comment, must never overwrite
-                    # a name already indexed correctly).
+                    # first found wins: a text-scan false positive must not overwrite a correct entry
                     self._index.setdefault(match.group(1), path)
-        # model name -> SymbolTable (already built, possibly partially if
-        # in progress - see anti-cycle guard below), or None if attempted
-        # and not found/failed - never retried.
+        # model name -> SymbolTable (possibly still being built), or None if not found/failed (never retried)
         self._cache: dict[str, Any] = {}
-        # Reverse of `_index`, built on first use: `_get_table` asks for a
-        # file's sibling models on every miss, and resolving the whole
-        # index each time is O(index) stat calls per built model.
+        # Reverse of `_index`, built lazily: avoids O(index) stat calls per built model.
         self._names_by_path: dict[Path, list[str]] | None = None
-        # Names actually ASKED for, as opposed to merely present in
-        # `_cache` because a sibling model of the same file was built.
-        # `loaded_models` must report only the former: a caller scoping
-        # itself to the models an IMPORTS really named (see
-        # `convert/jsonfg.py::_context_instances`, where an unrelated
-        # sibling CONTEXT would otherwise shadow the imported one's
-        # rebinding) has no other way to tell them apart.
+        # Names actually asked for, as opposed to cached only because a sibling model of the same file was built.
         self._requested: set[str] = set()
         self._make_sub_builder = None  # injected by InterlisModelBuilder
 
     def path_for(self, model_name: str) -> Path | None:
-        """Return the indexed `.ili` file path for this MODEL/REFSYSTEM name.
-
-        Resolution driven by the HEADERSECTION/MODELS of an XTF being
-        validated (see xtf/model_resolution.py). `None` for a predefined
-        model (`_BUILTIN_SOURCES`, never a real file on disk) or one
-        absent from the given `--repo` directories.
-        """
+        """Return the indexed `.ili` path for a MODEL/REFSYSTEM name, or None (predefined or absent from `--repo`)."""
         return self._index.get(model_name)
 
     def declared_model_names(self, path: Path) -> list[str]:
-        """Every MODEL/REFSYSTEM name this repository indexed to `path`, in declaration order.
+        """Every MODEL/REFSYSTEM name indexed to `path`, in declaration order.
 
-        A single `.ili` can declare several models (e.g.
-        `BaseModel_SectoralPlans_V1_4.ili`: a catalogues model plus an
-        LV03 and an LV95 variant); a caller holding only the file (e.g.
-        `convert-sql --catalog`) needs those names to reach the same
-        built table as `--repo` resolution, instead of building the file
-        a second time into an unrelated object graph.
+        One `.ili` can declare several models; a caller holding only the file needs them to reach the same built
+        table as `--repo` resolution instead of building the file twice.
         """
         if self._names_by_path is None:
             by_path: dict[Path, list[str]] = {}
@@ -138,29 +91,14 @@ class ModelRepository:
         return self._names_by_path.get(path.resolve(), [])
 
     def register_prebuilt(self, model_name: str, symbol_table) -> None:
-        """Register an already-built model in the resolution cache.
-
-        Same cache as `resolve_external`/`availability`. For a model built
-        elsewhere (the root model of `interlis validate-xtf`, built directly by
-        the main builder via its own `parse_file`+`build()`, not via
-        `_get_table`) - avoids re-parsing/rebuilding it a second time
-        during the header completeness check (`availability` below).
-        """
+        """Register an already-built model (e.g. a root model) in the resolution cache, to avoid rebuilding it."""
         self._cache[model_name] = symbol_table
         self._requested.add(model_name)
 
     def availability(self, model_name: str) -> str:
-        """Return a named model's resolvability status.
+        """Return a model's status: 'builtin' | 'available' | 'indexed_but_failed' | 'missing'.
 
-        One of 'builtin' | 'available' | 'indexed_but_failed' | 'missing' -
-        for the PROACTIVE header-vs-resolved completeness check used by
-        `interlis validate-xtf` (see
-        xtf/model_resolution.py:header_completeness), independent of what
-        a DATASECTION actually exercises (`resolve_external` only loads
-        what's actually REFERENCED). Reuses `_get_table` (same cache as
-        `resolve_external`): no extra cost if this model gets touched later
-        anyway by a real reference, and `register_prebuilt` avoids the
-        double cost for the root model itself.
+        Lets a header completeness check run independently of which models a DATASECTION actually references.
         """
         if model_name in _BUILTIN_SOURCES:
             return "builtin"
@@ -170,14 +108,7 @@ class ModelRepository:
         return "available" if table is not None else "indexed_but_failed"
 
     def bind_builder_factory(self, factory) -> None:
-        """Inject the sub-builder factory used to build imported files.
-
-        Provided by the root builder, which owns the shared components
-        (schema/registry/spec/attachment) to reuse for each imported file
-        instead of reloading them from disk. `factory() ->
-        InterlisModelBuilder`, already configured with `repository=self`
-        so its OWN imports resolve recursively the same way.
-        """
+        """Inject the factory building imported files: `factory() -> InterlisModelBuilder` with `repository=self`."""
         self._make_sub_builder = factory
 
     def resolve_external(self, model_name: str, full_dotted_name: str, kind_hint) -> Any | None:
@@ -190,18 +121,9 @@ class ModelRepository:
         return self._resolve_via_topic_inheritance(table, full_dotted_name, kind_hint)
 
     def _resolve_via_topic_inheritance(self, table: Any, full_dotted_name: str, kind_hint) -> Any | None:
-        """A qualified name through a `TOPIC EXTENDS` chain the topic inherits but never redeclares.
+        """Resolve `<Model>.<Topic>.<Name>` when `<Name>` is only declared in a base topic (`TOPIC EXTENDS`).
 
-        `<Model>.<Topic>.<Name>` finds nothing directly when `<Name>` only
-        lives in a base topic (`<Topic> EXTENDS <base>`), possibly in
-        ANOTHER model - real corpus pattern (`RoadsExgm2ien.ili`'s `GRAPHIC
-        ... BASED ON RoadsExdm2ien.RoadsExtended.LandCover`: `LandCover` is
-        only declared in `RoadsExdm2ben.Roads`). Within one file this is
-        already covered (`ForwardRefResolver._resolve_via_topic_extends` -
-        one shared symbol table, no per-topic scoping); this is the
-        cross-model equivalent, walking `DataUnit.Super` (the topic's own
-        inheritance link, already resolved by its own sub-build) via each
-        topic's SubModel/DataUnit twin.
+        Cross-model counterpart of `ForwardRefResolver._resolve_via_topic_extends`; walks `DataUnit.Super`.
         """
         if "." not in full_dotted_name:
             return None
@@ -228,39 +150,18 @@ class ModelRepository:
         return None
 
     def symbol_table_for(self, model_name: str):
-        """Return a loaded model's complete symbol table.
-
-        Same cache as `resolve_external`/`availability` - exposed
-        separately so a caller can reuse the ENTIRE table (e.g.
-        `schema.home_symbol_table`: `embedded_roles_of` must look up
-        associations where they're REALLY declared, not just resolve one
-        name at a time like `resolve_external`).
-        """
+        """Return a loaded model's complete symbol table (same cache as `resolve_external`)."""
         return self._get_table(model_name)
 
     def loaded_models(self) -> dict[str, Any]:
-        """Return `{model name: SymbolTable}` for every imported model actually built so far.
-
-        Only models a `build()` really pulled in (a reference resolved
-        through them) - never the whole `--repo` index. Used by
-        `interlis convert-sql` to turn a derived VIEW model's base models
-        into `CREATE TABLE`s in the SAME conversion without the caller
-        having to name each one again via `--catalog`.
-        """
+        """Return `{model name: SymbolTable}` for every imported model a `build()` actually pulled in."""
         return {name: table for name, table in self._cache.items() if table is not None and name in self._requested}
 
     def _get_table(self, model_name: str):
         """Build (or return the cached) SymbolTable for `model_name`.
 
-        Passes `meta_attributes` (eCH-0117 `!!@Name=Value` comments, see
-        `runtime.parse.meta_attribute_comments`) into the sub-build - an
-        imported model's own MetaAttribute instances (e.g. `!!@CRS=...`
-        on a CoordType domain) are otherwise never captured, since only
-        the file passed directly to `InterlisModelBuilder.build()` used
-        to get this treatment. Every Swiss geometry domain in practice is
-        imported (from `CHBase_Part1_GEOMETRY_V1`), never declared
-        locally, so without this the CRS meta-attribute mechanism used by
-        `.xtf` -> JSON-FG geometry conversion had zero real coverage.
+        Passes the file's `!!@Name=Value` meta-attribute comments to the sub-build so an imported model's own
+        MetaAttributes (e.g. a domain's `!!@CRS=...`) are captured.
         """
         self._requested.add(model_name)
         if model_name in self._cache:
@@ -275,15 +176,8 @@ class ModelRepository:
             if path is None:
                 self._cache[model_name] = None
                 return None
-            # One build populates EVERY model the file declares, so they
-            # must all share its table. Caching under the requested name
-            # alone rebuilds the whole file when a sibling model is asked
-            # for later, and the two builds' instances are then never
-            # `is`-identical - an EXTENDS/REFERENCE TO resolved through
-            # one build points at an object the other build's table has
-            # no entry for, which is how `convert-sql --catalog` used to
-            # emit a FOREIGN KEY onto a table its own subclass rows never
-            # reach.
+            # One build populates every model the file declares, so they must share its table; two builds would
+            # yield non-identical instances that an EXTENDS/REFERENCE TO resolved through one cannot find in the other.
             sibling_names = self.declared_model_names(path)
             for sibling in sibling_names:
                 if sibling in self._cache:
@@ -295,38 +189,21 @@ class ModelRepository:
             self._cache[model_name] = None
             return None
         builder = self._make_sub_builder()
-        # Anti-cycle guard: the placeholder (the sub-builder's SymbolTable,
-        # still empty) is registered in the cache BEFORE `build()` runs, not
-        # after - a reentrant reference to this same model (a circular
-        # import, e.g. A imports B which references A) finds its
-        # partially-populated table instead of endlessly restarting the
-        # load of the same file.
+        # Anti-cycle guard: cache the still-empty table before `build()` so a circular import finds it instead of
+        # reloading the same file endlessly.
         for name in {model_name, *sibling_names}:
             self._cache[name] = builder.symbol_table
         try:
             result = builder.build(tree, meta_attributes=meta_attributes)
         except BuildError:
-            # An EXTERNAL model indexed successfully can still genuinely
-            # fail to build (a binding/mapping error on this specific
-            # file). Same policy as the SYNTAX-error case just above
-            # (`if syntax_errors: ... return None`): an external model that
-            # doesn't build degrades to `None` (as if absent) rather than
-            # crashing the whole root `validate`/`build` - the placeholder
-            # already cached (anti-cycle guard above) stays empty, never
-            # retried.
+            # Same policy as a syntax error: an imported model that fails to build degrades to None (as if absent)
+            # rather than crashing the root build, and is never retried.
             for name in {model_name, *sibling_names}:
                 self._cache[name] = None
             return None
         if model_name in _BUILTIN_SOURCES:
-            # The Model actually declared carries an internal name
-            # different from the real name documented by the manual (see
-            # _PREDEFINED_INTERLIS_SOURCE, a lexer constraint) - corrected
-            # here: the instance's own Name (not a fabrication, just fixing
-            # the syntax workaround back to the real value), every
-            # qualified entry in its table, and an alias under the expected
-            # bare name so that `Import.ImportedP` (`always_external`
-            # resolution, targeting the model's own name) finds the real
-            # Model instance instead of an UnresolvedNamedReference.
+            # Restore the real model name over the internal one (see _PREDEFINED_INTERLIS_SOURCE) in the instance
+            # and the table, and alias the bare name so an `Import` finds the Model instead of an unresolved reference.
             result.Name = model_name
             builder.symbol_table.rekey_model_prefix(_PREDEFINED_MODEL_INTERNAL_NAME, model_name)
             builder.symbol_table.register(model_name, result)

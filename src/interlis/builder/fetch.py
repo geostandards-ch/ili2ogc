@@ -1,8 +1,7 @@
 """`interlis fetch-models`: download the models a file needs from the INTERLIS model repositories.
 
-The only network access of this package, and an explicit step of its own: every other command resolves IMPORTS
-from local `--repo` directories, so a build is reproducible and offline. The files land in one directory - a cache
-reused across runs (a model already there is not downloaded again) - that later commands take as `--repo`.
+The package's only network access, an explicit step: other commands resolve IMPORTS from local `--repo` directories.
+Files land in one reusable cache directory (existing models are not re-downloaded) that later commands take as `--repo`.
 """
 
 from __future__ import annotations

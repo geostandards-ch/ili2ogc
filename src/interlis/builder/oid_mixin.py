@@ -1,8 +1,4 @@
-"""OID clauses (classDef's own `OID AS .../NO OID`, topicDef's `BASKET OID AS .../OID AS ...`).
-
-Mixed into `InterlisModelBuilder` - see `_scan_oid_clauses` for why these
-need a positional scan rather than a declarative attribute_binding.
-"""
+"""OID clauses (classDef's `OID AS .../NO OID`, topicDef's `BASKET OID AS .../OID AS ...`) for the builder."""
 
 from __future__ import annotations
 
@@ -20,18 +16,14 @@ if TYPE_CHECKING:
 
     _Base = _BuilderHost
 else:
-    _Base = object  # real runtime base - see _builder_protocol.py for why
+    _Base = object
 
 
 class _OidMixin(_Base):
     def _scan_oid_clauses(self, ctx: ParserRuleContext, rule_name: str) -> list[dict]:
-        """Positionally scan `ctx.children` for OID clauses (classDef/topicDef).
+        """Scan `ctx.children` positionally for OID clauses (the grammar offers no accessor to bind).
 
-        Both rules inline the same grammar fragment with no accessor to
-        bind declaratively (RULE #2bis) - walked positionally instead.
-        Returns clauses in source order, each `{"basket": bool, "no_oid":
-        bool, "value": ForwardRef | MetaInstance | None}` (`value` is
-        `None` only for a `no_oid` clause).
+        Returns clauses in source order as `{"basket", "no_oid", "value"}`; `value` is None only for `NO OID`.
         """
         children = list(ctx.children or [])
         clauses: list[dict] = []
@@ -65,9 +57,7 @@ class _OidMixin(_Base):
     def _resolve_oid_domain_ref(self, tokens: list[Any], ctx: ParserRuleContext, rule_name: str) -> Any:
         """Resolve one OID clause's domain-ref tokens (between AS and SEMI).
 
-        `UUIDOID`/`ANYOID` are reserved lexer tokens, never resolvable via
-        a name lookup - built as a bare `AnyOIDType` marker instead.
-        Otherwise, a genuine named domain reference (`ForwardRef`).
+        `UUIDOID`/`ANYOID` are reserved tokens, not name lookups, so they become a bare `AnyOIDType`.
         """
         if any(
             isinstance(t, TerminalNode) and t.symbol.type in (InterlisParser.UUIDOID, InterlisParser.ANYOID)
@@ -91,9 +81,7 @@ class _OidMixin(_Base):
     def _attach_class_oid(self, instance: MetaInstance, ctx: ParserRuleContext) -> None:
         """Attach classDef's own `OID AS <domain-ref>` / `NO OID` clause, if present.
 
-        Marks `instance._own_oid_clause` whenever a clause is present at
-        all (even `NO OID`) - `_apply_topic_oid_clauses`'s class-default
-        propagation must never override a class that already decided.
+        Any clause, even `NO OID`, sets `_own_oid_clause` so the topic-level default never overrides it.
         """
         clauses = self._scan_oid_clauses(ctx, "classDef")
         if not clauses:
@@ -107,12 +95,7 @@ class _OidMixin(_Base):
             self.forward_refs.register_pending(value, instance, "Oid")
 
     def _apply_topic_oid_clauses(self, ctx: ParserRuleContext, instances: dict[str, MetaInstance]) -> None:
-        """Wire topicDef's OID clauses (see `_scan_oid_clauses`).
-
-        The basket-level clause feeds `BasketOID` directly. The
-        class-default clause is propagated to every `Class` in this
-        topic that carries no `_own_oid_clause` of its own.
-        """
+        """Wire topicDef's OID clauses: basket clause -> `BasketOID`, default clause -> classes without their own."""
         clauses = self._scan_oid_clauses(ctx, "topicDef")
         data_unit = instances.get("DataUnit")
         basket_clause = next((c for c in clauses if c["basket"]), None)
@@ -125,11 +108,7 @@ class _OidMixin(_Base):
         default_clause = next((c for c in clauses if not c["basket"]), None)
         if default_clause is None or default_clause["value"] is None:
             return
-        # classDef's `parent: {association: PackageElements, role:
-        # Element}` attaches every Class to SubModel, not DataUnit
-        # (topicDef.definitions is an UNPREFIXED binding key, applied to
-        # the FIRST of the two linked instances, i.e. SubModel - confirmed
-        # empirically, DataUnit.Element is always empty).
+        # Classes are attached to the SubModel, not the DataUnit (DataUnit.Element is always empty).
         container = instances.get("SubModel")
         if container is None:
             return

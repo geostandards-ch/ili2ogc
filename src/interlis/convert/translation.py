@@ -1,14 +1,7 @@
 """`--lang` output overlay: rename converter output through a `TRANSLATION OF` model.
 
-An INTERLIS translation model (`MODEL X_fr (fr) TRANSLATION OF X ["ver"]`)
-re-declares the base's whole structure with translated identifiers. The
-transfer format does NOT change (refman SS4.3.3: "die Tagnamen [bleiben]
-in der Ursprungs-Sprache"), so a translation is a presentation overlay:
-parse and evaluate against the base model, then rename the OUTPUT
-(`convert` JSON Schema, `convert-jsonfg` FeatureCollection) through the
-name map the builder aligned positionally (`InterlisModelBuilder._apply_pending_translations`).
-`convert-sql` identifier translation is a separate increment (a `CREATE
-VIEW` body bakes table/column names into text).
+The transfer format keeps the base language's tag names, so a translation is a presentation overlay: parse and
+evaluate against the base model, then rename the JSON Schema / JSON-FG / SQL output via the builder's name map.
 """
 
 from __future__ import annotations
@@ -40,8 +33,7 @@ class Translation:
     def attribute(self, owner: str | None, name: str) -> str:
         if owner is not None and (owner, name) in self.attributes:
             return self.attributes[(owner, name)]
-        # fall back to any owner - a plain rename is almost always
-        # consistent across classes (`Bemerkungen` -> `Remarques`)
+        # Fall back to any owner: a rename is usually the same across classes.
         for (owner_name, attr_name), translated in self.attributes.items():
             if attr_name == name:
                 return translated
@@ -51,9 +43,7 @@ class Translation:
 def load_translation(base_model: str, language: str, repository: ModelRepository | None) -> Translation | None:
     """Find and build the `TRANSLATION OF <base_model>` model for `language` in `repository`, or `None`.
 
-    Cheap header scan first (`TRANSLATION OF <base>` + `(<lang>)`), then a
-    real build of just that one model so its aligned name map
-    (`Model._translation`) can be reused.
+    A cheap header scan picks the model; only that one is then built to reuse its aligned name map.
     """
     if repository is None:
         return None
@@ -74,9 +64,7 @@ def load_translation(base_model: str, language: str, repository: ModelRepository
     return None
 
 
-# --------------------------------------------------------------------------- #
-# apply to converter output                                                    #
-# --------------------------------------------------------------------------- #
+# --- Apply a translation to converter output ---
 def rename_json_schema(schema: dict[str, Any], tr: Translation) -> dict[str, Any]:
     """Rename `$defs` keys, `$ref` targets, `properties` keys, `required`, and `title` in a `model_to_json_schema`
     result.
@@ -135,16 +123,9 @@ def rename_feature_collection(collection: dict[str, Any], tr: Translation) -> di
 
 
 def rename_sql_ddl(ddl: str, tr: Translation) -> str:
-    """Rename every quoted identifier in a `render_postgresql` / `render_gpkg` DDL through the translation.
+    """Rename every quoted identifier in a PostgreSQL/GeoPackage DDL through the translation, in one pass.
 
-    A `CREATE VIEW` body bakes table/column names into text and FK
-    constraints reference them by name, so the rename is a single pass
-    over the whole DDL rather than a per-object step. SQL identifiers here
-    are always lowercase and always `"..."`-quoted, and a positional
-    translation maps one base name to exactly one translated name
-    everywhere it occurs - a name that would translate two different ways
-    across classes (vanishingly rare) is left untranslated with a warning
-    rather than renamed ambiguously.
+    A name translating two different ways across classes is left untranslated with a warning, never renamed ambiguously.
     """
     candidates: dict[str, set[str]] = {}
     for name, translated in tr.elements.items():

@@ -1,7 +1,4 @@
-"""Load spec/grammar/mapping/*.yml into a single {rule_name: SpecEntry} dict.
-
-Merges the 9 themed files.
-"""
+"""Load spec/grammar/mapping/*.yml into a single {rule_name: SpecEntry} dict."""
 
 from pathlib import Path
 
@@ -11,13 +8,10 @@ from interlis.spec.models import SpecEntry
 
 
 def load_raw_spec(spec_dir: Path) -> tuple[dict[str, dict], list[str]]:
-    """Load the 9 files into a single {rule: raw entry (dict)} dict.
+    """Load the mapping files into one {rule: raw entry} dict.
 
-    Also returns the list of cross-file duplicate-rule messages (the first
-    occurrence of a duplicated rule is kept, later ones ignored) instead of
-    raising on the first one - it's up to the caller to decide whether to
-    stop or continue (the CLI validator wants to see every problem in a
-    single pass).
+    Also returns cross-file duplicate-rule messages (the first occurrence wins) instead of raising, so a validator
+    can report every problem in one pass.
     """
     merged: dict[str, dict] = {}
     origin: dict[str, str] = {}
@@ -34,12 +28,7 @@ def load_raw_spec(spec_dir: Path) -> tuple[dict[str, dict], list[str]]:
 
 
 def load_spec(spec_dir: Path) -> dict[str, SpecEntry]:
-    """Load and validate (Pydantic) the 9 files.
-
-    Raises pydantic.ValidationError on the first schema problem,
-    ValueError on a cross-file duplicate - used by the ModelBuilder, which
-    needs a guaranteed-valid spec before it starts building.
-    """
+    """Load and validate the mapping files; raises ValidationError on a schema problem, ValueError on a duplicate."""
     raw, duplicates = load_raw_spec(spec_dir)
     if duplicates:
         raise ValueError("; ".join(duplicates))

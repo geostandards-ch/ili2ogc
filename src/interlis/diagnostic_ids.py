@@ -1,26 +1,7 @@
-"""Stable identifiers for every converter/builder diagnostic this runtime emits.
+"""Stable identifiers for every converter/builder diagnostic; never rename one.
 
-Each id names ONE signal site (or a family of structurally identical
-sites): a construct a converter cannot faithfully translate, or an input
-the caller did not supply. The id is stable - it is what a downstream
-tool or a SARIF consumer keys off - so never rename one; retire it (drop
-the row here) only once no site emits it.
-
-`REGISTRY` maps id -> (klass, one_line). `klass` is the disposition:
-
-- ``"A"`` - not yet implemented. A real backlog item; the id disappears
-  once the construct is supported.
-- ``"B"`` - permanent category mismatch. The construct cannot be
-  expressed in the target formalism without inventing semantics INTERLIS
-  does not have (a whole-population check in a per-row SQL ``CHECK``, a
-  ``UNIQUE`` on a SQL view, an OID as a JSON-Schema property). Kept and
-  documented, not "fixable".
-- ``"C"`` - missing input. Not a limitation at all: the caller did not
-  pass ``--repo`` / ``--catalog``, or a reference target did not resolve.
-  The message names the fix.
-
-A companion CI check asserts every id here is actually referenced from
-``src/``.
+`REGISTRY` maps id -> (klass, one_line). `klass` is "A" (not yet implemented), "B" (cannot be expressed in the
+target) or "C" (missing input, e.g. no `--repo`).
 """
 
 from __future__ import annotations

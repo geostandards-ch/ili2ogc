@@ -92,9 +92,8 @@ _CURVED_TYPES = {
 def geometry_types(kind: str | None, instance: MetaInstance | None, *, feature_level: bool) -> frozenset[str]:
     """The JSON-FG geometry types `convert-jsonfg` can write for an attribute; empty for a non-geometry one.
 
-    A COORD or line type is a geometry value at any nesting depth; the 3D structures are geometries only as
-    feature attributes (`feature_level`), where `convert-jsonfg` moves them to `place`. A line type admitting
-    ARCS may also yield a curve type.
+    COORD and line types are geometries at any depth; the 3D structures only as feature attributes (`feature_level`).
+    A line type admitting ARCS may also yield a curve type.
     """
     multi = bool(getattr(instance, "Multi", False))
     if kind == "CoordType":

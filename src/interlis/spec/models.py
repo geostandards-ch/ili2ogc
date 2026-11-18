@@ -1,10 +1,4 @@
-"""Pydantic schema for a spec/grammar/mapping/*.yml entry.
-
-Single schema shared between static mapping validation and the
-ModelBuilder's execution (interlis.builder) - one single definition of
-"what a mapping entry looks like", so the two never drift apart over
-time.
-"""
+"""Pydantic schema for a spec/grammar/mapping/*.yml entry, shared by static mapping validation and the builder."""
 
 from typing import Any
 

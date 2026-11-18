@@ -1,16 +1,7 @@
-"""Shared diagnostics: one in-memory model, three renderings.
+"""Shared diagnostics: `Diagnostic`s in a `DiagnosticBag`, rendered as Ruff-style text, SARIF 2.1.0 and `-- NOTE`s.
 
-Every converter and the validator produce `Diagnostic`s into a
-`DiagnosticBag`; the CLI renders that bag as Ruff-style text (stderr), as
-SARIF 2.1.0 (`--output-format sarif` / `--report FILE`), and - for
-`convert-sql` - the `-- NOTE` comments stay in the `.sql` as a third
-rendering of the same objects.
-
-`severity` is SARIF's own vocabulary (`error` / `warning` / `note`); the
-XTF validator's historical `info` maps to `note`. `rule` is a stable id
-from `interlis.diagnostic_ids.REGISTRY`. `help` names the fix, GDAL
-RFC 104 style ("... - pass its model to --repo or --catalog"); it is
-required in spirit for a class-C (missing-input) diagnostic.
+`severity` uses SARIF's vocabulary (`error`/`warning`/`note`); `rule` is a stable id from
+`interlis.diagnostic_ids.REGISTRY`; `help` names the fix and is expected for a class-C (missing-input) diagnostic.
 """
 
 from __future__ import annotations
@@ -22,9 +13,7 @@ from interlis.diagnostic_ids import REGISTRY
 
 _SEVERITY_ORDER = {"note": 0, "warning": 1, "error": 2}
 
-# Rule ids that are NOT converter limitations (so not in
-# `diagnostic_ids.REGISTRY`, and not A/B/C-classed) but still flow through
-# the same Diagnostic/SARIF machinery - `interlis validate-xtf` data findings.
+# Rule ids that are not converter limitations (so not in `diagnostic_ids.REGISTRY`): `validate-xtf` data findings.
 EXTRA_RULES: dict[str, str] = {
     "XTF-VALIDATION": "an .xtf value does not conform to its schema",
 }
@@ -196,12 +185,10 @@ _BUILDER_WARNING_RE = re.compile(r"^\[([A-Z0-9-]+)\]\s*(.*)$", re.DOTALL)
 
 
 def builder_warnings_to_diagnostics(caught, *, file: str | None = None, include_spec_gaps: bool = False):
-    """Classify `warnings.catch_warnings(record=True)` output from a builder run into `Diagnostic`s.
+    """Classify `warnings.catch_warnings(record=True)` output of a builder run into `Diagnostic`s.
 
-    Only warnings whose text carries a stable id (`[RULE-ID] ...`) are
-    picked up. `BUILD-SPEC-GAP-ALT-ABSENT` is mostly benign
-    optional-absent noise (7+ per ordinary model) - excluded unless
-    `include_spec_gaps` is set, so an ordinary `convert` stays quiet.
+    Only warnings carrying a stable `[RULE-ID]` are picked up; `BUILD-SPEC-GAP-ALT-ABSENT` is benign noise, excluded
+    unless `include_spec_gaps` is set.
     """
     out: list[Diagnostic] = []
     for warning in caught:

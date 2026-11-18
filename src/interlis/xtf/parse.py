@@ -1,27 +1,7 @@
-"""STRUCTURAL (not yet semantic) parser for INTERLIS transfer files (.xtf).
+"""Streaming parser for INTERLIS transfer files (.xtf), structure only.
 
-The XTF validator's first layer.
-
-Deliberately generic: captures each attribute as a raw XML subtree
-(`RawNode`), without interpreting whether it's a reference, a coordinate,
-or a plain value - that interpretation depends on the attribute's
-DECLARED TYPE on the schema (.ili) side, not on its XML shape alone
-(checked against both the Reference Manual eCH-0031 V2.1.0 SS4.3.9/4.3.11
-and real files - the two diverge). A later layer, cross-referencing this result with
-IlisMeta16 (Class/AttrOrParam/DomainType already built by
-InterlisModelBuilder), does the interpretation.
-
-Streaming (`ET.iterparse` + `elem.clear()` per object/attribute): real
-Swiss open-data transfers run several hundred MB in size - the full XML
-tree must never be kept in memory.
-
-Accepts both real wire conventions for the envelope (section tags,
-BID/TID, model name/version/uri, sender) - XTF 2.3 (bare, UPPERCASE
-attributes; every file in xtf_corpus/, the only convention seen in real
-Swiss open data so far) and XTF 2.4 (`ili:`-namespaced, lowercase, model
-name as element text - see `_get_attr_ci` and the "sender"/"model" role
-handling below; confirmed only via non-production reference/test fixtures,
-see tests/fixtures/xtf/xtf24allerrors/NOTICE and xtf24envelope/NOTICE).
+Each attribute is kept as a raw XML subtree (`RawNode`); its meaning depends on the declared type, known elsewhere.
+Parsing is incremental so large files fit in memory. XTF 2.3 and 2.4 envelopes are both accepted.
 """
 
 from collections.abc import Iterator
@@ -39,26 +19,9 @@ _DELETE_OBJECT_TAG = "{http://www.interlis.ch/xtf/2.4/INTERLIS}delete"
 
 
 def _model_name_from_tag(tag: str) -> str | None:
-    """Recover a namespaced XTF 2.4 data tag's declaring MODEL name, or `None` for a bare (XTF 2.3) tag.
+    """Return the MODEL name a namespaced XTF 2.4 tag belongs to, or `None` for a bare XTF 2.3 tag.
 
-    A basket/object/attribute tag in real XTF 2.4 data uses a genuine XML
-    namespace whose URI is the transferred model's own name, one segment
-    per model (`xmlns:Holznutzungsbewilligung_V1_0=
-    "http://www.interlis.ch/xtf/2.4/Holznutzungsbewilligung_V1_0"` -
-    confirmed on multiple real geodienste.ch XTF 2.4 files, one `xmlns:`
-    declaration per IMPORTed model, always ending in the model's own bare
-    Name) - unlike XTF 2.3, where the SAME information is already baked
-    into the bare, undotted-namespace tag text itself (e.g.
-    `RoadTrafficAccidentLocation_V2.RoadTrafficAccident`, `_strip_ns` is a
-    no-op there). `_strip_ns` alone loses this prefix for a REAL
-    namespace (Clark notation `{uri}local`, ElementTree's own
-    resolution), taking only `local` - fine for the fixed `ili:`/`geom:`
-    structural keywords (HEADERSECTION/COORD/...), but silently wrong for
-    a basket/object tag, which needs the full `Model.Topic[.Class]` to
-    resolve against a schema. Returns `None` (not a real transferred
-    model) for anything not matching this URI shape, including the fixed
-    `ili:` namespace itself (`.../2.4/INTERLIS`) - never mistaken for a
-    model named "INTERLIS".
+    The namespace URI ends in the model name, which is needed to build `Model.Topic.Class`.
     """
     if not tag.startswith("{"):
         return None
@@ -71,15 +34,9 @@ def _model_name_from_tag(tag: str) -> str | None:
 
 
 def _get_attr_ci(elem: ET.Element, name: str) -> str | None:
-    """Case/namespace-insensitive attribute lookup - `name` is UPPERCASE.
+    """Look up an attribute ignoring case and namespace; `name` is UPPERCASE.
 
-    Two real wire conventions exist for the same envelope fields: XTF 2.3
-    attributes are bare and UPPERCASE (BID/TID/KIND/ENDSTATE/NAME/VERSION/
-    URI/SENDER); XTF 2.4 equivalents are `ili:`-namespaced and lowercase
-    (confirmed via iox-ili's Xtf24Reader.java, e.g. QNAME_ILI_BID/QNAME_ILI_TID)
-    - ElementTree exposes a namespaced attribute's key in Clark notation
-    (`{uri}localname`), so the bare-name fast path is tried first, then
-    every attribute's namespace-stripped, uppercased local name.
+    XTF 2.3 attributes are bare UPPERCASE and XTF 2.4 ones are namespaced lowercase.
     """
     if name in elem.attrib:
         return elem.attrib[name]
@@ -91,13 +48,9 @@ def _get_attr_ci(elem: ET.Element, name: str) -> str | None:
 
 @dataclass
 class RawNode:
-    """Raw XML subtree for ONE attribute (or one of its descendants).
+    """Raw XML subtree for one attribute (or one of its descendants).
 
-    The INTERLIS namespace is stripped from the tag, text is trimmed
-    (None if empty/absent). An element with no text whose value sits in its
-    `OID` XML attribute (an attribute of an OID domain) reads that value as
-    its text. `blank` holds the text of a childless element made of whitespace only, a
-    non-empty TEXT value that trimming turns into `None`.
+    The namespace is stripped from the tag and the text is trimmed (`None` if empty).
     """
 
     tag: str
@@ -109,17 +62,14 @@ class RawNode:
 
 @dataclass
 class XtfObject:
-    """An instance: a class OR a non-embedded relation.
+    """An instance: a class or a non-embedded relation, both encoded the same way.
 
-    Both are encoded identically on the transfer side (§4.3.9.2).
-    `qualified_class` is the full tag name as written in the file (e.g.
-    'RoadTrafficCensus_V1_1.RoadTrafficCensus.MeasurementLocation'), not
-    yet resolved against a schema; empty for a `DeleteObject` (`<ili:delete ili:tid=...>`), which names no class.
+    `qualified_class` is the tag as written, not yet resolved; empty for a `DeleteObject`.
     """
 
     tid: str | None
     qualified_class: str
-    attributes: dict[str, list[RawNode]]  # nom d'attribut -> occurrences (LIST/BAG : plusieurs)
+    attributes: dict[str, list[RawNode]]  # attribute name -> occurrences (several for LIST/BAG)
     operation: str | None = None
     """The upper-cased `OPERATION` (`INSERT`/`UPDATE`/`DELETE`) of an incremental transfer, `None` when absent
     (an `INSERT`)."""
@@ -163,19 +113,16 @@ def _to_raw_node(elem: ET.Element) -> RawNode:
 
 
 def _walk(path: Path) -> Iterator[tuple[str, Any]]:
-    """Walk an .xtf once, yielding `("header", (sender, version, models))` after its header section, `("basket",
-    basket)` as each basket opens (its `objects` left empty) and `("object", (basket, obj))` as each object closes.
+    """Walk an .xtf once, yielding the header, each basket as it opens, and each object as it closes.
 
-    Nothing is retained here, so memory stays flat whatever the file's size.
+    Nothing is retained, so memory stays flat whatever the file size.
     """
     sender: str | None = None
     ili_version: str | None = None
     models: list[XtfModelRef] = []
 
-    # Stack of (role, tag_without_namespace) - the role is determined by
-    # STRUCTURAL POSITION (depth relative to DATASECTION), never by the
-    # tag name itself (basket/object/attribute tags are named after the
-    # transferred model, not fixed keywords).
+    # Stack of (role, tag_without_namespace); the role comes from structural position,
+    # since tags are named after the model.
     stack: list[tuple[str, str]] = []
     current_basket: XtfBasket | None = None
     current_object: XtfObject | None = None
@@ -184,11 +131,7 @@ def _walk(path: Path) -> Iterator[tuple[str, Any]]:
         tag = _strip_ns(elem.tag)
         if event == "start":
             parent_role = stack[-1][0] if stack else None
-            # Section-name keywords (HEADERSECTION/DATASECTION/MODELS/SENDER)
-            # are compared case-insensitively - XTF 2.3 uses bare UPPERCASE,
-            # XTF 2.4 uses `ili:`-namespaced lowercase (already stripped by
-            # `_strip_ns` above; see `_get_attr_ci` for the same treatment
-            # of attributes).
+            # Section keywords are compared case-insensitively (XTF 2.3 UPPERCASE, XTF 2.4 lowercase).
             upper_tag = tag.upper()
             if parent_role is None:
                 role = "transfer"
@@ -199,9 +142,8 @@ def _walk(path: Path) -> Iterator[tuple[str, Any]]:
                     else ("datasection" if upper_tag == "DATASECTION" else "other")
                 )
             elif parent_role == "headersection":
-                # SENDER is a child element only in XTF 2.4 (an attribute of
-                # HEADERSECTION itself in XTF 2.3 - handled below, on the
-                # "headersection" end event).
+                # SENDER is a child element only in XTF 2.4 (an attribute of HEADERSECTION in XTF 2.3,
+                # handled at its end event).
                 if upper_tag == "MODELS":
                     role = "models"
                 elif upper_tag == "SENDER":
@@ -223,16 +165,8 @@ def _walk(path: Path) -> Iterator[tuple[str, Any]]:
                 yield ("basket", current_basket)
             elif parent_role == "basket":
                 role = "object"
-                # XTF 2.4: the object's own namespace prefix names its
-                # OWN model (e.g. via `TOPIC EXTENDS`, can differ from the
-                # basket's) and its local tag is the bare Class name alone
-                # - needs the enclosing basket's own TOPIC to reconstruct
-                # `Model.Topic.Class` (namespace alone only gives `Model`).
-                # XTF 2.3 (`model_name is None`): the bare tag is already
-                # the complete `Model.Topic.Class` on its own (e.g.
-                # `RoadTrafficAccidentLocation_V2.RoadTrafficAccident.
-                # RoadTrafficAccident`) - used as-is, unchanged from before
-                # this fix.
+                # XTF 2.4: the namespace names the object's model and the tag is the bare class name, so rebuild
+                # `Model.Topic.Class` from the basket TOPIC. XTF 2.3: the tag is already complete.
                 model_name = _model_name_from_tag(elem.tag)
                 basket_topic = current_basket.qualified_topic.rsplit(".", 1)[-1]
                 qualified_class = f"{model_name}.{basket_topic}.{tag}" if model_name else tag
@@ -265,10 +199,8 @@ def _walk(path: Path) -> Iterator[tuple[str, Any]]:
             current_basket = None
             elem.clear()
         elif role == "model":
-            # XTF 2.3: NAME is an attribute (VERSION/URI alongside it). XTF
-            # 2.4: the model name is the element's TEXT content instead - no
-            # per-model version/uri in the header at all (confirmed via
-            # iox-ili's Xtf24Reader.readModel, a bare `List<String>`).
+            # XTF 2.3: NAME is an attribute (VERSION/URI alongside).
+            # XTF 2.4: the model name is the element's text, with no version/uri.
             name = _get_attr_ci(elem, "NAME")
             if name is None:
                 name = elem.text.strip() if elem.text else ""
@@ -284,11 +216,9 @@ def _walk(path: Path) -> Iterator[tuple[str, Any]]:
 
 
 def parse_xtf(path: Path) -> XtfTransfer:
-    """Parse an .xtf into (sender, version, models, baskets), see XtfTransfer.
+    """Parse an .xtf into `(sender, version, models, baskets)`, holding every object in memory.
 
-    Resolves NO reference, interprets NO type - a purely structural layer
-    (don't guess what needs the schema to be decided). Holds every object in memory:
-    see `iter_objects` to stream them instead.
+    Structure only: no reference is resolved. Use `iter_objects` to stream instead.
     """
     transfer = XtfTransfer(sender=None, ili_version=None, models=[], baskets=[])
     for kind, payload in _walk(path):
@@ -313,10 +243,9 @@ def read_skeleton(path: Path) -> XtfTransfer:
 
 
 def iter_objects(path: Path) -> Iterator[tuple[XtfBasket, XtfObject]]:
-    """Every object of an .xtf with its basket, one at a time and never accumulated (flat memory).
+    """Yield every object of an .xtf with its basket, one at a time.
 
-    The yielded basket's `objects` stays empty, so nothing that needs to see every object of the transfer
-    (resolving references, VIEWs) can work from this: use `parse_xtf` for those.
+    The basket's `objects` stays empty, so checks needing all objects (references, VIEWs) need `parse_xtf`.
     """
     for kind, payload in _walk(path):
         if kind == "object":
@@ -324,10 +253,7 @@ def iter_objects(path: Path) -> Iterator[tuple[XtfBasket, XtfObject]]:
 
 
 def iter_events(path: Path) -> Iterator[tuple[str, Any]]:
-    """`("basket", XtfBasket)` as each basket opens, then `("object", (basket, XtfObject))` for each of its objects.
-
-    Nothing is accumulated (flat memory), and an empty basket is still reported.
-    """
+    """Yield each basket as it opens, then each of its objects; empty baskets are still reported."""
     for kind, payload in _walk(path):
         if kind != "header":
             yield kind, payload
@@ -338,10 +264,7 @@ def _is_incremental_basket(basket: XtfBasket) -> bool:
 
 
 def is_incremental(source: XtfTransfer | Path) -> bool:
-    """Whether a transfer (parsed, or an .xtf path read once without keeping anything) is incremental.
-
-    It is when a basket has KIND `UPDATE`/`INCREMENTAL` or an object carries an `UPDATE`/`DELETE` operation.
-    """
+    """Whether a transfer is incremental: a basket of KIND UPDATE/INCREMENTAL or an UPDATE/DELETE operation."""
     if isinstance(source, XtfTransfer):
         return any(
             _is_incremental_basket(b) or any(o.operation in ("UPDATE", "DELETE") for o in b.objects)

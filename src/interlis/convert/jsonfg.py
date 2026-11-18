@@ -1,42 +1,6 @@
-"""XTF data instance -> JSON-FG conversion: Feature/FeatureCollection, scalar properties, OID, featureType, geometry.
+"""Convert parsed XTF data into JSON-FG Features and FeatureCollections.
 
-`object_to_feature` converts one already-parsed XtfObject (xtf/parse.py,
-structural layer) into a JSON-FG (OGC 21-045r1) Feature object;
-`transfer_to_feature_collection` wraps every resolvable object of an
-XtfTransfer into one FeatureCollection. Both conform to the "core" and
-"types-schemas" requirements classes always, plus "circular-arcs"/
-"polyhedra" when "place" needs them - single-attribute point/line/
-polygon geometry -> "place" (never "geometry", which stays `null` - no
-WGS84 reprojection, see module docs); a plain REFERENCE TO, an embedded
-association role, or a 1-own-attribute STRUCTURE wrapping a REFERENCE TO
-(all 3 real wire shapes, unified via the SAME `extract_reference` search
-already proven by xtf/validate.py) -> the referenced object's OID as a
-plain string; a genuine STRUCTURE (no findable REF) -> a nested JSON
-object, `BAG`/`LIST OF X` -> a JSON array, both recursively (same
-"resolve schema, dispatch per kind" logic as the root object, mirroring
-xtf/validate.py's own `_validate_attrs` recursion). A CoordType/LineType
-NESTED inside a structure/list element becomes a plain GeoJSON geometry
-object in `properties` (the SAME `_coord_geometry`/`_line_geometry`
-builders as the top-level `place`, which stays the ONLY thing under
-`geometry`/`place`). A class with 2+ own+inherited
-geometry-typed attributes gets a single "place" of type
-`GeometryCollection` bundling every one of them (JSON-FG issue #134 added
-`GeometryCollection` to `place.json`'s allowed types - no separate
-conformance class needed). A `Geometry3D_V2.Solid3D`-typed attribute
-(matched by qualified name, not structurally - RULE #7 exception, no real
-corpus evidence yet) becomes a `Polyhedron` the same way; a
-`PolylineStraight3D`/`CompositeCurve3D`-typed attribute becomes a
-`LineString`, and a standalone `Tin3D`/`SurfaceShell3D`/
-`CompositeSurface3D`-typed attribute becomes a `MultiPolygon`; a
-`PointCloud3D`-typed attribute becomes a `MultiPoint` (all 4 the same
-RULE #7 exception, same matching approach). Reuses the schema resolution
-already proven by
-xtf/validate.py (resolve_attribute/attributes_of/coord_axes/
-line_coord_type) AND its wire-tag helpers (geom_tag/find_child/
-_axis_components/the BOUNDARY/SURFACE/LINE_KIND tag sets) rather than a
-second parallel implementation of the same COORD/POLYLINE/SURFACE/AREA/
-MULTI* wire conventions - convert() stays a decoupled stage from
-validate(), same split already established by convert/jsonschema.py.
+Geometry goes to "place" ("geometry" stays `null`, no reprojection); references become OID strings.
 """
 
 import contextlib
@@ -109,29 +73,15 @@ CONF_CIRCULAR_ARCS = f"http://www.opengis.net/spec/json-fg-1/{JSON_FG_VERSION}/c
 CONF_POLYHEDRA = f"http://www.opengis.net/spec/json-fg-1/{JSON_FG_VERSION}/conf/polyhedra"
 
 _SCALAR_KINDS = {"NumType", "TextType", "EnumType", "BooleanType", "FormattedType", "BlackboxType"}
-# JSON-FG Part 1 Core §7.5 (conformance class "circular-arcs") - geometry
-# "type" values that require CONF_CIRCULAR_ARCS to be declared in
-# "conformsTo".
+# Geometry types that require CONF_CIRCULAR_ARCS in "conformsTo".
 CIRCULAR_ARC_TYPES = frozenset({"CircularString", "CompoundCurve", "CurvePolygon", "MultiCurve", "MultiSurface"})
 POLYHEDRA_TYPES = frozenset({"Polyhedron", "MultiPolyhedron"})
-# `Geometry3D_V2.Solid3D` (CHBase Part VIII, models.geo.admin.ch) is the
-# only published INTERLIS 3D solid structure - matched by Name + its
-# distinctive `OuterShell` attribute (see `is_solid3d`), not by qualified
-# model path (`SymbolTable.qualified_name_of` only resolves within the
-# model actually being built, never an imported one - same cross-model
-# identity limitation already documented on `concrete_structure_subclasses`
-# in xtf/schema.py). No real corpus file uses this construct yet (RULE
-# #7: a synthetic, unvalidated exception - see
-# docs/dev-notes/solid3d-polyhedron-mapping.md).
+# `Geometry3D_V2.Solid3D` is matched by Name plus its `OuterShell` attribute (`is_solid3d`), not by qualified
+# model path: `SymbolTable.qualified_name_of` cannot resolve an imported model.
 
 
 def place_type_names(place: dict[str, Any] | None) -> set[str]:
-    """Collect the "type" value(s) a `place` actually carries, unwrapping a `GeometryCollection` one level.
-
-    Shared between a single Feature's own `conformsTo` and a
-    FeatureCollection's aggregate one, so a `GeometryCollection`-wrapped
-    circular-arc/polyhedra shape is detected in both places alike.
-    """
+    """Collect the "type" value(s) a `place` carries, unwrapping a `GeometryCollection` one level."""
     if place is None:
         return set()
     if place.get("type") == "GeometryCollection":
@@ -140,28 +90,14 @@ def place_type_names(place: dict[str, Any] | None) -> set[str]:
 
 
 def _scalar_value(resolved: ResolvedAttribute, node: RawNode) -> Any:
-    """Read ONE scalar attribute's wire value off its RawNode.
-
-    Same wire conventions already relied on by xtf/validate.py's
-    `_validate_scalar` (plain element text, "true"/"false" for BOOLEAN -
-    eCH-0031 V2.1.0 SS4.3.11), just producing a value instead of a
-    validation verdict. Never raises: a value that doesn't parse as
-    expected (e.g. non-numeric text under a NumType) is passed through
-    as-is rather than dropped, consistent with this converter's RULE #5
-    stance of surfacing rather than hiding.
-    """
+    """Read ONE scalar attribute's wire value; never raises (an unparsable value is passed through as-is)."""
     text = node.text
     kind = resolved.type_kind
     if text is None:
         return node.blank if node.blank and kind == "TextType" else None
-    # FormattedType (an ISO date/time string on the wire) and BlackboxType
-    # (the inner XML/base64 text) both pass through verbatim - matches the
-    # `type: string` their own JSON Schema `$defs` entry declares.
+    # FormattedType/BlackboxType pass through verbatim (their JSON Schema is `type: string`).
     if kind == "NumType":
-        # Same integer-vs-number heuristic already used for this SAME
-        # attribute's JSON Schema (convert/jsonschema.py) - keeps a
-        # Feature's property values consistent with the type its own
-        # $defs entry declares, rather than a second independent guess.
+        # Same integer-vs-number heuristic as this attribute's JSON Schema.
         as_int = is_integer_range(
             getattr(resolved.type_instance, "Min", None), getattr(resolved.type_instance, "Max", None)
         )
@@ -252,14 +188,8 @@ def _attribute_value(
     if kind in _SCALAR_KINDS:
         return _scalar_value(resolved, raw_nodes[0])
     if kind in GEOMETRY_KINDS and raw_nodes:
-        # A CoordType/LineType NESTED inside a STRUCTURE or a BAG/LIST
-        # element - the Feature's own `place` is a separate, top-level
-        # attribute (`_place_and_crs`). A nested one has nowhere native to
-        # go in JSON-FG, so it becomes a plain GeoJSON geometry object in
-        # `properties` (reusing the SAME `_coord_geometry`/`_line_geometry`
-        # builders, no parallel coordinate parsing) rather than being
-        # left out - real corpus DATA has this (nested
-        # `CaptureMethod` geometry, SIA405 symbol positions, ...).
+        # A CoordType/LineType nested in a STRUCTURE or BAG/LIST element becomes a plain GeoJSON geometry in
+        # `properties`; the Feature's own `place` is built separately (`_place_and_crs`).
         geometry = (
             _coord_geometry(resolved, raw_nodes[0]) if kind == "CoordType" else _line_geometry(resolved, raw_nodes[0])
         )
@@ -267,34 +197,19 @@ def _attribute_value(
     if kind == "MultiValue":
         return _multi_value(resolved, raw_nodes, symbol_table=symbol_table)
     if kind in _REFERENCE_TYPE_KINDS:
-        # Same dispatch as xtf/validate.py's _validate_resolved_attr: a
-        # "ReferenceType"/"Class" kind doesn't always mean a plain
-        # REFERENCE TO or an embedded association role - a 1-own-attribute
-        # STRUCTURE wrapping a REFERENCE TO (the "MandatoryCatalogueReference"
-        # pattern, real corpus example: RoadTrafficAccidentLocation_V2's
-        # AccidentType/AccidentSeverityCategory/RoadType/AccidentWeekDay)
-        # is ALSO transferred with a findable REF, several levels deep -
-        # extract_reference searches the whole subtree regardless of which
-        # of these 3 real wire shapes produced it, so all 3 are handled by
-        # this ONE lookup, never 3 separate cases.
+        # A "ReferenceType"/"Class" kind may be a plain reference, an embedded role, or a STRUCTURE wrapping a
+        # REFERENCE TO; `extract_reference` finds the REF in all three wire shapes.
         is_structure = kind == "Class" and getattr(resolved.type_instance, "Kind", None) == "Structure"
         if is_structure and wrapped_reference(resolved.type_instance) is None:
             return _structure_value(resolved, raw_nodes, symbol_table=symbol_table, already_unwrapped=already_unwrapped)
         ref = extract_reference(raw_nodes[0]) if raw_nodes else None
         if ref is not None:
             return ref
-        # A GENUINE STRUCTURE occurrence (Kind=Structure, no REF anywhere -
-        # real nested content, e.g. MultilingualText) recurses into its own
-        # content instead of falling through to the marker below.
+        # A genuine STRUCTURE (no REF anywhere) recurses into its own content.
         if kind == "Class" and getattr(resolved.type_instance, "Kind", None) == "Structure":
             return _structure_value(resolved, raw_nodes, symbol_table=symbol_table, already_unwrapped=already_unwrapped)
-        # A `CLASS`/`STRUCTURE RESTRICTION` domain attribute whose exporter
-        # flattened the value to a leaf scalar (real corpus:
-        # RoadTrafficCensus_V1_1's `Owner`/`Canton`, `DOMAIN Owner = CLASS
-        # RESTRICTION (...)`, on the wire as `<Owner>CH</Owner>`) - mirror
-        # the JSON Schema pipeline, which emits `{"type": "string",
-        # "x-reference-target": ...}` for the same construct: return the
-        # text as a string.
+        # A CLASS/STRUCTURE RESTRICTION domain flattened by the exporter to a leaf scalar: return the text,
+        # as the JSON Schema pipeline does (`x-reference-target`).
         leaf = raw_nodes[0] if raw_nodes else None
         if leaf is not None and not leaf.children and leaf.text is not None:
             return leaf.text
@@ -318,17 +233,8 @@ def _structure_value(
 ) -> dict[str, Any]:
     """Recurse into a genuine STRUCTURE occurrence's own attributes.
 
-    Value-producing counterpart of xtf/validate.py's `_validate_attrs`
-    recursion (same real wire convention, same `already_unwrapped`
-    distinction - a bug there, fixed once, is worth respecting exactly
-    rather than re-deriving): `already_unwrapped=False` (a root/plain
-    structure-typed attribute) - `raw_nodes[0]` is the node NAMED AFTER
-    THE ATTRIBUTE (e.g. `<Name>`), whose ONLY child is the actual
-    structure-content wrapper (`<...MultilingualText>`) - one level of
-    unwrapping needed. `already_unwrapped=True` (a `MultiValue`
-    occurrence, see `_multi_value`) - `raw_nodes[0]` IS ALREADY that
-    wrapper - unwrapping it again would misgroup the grandchildren
-    instead of the real attributes.
+    With `already_unwrapped=False`, `raw_nodes[0]` is the node named after the attribute and its only child is the
+    content wrapper (one unwrapping level); with `True` (a `MultiValue` occurrence) it already is that wrapper.
     """
     node = raw_nodes[0] if raw_nodes else None
     if node is None:
@@ -340,20 +246,10 @@ def _structure_value(
 
 
 def _multi_value(resolved: ResolvedAttribute, raw_nodes: list[RawNode], *, symbol_table: SymbolTable | None) -> Any:
-    """`BAG {m..n} OF X` / `LIST {m..n} OF X` -> a JSON array of converted occurrences.
+    """`BAG`/`LIST {m..n} OF X` -> a JSON array of converted occurrences.
 
-    Real wire convention (confirmed on `KGS_PBC_V2_2.ili`'s
-    `Objektart`/`EGID`/`Adressen`, same as xtf/validate.py's own
-    MultiValue handling): a SINGLE element named after the attribute,
-    containing each occurrence as a DIRECT CHILD - never repeated
-    attribute-name tags at the object level (that convention is what
-    `XtfObject.attributes` itself already captures, a DIFFERENT kind of
-    repetition). Each occurrence is re-dispatched through
-    `_attribute_value` via a synthetic `ResolvedAttribute` for
-    `MultiValue.BaseType` (Structure, Reference, scalar, ... - the exact
-    same generic mechanism, unlimited recursion), `already_unwrapped=True`
-    since an occurrence IS the content wrapper already (see
-    `_structure_value`).
+    The wire carries ONE element named after the attribute with each occurrence as a direct child; each occurrence
+    is re-dispatched through `_attribute_value` via a synthetic attribute for `MultiValue.BaseType`.
     """
     base_type = getattr(resolved.type_instance, "BaseType", None)
     if not isinstance(base_type, MetaInstance):
@@ -373,49 +269,18 @@ def _multi_value(resolved: ResolvedAttribute, raw_nodes: list[RawNode], *, symbo
 
 
 def _sql_identifier(name: str) -> str:
-    """Lowercase - matches `convert/sql.py`'s `_sql_identifier` EXACTLY (kept manually in sync, not imported:
-    `convert/sql.py` already imports FROM this module, so importing back would be circular).
+    """Lowercase, mirroring `convert/sql.py`'s `_sql_identifier` (not imported: that module imports this one).
 
-    Only correct as long as both copies stay identical - the one real,
-    documented limitation this creates: a child table
-    name/FK column here is NOT recomputed with the SAME cross-class
-    disambiguation `convert/sql.py`'s `build_tables` applies on a real
-    `Class.Name` collision (`_2`/`_3` suffix) - this module has no
-    visibility into sibling classes to detect that collision at all. Real
-    corpus prevalence of BOTH a name collision AND a BAG/LIST attribute on
-    the SAME class name: not observed so far.
+    Unlike `build_tables`, no `_2`/`_3` suffix disambiguation of colliding class names is applied.
     """
     return name.lower()
 
 
 def _child_row_features(obj: XtfObject, cls: MetaInstance, *, symbol_table: SymbolTable | None) -> list[dict[str, Any]]:
-    """Return one JSON-FG Feature per `BAG`/`LIST OF` occurrence across ALL of `obj`'s own+inherited attributes.
+    """One Feature per `BAG`/`LIST OF` element of `obj`, as a child-table row.
 
-    Companion to `convert/sql.py`'s child tables (`_build_child_table`) -
-    same schema, so GDAL's own `"featureType"`-based table splitting
-    (already relied on for the main data)
-    routes these into the SAME child tables in the SAME `ogr2ogr -append`
-    call as everything else - no separate file, no separate GDAL
-    invocation, no live-database dependency for this project.
-
-    `featureType` = `"<parent_table>_<attr_name>"` (`convert/sql.py`'s own
-    child table name). `properties` always carries `"<parent_table>_fk"`
-    (the parent's own OID, matching the child table's own FK column) and,
-    for `Ordered=True` (`LIST`), a `"seq"` 0-based index (`BAG` has none -
-    order isn't significant). The element's own value: a genuine
-    `STRUCTURE` occurrence spreads its OWN members directly (matching the
-    child table's own flattened columns, one level, same as
-    `_build_child_table`) ; anything else (scalar, or a `REFERENCE TO`
-    target OID - though `BAG`/`LIST OF REFERENCE TO` is not actually
-    constructible by this project's own grammar, per `convert/sql.py`'s
-    own note) lands in a single `"value"` property,
-    matching the child table's own `value` column. `id` is synthesized
-    (`"<parent OID>_<attr name>_<index>"`) - a `STRUCTURE`/scalar
-    occurrence has no OID of its own on the wire. `"geometry"` stays
-    `null` like every other Feature this module produces (no WGS84
-    reprojection); a geometry-typed `BAG`/`LIST` element's `"value"` is a
-    plain GeoJSON geometry object (`_attribute_value` dispatches
-    CoordType/LineType through `_coord_geometry`/`_line_geometry`).
+    `featureType` is `"<parent_table>_<attr>"`; `properties` holds the parent foreign key, a `"seq"` index for `LIST`
+    and the element's members (or `"value"`).
     """
     features: list[dict[str, Any]] = []
     if obj.tid is None:
@@ -466,15 +331,10 @@ def _child_row_features(obj: XtfObject, cls: MetaInstance, *, symbol_table: Symb
 def members_value(
     cls: MetaInstance, attrs: dict[str, list[RawNode]], *, symbol_table: SymbolTable | None
 ) -> dict[str, Any]:
-    """Convert every attribute present in `attrs` against `cls`'s own schema into a plain dict.
+    """Convert every attribute present in `attrs` against `cls`'s schema into a plain dict.
 
-    Shared by `object_to_feature` (the root object) and `_structure_value`
-    (nested STRUCTURE content) - same "resolve schema, dispatch per kind"
-    logic applied to any Class/Structure's own attribute set, mirroring
-    xtf/validate.py's `_validate_attrs` (there: valid/invalid issues;
-    here: a value). An attribute present on the wire but not found in the
-    schema is silently skipped - not this converter's job to flag,
-    `validate()` does.
+    Shared by `object_to_feature` and `_structure_value`; an attribute absent from the schema is skipped
+    (`validate()` flags it).
     """
     schema_attrs = schema_members_of(cls, symbol_table) if symbol_table is not None else attributes_of(cls)
     resolved_attrs = {name: resolve_attribute(attr) for name, attr in schema_attrs.items()}
@@ -489,23 +349,7 @@ def members_value(
     return result
 
 
-# --- Geometry (`"place"`) ----------------------------------------------------
-#
-# Value-extraction counterparts of xtf/validate.py's _validate_coord_node/
-# _validate_polyline_node/_validate_boundary_node/_validate_surface_node -
-# same wire structure (reuses the SAME tag helpers/sets, imported directly
-# rather than duplicated), but building a JSON-FG geometry value instead of
-# a list of validation issues. Returns `None` (never raises) on anything
-# this module doesn't represent - a custom LINE FORM segment, a missing/
-# non-numeric component - so the caller falls back to leaving the attribute
-# in "properties" (RULE #5: never silently misrepresent geometry that
-# couldn't be read). An ARC segment IS representable (see `_read_polyline`
-# below): a
-# straight-only POLYLINE/BOUNDARY still returns a plain position list (as
-# before, wrapped into LineString/Polygon by the caller), but one
-# containing at least one ARC returns an already-typed JSON-FG geometry
-# object (CircularString/CompoundCurve/CurvePolygon) instead - the caller
-# (`_line_geometry`) tells the two apart via `isinstance(value, dict)`.
+# --- Geometry (`"place"`): readers return `None` for anything not representable, so it stays in "properties".
 
 
 def _positions_from(node: RawNode, prefix: str) -> list[float] | None:
@@ -529,13 +373,9 @@ def read_coord(node: RawNode) -> list[float] | None:
 
 
 def read_arc(node: RawNode) -> tuple[list[float], list[float]] | None:
-    """Read an ArcSegment (eCH-0031 V2.1.0 SS4.3.11.14): `(intermediate point, end point)`.
+    """Read an ArcSegment as `(intermediate point, end point)`.
 
-    The intermediate point (A1/A2) is always 2D - INTERLIS never carries a
-    3rd component for it (confirmed in xtf/validate.py's `_validate_arc_node`)
-    even when the surrounding COORD/end point is 3D; the optional radius
-    (R) is redundant with the 3 points a `CircularString` arc needs and is
-    not read here.
+    The intermediate point (A1/A2) is always 2D even when the end point is 3D; the optional radius is not read.
     """
     if geom_tag(node) != "ARC":
         return None
@@ -545,22 +385,10 @@ def read_arc(node: RawNode) -> tuple[list[float], list[float]] | None:
 
 
 def _read_polyline(node: RawNode) -> list[list[float]] | dict[str, Any] | None:
-    """Read a POLYLINE's SegmentSequence into a plain position list (straight-only) or a curved geometry object.
+    """Read a POLYLINE into a plain position list (straight-only) or a curved geometry object.
 
-    A SegmentSequence always starts with a COORD (the path's start point),
-    then zero or more StraightSegment (COORD)/ArcSegment (ARC) - never
-    ArcSegment first (eCH-0031 V2.1.0 SS4.3.11.14). Consecutive segments of
-    the same kind are grouped into one run (a straight run -> `LineString`,
-    an arc run -> `CircularString`, chained arcs sharing their shared
-    endpoint per JSON-FG's own encoding rather than repeating it - see
-    core/examples/multi-curve.json, opengeospatial/ogc-feat-geo-json); a
-    run switch keeps the boundary point as the start of the next run. A
-    straight-only polyline collapses back to the original plain position
-    list (unchanged return shape, still what `_line_geometry` wraps into a
-    "LineString"/"Polygon"); one made of a single arc run returns a bare
-    `CircularString`; anything mixing runs returns a `CompoundCurve`
-    (JSON-FG Part 1 Core SS7.5.2 - each item's first position equals the
-    previous item's last, exactly how runs are chained here).
+    Consecutive segments of one kind form a run (`LineString` / `CircularString`, chained arcs sharing endpoints);
+    a single arc run returns a bare `CircularString`, mixed runs a `CompoundCurve`.
     """
     if geom_tag(node) != "POLYLINE" or not node.children:
         return None
@@ -623,12 +451,7 @@ def _read_boundary(node: RawNode) -> list[list[float]] | dict[str, Any] | None:
 def _read_surface(node: RawNode) -> list[list[list[float]]] | dict[str, Any] | None:
     """Read a SURFACE/AREA into plain rings (straight-only) or a `CurvePolygon` (any ring with an arc).
 
-    A `CurvePolygon`'s "geometries" member is a list of closed curve
-    geometries (JSON-FG Part 1 Core SS7.5.3) - every ring, straight or
-    curved, is wrapped as a full geometry object there (a plain ring
-    becomes `{"type": "LineString", ...}`), unlike the plain-`Polygon` case
-    where rings stay bare position lists (`_read_boundary`'s straight-only
-    return shape, unchanged).
+    A `CurvePolygon` wraps every ring, even a straight one, as a full geometry object.
     """
     if geom_tag(node) not in _SURFACE_TAGS:
         return None
@@ -671,20 +494,9 @@ def _coord_geometry(resolved: ResolvedAttribute, node: RawNode) -> dict[str, Any
 
 
 def _line_geometry(resolved: ResolvedAttribute, node: RawNode) -> dict[str, Any] | None:
-    """Build the JSON-FG geometry value for a LineType attribute occurrence.
+    """Build the JSON-FG geometry for a line attribute, or `None` if it cannot be represented.
 
-    `reader` (`_read_polyline`/`_read_surface`) returns either a plain
-    position list (straight-only - wrapped here into "LineString"/"Polygon"/
-    "MultiLineString"/"MultiPolygon", unchanged from before circular-arcs
-    support) or an already-typed geometry object (`CircularString`/
-    `CompoundCurve`/`CurvePolygon` - any run/ring containing an ARC segment,
-    see `_read_polyline`/`_read_surface`), told apart via `isinstance(...,
-    dict)`. In the `multi` case, ANY curved part switches the WHOLE
-    attribute to JSON-FG's `MultiCurve`/`MultiSurface` (SS7.5.4/.5) instead
-    of `MultiLineString`/`MultiPolygon` - both require every member to be a
-    full geometry object, so a straight part is wrapped into a
-    `LineString`/`Polygon` there too rather than left as a bare coordinate
-    array.
+    In the multi case any curved part makes the whole attribute a `MultiCurve`/`MultiSurface`.
     """
     line_type = resolved.type_instance
     kind = getattr(line_type, "Kind", None)
@@ -773,12 +585,7 @@ def _resolve_named_attr(cls: MetaInstance, name: str) -> ResolvedAttribute | Non
 
 
 def _resolve_base_type(cls: MetaInstance, attr_name: str) -> MetaInstance | None:
-    """Resolve `cls.<attr_name>`, then unwrap ITS OWN `.type_instance.BaseType`.
-
-    The shared two-step indirection behind every 3D/CHBase coord-type
-    walker below (`Simplified`/`Points`/`Surfaces` -> the element type one
-    level down) - was duplicated inline 5 times before being extracted here.
-    """
+    """Resolve `cls.<attr_name>`, then unwrap its `.type_instance.BaseType`."""
     attr = _resolve_named_attr(cls, attr_name)
     base_type = getattr(attr.type_instance, "BaseType", None) if attr is not None else None
     return base_type if isinstance(base_type, MetaInstance) else None
@@ -788,12 +595,7 @@ def _place_and_crs_via(
     coord_type_fn: Callable[[MetaInstance], MetaInstance | None],
     geometry_fn: Callable[[MetaInstance, dict[str, Any]], dict[str, Any] | None],
 ) -> Callable[[ResolvedAttribute, Any, SymbolTable | None, ModelRepository | None], tuple[dict[str, Any], str] | None]:
-    """Build one `_solid3d_place_and_crs`-shaped function from its shape-specific coord-type/geometry builders.
-
-    Every 3D/CHBase geometry shape shares the same guard/lookup skeleton
-    (`_solid3d_place_and_crs` and its 4 siblings used to duplicate it) -
-    only `coord_type_fn`/`geometry_fn` differ per shape.
-    """
+    """Build one `*_place_and_crs` function from its shape-specific coord-type and geometry builders."""
 
     def _place_and_crs_for_shape(
         resolved: ResolvedAttribute,
@@ -815,14 +617,7 @@ def _place_and_crs_via(
 
 
 def _solid3d_coord_type(solid_class: MetaInstance) -> MetaInstance | None:
-    """Walk `Solid3D.OuterShell -> Simplified -> Triangle3D.Geometry` to the ultimate `CoordType`, for CRS lookup.
-
-    Unlike a plain `CoordType`/`LineType` attribute, a `Solid3D` value has
-    no single geometry-typed attribute of its own to read a `CoordType`
-    off of - the schema has to be walked down to the one place a
-    `CoordType` actually lives (every `Triangle3D.Geometry`, all sharing
-    the same declared VERTEX domain by construction).
-    """
+    """Walk `Solid3D.OuterShell -> Simplified -> Triangle3D.Geometry` to its `CoordType`, for CRS lookup."""
     shell = _resolve_named_attr(solid_class, "OuterShell")
     shell_class = shell.type_instance if shell is not None else None
     if not isinstance(shell_class, MetaInstance):
@@ -837,12 +632,9 @@ def _solid3d_coord_type(solid_class: MetaInstance) -> MetaInstance | None:
 
 
 def _polyhedron_shell(shell: Any) -> list[Any] | None:
-    """One JSON-FG Polyhedron shell (a MultiPolygon-shaped patch list) from an already-decoded `SurfaceShell3D` dict.
+    """One JSON-FG Polyhedron shell (a patch list) from a decoded `SurfaceShell3D` dict.
 
-    Only `Simplified` (guaranteed straight-only triangles, `BAG {1..*}`)
-    feeds the shell - `Native` (arbitrary `Surface3D` subclasses, possibly
-    non-planar) has no guaranteed straight-only representation and is left
-    out, same non-lossy-preferred stance already taken for circular-arcs.
+    Only `Simplified` (straight-only triangles) feeds the shell; `Native` has no guaranteed straight-only form.
     """
     if not isinstance(shell, dict):
         return None
@@ -862,14 +654,7 @@ def _polyhedron_shell(shell: Any) -> list[Any] | None:
 
 
 def _solid3d_polyhedron(value: dict[str, Any]) -> dict[str, Any] | None:
-    """A `Geometry3D_V2.Solid3D` value (already decoded by `_structure_value`) -> a JSON-FG `Polyhedron` geometry.
-
-    Each shell (`OuterShell`, then every `InnerShells` occurrence) becomes
-    one entry of `coordinates` (JSON-FG Part 1 §7.4: "a solid defined by
-    shells, each shell a closed, simple MultiPolygon") - `Solid3D`'s own
-    `InnerShells` (voids enclosed by the outer shell) map onto this
-    one-for-one.
-    """
+    """A decoded `Geometry3D_V2.Solid3D` value -> a JSON-FG `Polyhedron` (outer shell, then each inner shell)."""
     outer_shell = _polyhedron_shell(value.get("OuterShell"))
     if outer_shell is None:
         return None
@@ -882,10 +667,7 @@ def _solid3d_polyhedron(value: dict[str, Any]) -> dict[str, Any] | None:
     return {"type": "Polyhedron", "coordinates": shells}
 
 
-# `value` in each `_place_and_crs_via`-built function below is the attribute's
-# already-decoded `properties` value (built once by `members_value`/
-# `_structure_value` for every attribute, geometry or not) - reused here
-# rather than re-decoding the same raw wire nodes a second time.
+# `value` is the attribute's already-decoded `properties` value, reused rather than re-decoding the wire nodes.
 _solid3d_place_and_crs = _place_and_crs_via(
     _solid3d_coord_type, lambda _type_instance, value: _solid3d_polyhedron(value)
 )
@@ -908,16 +690,10 @@ def _curve3d_coord_type(type_instance: MetaInstance) -> MetaInstance | None:
 
 
 def _composite_curve3d_linestring(value: dict[str, Any]) -> dict[str, Any] | None:
-    """A `CompositeCurve3D` value (already decoded by `_structure_value`) -> one JSON-FG `LineString`.
+    """A decoded `CompositeCurve3D` value -> one JSON-FG `LineString`.
 
-    `Simplified` (`LIST {1..*} OF PolylineStraight3D`) is a CONNECTED
-    sequence (swisstopo "Basismodul 3D" SS2.3: each segment's start point
-    equals the previous segment's end point, except the first/last) - the
-    segments concatenate into a SINGLE `LineString`, never
-    `MultiLineString`/`MultiCurve` (those would misrepresent it as
-    disconnected pieces). The shared joint point is dropped once per
-    junction only when it is actually identical on both sides - never
-    guessed away otherwise (RULE #5).
+    `Simplified` is a connected sequence, so segments concatenate into a single line; the shared joint point is
+    dropped only when identical on both sides.
     """
     segments = value.get("Simplified")
     if not isinstance(segments, list) or not segments:
@@ -938,12 +714,7 @@ def _composite_curve3d_linestring(value: dict[str, Any]) -> dict[str, Any] | Non
 
 
 def _curve3d_geometry(type_instance: MetaInstance, value: dict[str, Any]) -> dict[str, Any] | None:
-    """The JSON-FG `LineString` for one already-decoded `Curve3D` value.
-
-    `PolylineStraight3D` reads its single `Geometry` directly;
-    `CompositeCurve3D` concatenates its segments via
-    `_composite_curve3d_linestring`.
-    """
+    """The JSON-FG `LineString` for one decoded `Curve3D` value (a single `Geometry`, or concatenated segments)."""
     if getattr(type_instance, "Name", None) == "PolylineStraight3D":
         geometry = value.get("Geometry")
         return geometry if isinstance(geometry, dict) and geometry.get("type") == "LineString" else None
@@ -965,15 +736,9 @@ def _composite_surface3d_coord_type(type_instance: MetaInstance) -> MetaInstance
 
 
 def _composite_surface3d_multipolygon(value: dict[str, Any]) -> dict[str, Any] | None:
-    """A `Tin3D`/`SurfaceShell3D`/`CompositeSurface3D` value (already decoded by `_structure_value`) -> `MultiPolygon`.
+    """A decoded `Tin3D`/`SurfaceShell3D`/`CompositeSurface3D` value -> `MultiPolygon` of triangle patches.
 
-    Flattened as a plain mesh of triangle patches (`_polyhedron_shell`,
-    shared with `Solid3D`'s own shell reading) - a standalone
-    `SurfaceShell3D`'s closure is NOT reconstructed into a single-shell
-    `Polyhedron` here (that would need detecting watertightness, which
-    this converter has no way to check from the wire alone); the open
-    (`Tin3D`) and closed (`SurfaceShell3D`) cases both get the same
-    honest "here are the triangles" representation.
+    A closed `SurfaceShell3D` is not promoted to a `Polyhedron`: watertightness cannot be checked from the wire.
     """
     patches = _polyhedron_shell(value)
     return None if patches is None else {"type": "MultiPolygon", "coordinates": patches}
@@ -1000,14 +765,7 @@ def _chbase_multisurface_coord_type(type_instance: MetaInstance) -> MetaInstance
 
 
 def _chbase_multisurface_multipolygon(value: dict[str, Any]) -> dict[str, Any] | None:
-    """A `MultiSurface` value (already decoded by `_structure_value`) -> `MultiPolygon`/`MultiSurface`.
-
-    Each `SurfaceStructure.Surface` is already a fully-built `Polygon`/
-    `CurvePolygon` dict (`_line_geometry` ran on it during the generic
-    `_structure_value` recursion) - this just re-aggregates them one level
-    up, mirroring `_line_geometry`'s own straight-vs-curved branching for a
-    native `Multi=True` LineType attribute.
-    """
+    """A decoded `MultiSurface` value -> `MultiPolygon`, or `MultiSurface` when any member is a `CurvePolygon`."""
     surfaces = value.get("Surfaces")
     if not isinstance(surfaces, list) or not surfaces:
         return None
@@ -1072,13 +830,9 @@ def geometry_coord_type(resolved: ResolvedAttribute) -> MetaInstance | None:
 
 
 def _feature_schema_ref(schema_url: str, feature_type: str) -> str:
-    """One `$defs` entry of a `convert/jsonschema.py.model_to_json_schema` document, addressed by URI fragment.
+    """A `$defs` entry of a `model_to_json_schema` document, addressed by URI fragment.
 
-    `schema_url` is caller-supplied (this pure-conversion runtime has no
-    schema-hosting story of its own to derive it from - same stance as
-    `--repo`/`--model`, always user-provided); `feature_type` is the SAME
-    short `Name` `model_to_json_schema` already keys `$defs` by (see
-    `class_to_json_schema`'s `title`), so the fragment always resolves.
+    `schema_url` is caller-supplied; `feature_type` is the short class `Name` that document keys `$defs` by.
     """
     return f"{schema_url}#/$defs/{feature_type}"
 
@@ -1093,91 +847,10 @@ def object_to_feature(
     schema_url: str | None = None,
     omit_multivalue: bool = False,
 ) -> dict[str, Any]:
-    """Convert one XtfObject into a JSON-FG Feature object.
+    """Convert one XtfObject (of the resolved class `cls`) into a JSON-FG Feature.
 
-    `omit_multivalue` (opt-in, `False` by default - zero behavior change
-    for every existing caller): drops every top-level `BAG`/`LIST OF`
-    property instead of inlining it as a JSON array - used by
-    `transfer_to_feature_collection`'s `include_child_rows=True`, where
-    that same data is ALREADY represented as separate child-row Features
-    (`_child_row_features`). Left inlined AND duplicated otherwise would
-    be dead weight in practice (GDAL's own `-append` into the pre-created
-    `convert/sql.py` schema has no matching column to receive it, per
-    GDAL's own documented "-append does NOT add missing fields" - it
-    would just be silently discarded on load, never a wrong load, but
-    wasted file size and a confusing thing for a human to read). Does NOT
-    affect a NESTED `BAG`/`LIST` inside a STRUCTURE property - only
-    TOP-LEVEL `BAG`/`LIST` attributes have a child table at all
-    (`convert/sql.py` flattens one level deep, never nested).
-
-    `cls` is the already-resolved Class/Structure instance for
-    `obj.qualified_class` (xtf.schema.resolve_class) - resolution stays
-    the caller's job, same split as xtf/validate.py's `_validate_object`,
-    so this function is a pure value transform.
-
-    `symbol_table`, when given, additionally includes EMBEDDED
-    ASSOCIATION ROLES (`xtf.schema.schema_members_of` instead of plain
-    `attributes_of`) as pseudo-attributes - same opt-in precondition as
-    `convert/jsonschema.py`'s `class_to_json_schema`. `None` (the
-    default) means own+inherited `ClassAttribute`s only.
-
-    `standalone=True` (default): produced as a JSON-FG "root object" in
-    its own right (OGC 21-045r1 clause 8: "not contained in another
-    JSON-FG object") - carries its own "conformsTo" (core, and
-    types-schemas since "featureType" is always included, per core
-    requirement /req/core/metadata.H; plus circular-arcs, SS7.5, whenever
-    "place" ends up one of CircularString/CompoundCurve/CurvePolygon/
-    MultiCurve/MultiSurface - see `_read_polyline`/`_read_surface`).
-    `standalone=False` (used by
-    `transfer_to_feature_collection` for a Feature nested inside a
-    FeatureCollection, which becomes the root object instead) OMITS
-    "conformsTo" - required, not a style choice: /req/core/metadata.C
-    states "Every other JSON-FG object SHALL NOT include a 'conformsTo'
-    member." "id" is included only when `obj.tid` is set (GeoJSON RFC
-    7946 SS3.2: OPTIONAL, string or number) - never a literal `null`,
-    unlike "geometry" which RFC 7946 requires as a member even when
-    unlocated (`null`). "featureType" reuses the class's short `Name`
-    (same identifier convert/jsonschema.py uses as its $defs key), so a
-    Feature and its schema entry can be linked by name via "featureSchema"
-    (clause 13, `/req/types-schemas/feature-schemas`) whenever `schema_url`
-    is given - a plain string URI (`_feature_schema_ref`), valid here
-    since a standalone Feature only ever has ONE "featureType" (clause 13
-    requirement `single-feature-schema` - a string value requires every
-    "featureType" in the document to match). `None` (the default) omits
-    "featureSchema" entirely, unchanged from before this was wired - this
-    runtime has no schema-hosting story of its own, so the link is only
-    ever built when the caller supplies where the companion
-    `model_to_json_schema` document will be reachable.
-
-    Geometry ("place"/"coordRefSys"): every own+inherited attribute whose
-    type resolves directly to CoordType/LineType, plus the specific
-    STRUCTURE-wrapped BAG/LIST shapes this module recognizes by name
-    (Solid3D, Curve3D, Tin3D/SurfaceShell3D/CompositeSurface3D,
-    PointCloud3D, GeometryCHLV95_V1/GeometryCHLV03_V1's MultiSurface - a
-    generic unnamed BAG/LIST wrapper stays out of scope, no real corpus
-    evidence) AND whose actual wire value converts cleanly (see
-    `_place_and_crs` - a `None` result, e.g. an unresolved CRS, leaves that
-    one attribute in "properties" instead, still holding its own converted
-    GeoJSON-object value; only a genuine parse failure, e.g. a custom LINE
-    FORM segment, leaves it out, recorded as JSONFG-GEOMETRY-UNREADABLE - a
-    STRUCTURE-wrapped shape (Solid3D and the others above) keeps its full
-    nested-STRUCTURE value, already a complete, useful representation on
-    its own - never a silent loss either way) is collected.
-    Exactly one such attribute becomes "place" directly (unchanged
-    behaviour); two or more become a single "place" of type
-    `GeometryCollection` bundling all of them, in declaration order - no
-    "primary" geometry is picked (real corpus evidence, e.g. `Station` in
-    `ElektrischeAnlagenNennspannungUeber36kV_V1.ili`: a mandatory point +
-    an optional area, both meaningful, neither disposable) - all members
-    of the collection must share the exact same `coordRefSys` (they
-    always do in every real case found; a class whose geometry attributes
-    disagree on CRS gets no "place" at all instead of guessing which one
-    wins). A class with zero resolvable geometry attributes still gets no
-    "place" (nothing to build it from). "geometry" (the WGS84 GeoJSON
-    fallback) always stays `null` here - reprojecting LV95/LV03 to WGS84
-    would need a real coordinate-transform dependency, out of scope for
-    this pure-Python runtime; JSON-FG core explicitly allows this
-    ("geometry" is `null` when no valid WGS84 representation exists).
+    Geometry attributes become "place" (several become a `GeometryCollection`); others stay in "properties".
+    `standalone=False` omits "conformsTo", which only a root object carries.
     """
     with _feature_scope(getattr(cls, "Name", None) or obj.qualified_class, obj.tid):
         return _object_to_feature(
@@ -1219,10 +892,7 @@ def _object_to_feature(
     composite_surface3d_names = {name for name, r in resolved_attrs.items() if is_composite_surface3d(r.type_instance)}
     pointcloud3d_names = {name for name, r in resolved_attrs.items() if is_pointcloud3d(r.type_instance)}
     chbase_multisurface_names = {name for name, r in resolved_attrs.items() if is_chbase_multisurface(r.type_instance)}
-    # Single pass over `resolved_attrs` (declaration order) so a class
-    # mixing a plain 2D/curve geometry with a 3D/CHBase shape gets its
-    # `GeometryCollection` in the documented declaration order, not
-    # grouped by shape category.
+    # One pass in declaration order so a mixed class gets its GeometryCollection in that order.
     resolved_geometries: list[tuple[str, dict[str, Any], str]] = []
     for name, resolved in resolved_attrs.items():
         raw_nodes = obj.attributes.get(name)
@@ -1258,13 +928,8 @@ def _object_to_feature(
                 properties.pop(geom_name, None)
                 placed_names.add(geom_name)
 
-    # A top-level geometry attribute that could NOT become `place` (no
-    # resolvable CRS, or a CRS mismatch across several) already holds the
-    # same GeoJSON-object value `_attribute_value` computes for a NESTED
-    # geometry (`_coord_geometry`/`_line_geometry`) - keep it rather than
-    # discarding real coordinates. Only a genuine parse failure (custom
-    # LINE FORM segment, unreadable wire data - `properties[name]` is
-    # `None`) is left out: no GeoJSON can stand for it.
+    # A top-level geometry attribute that did not become `place` keeps its GeoJSON value in `properties`;
+    # only an unreadable one (`None`) is left out.
     for name in geometry_names:
         if name in properties and name not in placed_names and not isinstance(properties[name], dict):
             del properties[name]
@@ -1293,30 +958,7 @@ def _object_to_feature(
     return feature
 
 
-# --- VIEW evaluation --------------------------------------------------------
-#
-# Every FormationKind is evaluated in memory against an already-parsed
-# XtfTransfer, producing JSON-FG Features shaped like the VIEW rather than
-# its raw base class(es) - the FGDM4GS report's central equivalence (a VIEW
-# is a FeatureType projection instruction):
-#
-#   PROJECTION OF   one base           re-tag each matching object
-#   JOIN OF         N bases            cartesian product (`_join_combinations`)
-#   UNION OF        N bases            concatenate every base's objects
-#   AGGREGATION OF  one base, ALL/EQUAL  one Feature per group (counts computed)
-#   INSPECTION OF   one base -> attr   one Feature per element of the attr (a
-#                                      geometry attr: boundary/edge/segment)
-#
-# A `WHERE` clause narrows a JOIN/PROJECTION per combination. It is
-# evaluated by `convert/constraint_eval.evaluate_expression` over a
-# properties dict where each base alias maps to an `_ObjView` (navigable
-# like the object's own attribute values, AND `==` its OID so a bare alias
-# in the WHERE denotes "this object"). That reuses the CONSTRAINT
-# evaluator's full node coverage (`And`/`Or`/`Not`/`Defined`/`Implication`/
-# relational, constants, nested-STRUCTURE paths). Only a construct that
-# evaluator itself doesn't support (arithmetic, `THIS`/`PARENT`, a
-# function call - `_view_where_unsupported`) leaves the VIEW skipped with a
-# clear diagnostic (RULE #5), never a silently wrong result.
+# --- VIEW evaluation: each VIEW kind is evaluated in memory into Features; an unsupported `WHERE` skips the VIEW.
 
 _UNSET = object()
 
@@ -1324,13 +966,7 @@ _ARITHMETIC_OPS = {"Mult", "Div", "Plus", "Minus"}
 
 
 class _ObjView(dict):
-    """A base object's value inside a view-WHERE properties dict.
-
-    Behaves as a dict of the object's own attribute values (for path
-    navigation, `constraint_eval._resolve_path`) but compares `==` to the
-    object's OID string, so a bare base alias in the `WHERE` (`... == Road`)
-    denotes that object's identity.
-    """
+    """A base object's value in a view-WHERE properties dict: a dict of its attributes that `==` its OID string."""
 
     def __init__(self, tid: str | None, attrs: dict[str, Any]) -> None:
         super().__init__(attrs)
@@ -1366,14 +1002,9 @@ def raw_node_value(node: RawNode) -> Any:
 
 
 def _obj_view(obj: XtfObject, by_tid: dict[str, XtfObject], seen: frozenset[str]) -> _ObjView:
-    """One object as an `_ObjView`, with each reference attribute resolved to the target's own `_ObjView`.
+    """One object as an `_ObjView`, each reference attribute resolved to the target's own `_ObjView`.
 
-    Lets a view `WHERE` navigate an association hop
-    (`Grundstueck->Entstehung->Grundbucheintrag`, the DMAV `*_Gueltig`
-    idiom): the middle hop is a reference whose target object's attributes
-    must be reachable. A nested `_ObjView` still compares `==` to its OID,
-    so `... == Alias` identity tests keep working. `seen` breaks reference
-    cycles.
+    Lets a view `WHERE` navigate association hops; `seen` breaks reference cycles.
     """
     if obj.tid is not None and obj.tid in seen:
         return _ObjView(obj.tid, {})
@@ -1425,13 +1056,8 @@ def _view_where_unsupported(expr: MetaInstance) -> str | None:
 def unsupported_view_reason(view: MetaInstance) -> str | None:
     """Return why `evaluate_view` can't evaluate `view`, or `None` if it can.
 
-    Reused by `cli.cmd_convert_jsonfg` to print a clear diagnostic for
-    every VIEW it skips instead of a silent omission. The remaining
-    reasons are a genuinely unavailable base model (RULE #9 - provide it
-    via `--repo`), a `WHERE` construct outside the CONSTRAINT evaluator's
-    scope (arithmetic / function call), and an AGGREGATION column that is
-    a user-FUNCTION result over the implicit `AGGREGATES` bag (an external
-    function the model only declares - no converter can run it).
+    Reasons: an unavailable base model (provide it via `--repo`), a `WHERE` construct outside the CONSTRAINT
+    evaluator's scope, or an AGGREGATION column that is an external-function result.
     """
     kind = getattr(view, "FormationKind", None)
     if kind not in ("Projection", "Join", "Union", "Aggregation", "Inspection"):
@@ -1482,19 +1108,10 @@ def _geometry_inspection_problem(view: MetaInstance, base: MetaInstance) -> str 
 def _join_combinations(
     bases: list[MetaInstance], objects_by_base: list[list[XtfObject]]
 ) -> list[list[XtfObject | None]]:
-    """Cartesian product of `objects_by_base`, one list per base, with `RenamedBaseView.OrNull` outer-join handling.
+    """Cartesian product of `objects_by_base`, with `RenamedBaseView.OrNull` outer-join handling.
 
-    Reference Manual eCH-0031 V2.1.0 SS3.16 (JOIN OF): "kartesisches Produkt
-    der Basis-Klassen" - a literal cartesian product, no join KEY/condition
-    of its own (a WHERE clause narrows the result on top, handled
-    separately, see `unsupported_view_reason`). "(OR NULL)": "wenn zu
-    einer bestimmten Kombination der vorangegangenen Objekte kein Objekt
-    der gewuenschten weiteren Klasse gefunden wird" - since there is no
-    WHERE here to narrow a combination-by-combination match, a base
-    contributes "no object found" only when it has ZERO objects in the
-    whole transfer; `OrNull` then keeps every partial combination alive
-    with a `None` placeholder for that base (contributing no attributes)
-    instead of collapsing the whole JOIN to the empty set.
+    A base contributes "no object" only when it has zero objects in the whole transfer; `OrNull` then keeps every
+    partial combination with a `None` placeholder instead of collapsing the JOIN to the empty set.
     """
     combos: list[list[XtfObject | None]] = [[]]
     for base, objs in zip(bases, objects_by_base):
@@ -1508,31 +1125,9 @@ def _join_combinations(
 
 
 def _project_object_under_view_names(view: MetaInstance, obj: XtfObject) -> XtfObject:
-    """Re-key `obj`'s wire attributes under `view`'s own `ClassAttribute` names.
+    """Rename `obj`'s attributes to the names the view gives them (`Name := <alias> -> <attr>`).
 
-    `object_to_feature`/`members_value` look up each property by the
-    Class's OWN schema attribute name - correct for a plain Class, and for
-    an `ALL OF` view attribute (its synthetic identity `Derivates` is
-    `<base> -> <attr>` with `attr == Name`, a no-op here: `source ==
-    out_name` is skipped below). WRONG for any RENAMED view attribute
-    (`Name := <alias> -> <attr>` with a different `Name`, e.g. a
-    lower-cased WFS/ArcGIS field name) - PROJECTION/JOIN (pooled via
-    `_merge_join_combo`)/AGGREGATION all fed the object straight through
-    before this fix, so every such attribute was silently dropped (empty
-    `properties`) - confirmed on real `xtf_corpus/geoadmin` data
-    (`MainRoads_LV95_V1_1_d.view_roadsegment`), not a synthetic edge
-    case: a VIEW derived from a published geodata service routinely
-    names its attributes after the service's own field names, virtually
-    never matching the base attribute's own spelling/case.
-
-    Mirrors `_union_projected_object`'s remap (that one is per-base/
-    `n_bases`-aware, for UNION's one-`Derivates`-entry-per-base shape);
-    every other FormationKind's `ClassAttribute` carries a single source
-    expression, `Derivates[0]`. For JOIN, `obj` is already the merged
-    combo (`_merge_join_combo`) - a plain source-name lookup against the
-    pooled attributes is correct here for the same reason
-    `_merge_join_combo` itself pools blindly: no real corpus evidence of
-    an attribute-name collision between two JOIN bases.
+    Identity attributes (`ALL OF`) are left unchanged.
     """
     remapped: dict[str, list[RawNode]] = dict(obj.attributes)
     for attr in getattr(view, "ClassAttribute", None) or []:
@@ -1558,16 +1153,8 @@ def _project_object_under_view_names(view: MetaInstance, obj: XtfObject) -> XtfO
 def _merge_join_combo(combo: list[XtfObject | None], view_name: str) -> XtfObject:
     """Merge one JOIN OF combination into a single synthetic `XtfObject`, re-fed through `object_to_feature`.
 
-    `attributes` are pooled from every non-`None` participant (a real
-    key collision between 2 bases' own attribute names would let the
-    later participant win silently - no real corpus evidence of this, the
-    2 known real JOIN OF examples are attribute-disjoint). `tid` joins
-    every participant's own tid with `_` (`None` if none has one) - a
-    simple, stable synthetic id; JSON-FG's "id" is OPTIONAL (RFC 7946
-    SS3.2), so this is a convenience, not a spec requirement.
-    `qualified_class` is set to the VIEW's own short name - never read by
-    `object_to_feature` (it derives "featureType" from `cls.Name`, the
-    VIEW itself, passed separately), kept only for readability/debugging.
+    Attributes are pooled from every non-`None` participant (a name collision lets the later one win); `tid` joins
+    the participants' tids with `_`; `qualified_class` is informational only.
     """
     attributes: dict[str, list[RawNode]] = {}
     tid_parts: list[str] = []
@@ -1583,16 +1170,8 @@ def _merge_join_combo(combo: list[XtfObject | None], view_name: str) -> XtfObjec
 def _union_projected_object(view: MetaInstance, base_index: int, n_bases: int, obj: XtfObject) -> XtfObject:
     """Re-key one UNION-base object's wire attributes under the union-view attribute names.
 
-    An explicit union assignment gives every attribute one source per base,
-    in base declaration order (`Attr := C1->A, C2->B`): base `i`'s objects
-    carry `A` on the wire, so `A` is copied to `Attr` for base `i` and `B`
-    to `Attr` for base `i+1`, letting `object_to_feature` (which reads by
-    the view's own attribute names) emit the union attribute whatever base
-    an object came from. An `ALL OF <base>` union attribute has a single
-    identity source and the base objects already carry it under the right
-    name - it is left as a straight pass-through. A source that is not a
-    plain one-hop path into that base is skipped for that object, the same
-    best-effort the JOIN pooling takes.
+    An explicit assignment has one source per base in declaration order (`Attr := C1->A, C2->B`), so base `i`'s `A`
+    is copied to `Attr`; an `ALL OF` attribute passes through; a source that is not a one-hop path is skipped.
     """
     remapped: dict[str, list[RawNode]] = dict(obj.attributes)
     for attr in getattr(view, "ClassAttribute", None) or []:
@@ -1616,11 +1195,7 @@ def _union_projected_object(view: MetaInstance, base_index: int, n_bases: int, o
 def _inspection_path(view: MetaInstance) -> list[str]:
     """Return the `-> attr (-> attr)*` chain of an `INSPECTION OF base -> attr` view, as attribute names.
 
-    `View.FormationParameter` (a `PathOrInspFactor` per the spec) is where
-    the builder should put it; until that binding actually populates
-    (`spec/grammar/mapping/09_views_graphics.yml`'s `inspection` entry),
-    `_inspection_path_from_ctx` in `InterlisModelBuilder` stashes the raw
-    `Name` tokens on `view._inspection_path` instead.
+    Prefers the raw `Name` tokens the builder stashes on `view._inspection_path`, else `FormationParameter`.
     """
     stashed = getattr(view, "_inspection_path", None)
     if isinstance(stashed, list) and stashed:
@@ -1661,15 +1236,8 @@ def _view_combos(
 ) -> tuple[list[MetaInstance], list[list[XtfObject | None]], dict[str, XtfObject]]:
     """Shared PROJECTION/AGGREGATION/JOIN setup: resolve bases, their matching objects, and WHERE-filtered combos.
 
-    One combo per kept result row - a 1-element list for PROJECTION/
-    AGGREGATION (one base), one element per base for JOIN
-    (`_join_combinations`, `None` for an `OR NULL` outer-join miss).
-    Shared by `evaluate_view` (JSON-FG) and `evaluate_view_objects` (the
-    write-xtf path) so both stay in lockstep on which rows a VIEW produces
-    - only the final per-combo SHAPE differs between the two callers.
-    UNION/INSPECTION have no combo concept of their own (see `evaluate_view`)
-    and never call this helper. Precondition (both callers already check
-    it): `view.FormationKind` is one of these 3 kinds.
+    One combo per kept row (`None` for an `OR NULL` JOIN miss); shared by `evaluate_view` and
+    `evaluate_view_objects` so both select the same rows. Precondition: `view.FormationKind` is one of the 3 kinds.
     """
     kind = view.FormationKind
     view_name = getattr(view, "Name", None) or "View"
@@ -1752,14 +1320,7 @@ def _aggregation_objects(
 ) -> list[XtfObject]:
     """Evaluate `AGGREGATION OF base (ALL | EQUAL(key))` into one `XtfObject` per group.
 
-    Mirrors the SQL translation exactly: `EQUAL(key)` groups on the key and
-    on every plain attribute (`GROUP BY`); `ALL` without a count keeps the
-    distinct rows (`SELECT DISTINCT`); `ALL` with a count column is a single
-    group, present even when no base object survives (an ungrouped
-    `COUNT(*)` always returns a row). `INTERLIS.objectCount/elementCount
-    (AGGREGATES)` columns hold the group size. A group stands for several
-    base objects, so its row has no TID - except a plain `ALL` row, which
-    keeps its first member's TID.
+    `EQUAL(key)` groups by the key; `ALL` keeps distinct rows. Count columns hold the group size.
     """
     alias = _view_alias(bases[0]) or ""
     key_factor = getattr(view, "_aggregation_key", None)
@@ -1812,30 +1373,9 @@ def evaluate_view_objects(
     symbol_table: SymbolTable,
     repository: ModelRepository | None = None,
 ) -> list[XtfObject]:
-    """Evaluate `view` into projected/merged `XtfObject`s - `evaluate_view`, one step earlier.
+    """Evaluate `view` into `XtfObject`s keyed by the view's own attribute names.
 
-    Same PROJECTION/AGGREGATION/JOIN row selection (`_view_combos`) and
-    `WHERE` filtering as `evaluate_view`, but stops before
-    `object_to_feature`: each returned `XtfObject` already carries its
-    `.attributes` keyed under the VIEW's own `ClassAttribute` names
-    (`_project_object_under_view_names`/`_merge_join_combo`), as raw
-    `RawNode` XML subtrees straight from `transfer` - never decoded into a
-    JSON-FG "place"/properties split. This is the shape
-    `convert/xtf_writer.py`'s `write_xtf` re-serializes losslessly (no
-    reverse-engineering INTERLIS geometry XML from JSON-FG "place"), and
-    what `evaluate_view` itself builds on for these 3 FormationKinds.
-
-    UNION returns each base's own objects, re-keyed under the union's
-    per-base attribute assignment (`_union_projected_object`). INSPECTION
-    returns one `XtfObject` per inspected element (`_inspection_elements`)
-    - EXCEPT an inspection of a SURFACE/AREA/POLYLINE attribute
-    (`geometry_inspection`), which raises `ValueError`: its elements are
-    derived geometry values with no element TYPE (see
-    `_evaluate_geometry_inspection`), nothing an XTF writer could
-    serialize as a named attribute.
-
-    Raises `ValueError` if `unsupported_view_reason(view)` isn't `None`,
-    same precondition as `evaluate_view`.
+    Raises `ValueError` if the view is unsupported or is an INSPECTION of a geometry attribute.
     """
     reason = unsupported_view_reason(view)
     if reason is not None:
@@ -1886,30 +1426,9 @@ def evaluate_view(
     repository: ModelRepository | None = None,
     standalone: bool = False,
 ) -> list[dict[str, Any]]:
-    """Evaluate `view` against `transfer` into JSON-FG Features - every FormationKind.
+    """Evaluate `view` against `transfer` into JSON-FG Features, whatever its formation kind.
 
-    Raises `ValueError` if `unsupported_view_reason(view)` isn't `None` -
-    callers (e.g. `cmd_convert_jsonfg`) are expected to check that first
-    and skip with a diagnostic, never call this blind.
-
-    - `PROJECTION OF` (1 base): each matching base object re-tagged with
-      `view` as its `cls` - the View's `ClassAttribute` list already
-      carries the base's own wire attribute names (`ALL OF`), so
-      `object_to_feature` emits exactly the View's declared properties.
-    - `JOIN OF` (N bases): the cartesian product of each base's matching
-      objects (`_join_combinations`), each combination merged
-      (`_merge_join_combo`).
-    - `UNION OF` (N bases): every base's matching objects, concatenated,
-      each re-tagged with `view` (compatible base viewables - the union of
-      their extensions).
-    - `AGGREGATION OF` (1 base): one Feature per group (`_aggregation_objects`):
-      `EQUAL(key)` groups on the key, `ALL` keeps the distinct rows;
-      `INTERLIS.objectCount/elementCount(AGGREGATES)` columns count the group.
-    - `INSPECTION OF base -> attr` (1 base): one Feature per element of the
-      inspected `BAG`/`LIST`/reference attribute on each base object.
-
-    A `WHERE` clause narrows `JOIN`/`PROJECTION` per combination, evaluated
-    by `constraint_eval.evaluate_expression` over `_combo_properties`.
+    Raises `ValueError` if the view is unsupported (callers check `unsupported_view_reason` first).
     """
     reason = unsupported_view_reason(view)
     if reason is not None:
@@ -2000,14 +1519,8 @@ def _inspection_target(
 ) -> tuple[MetaInstance | None, bool, list[bool]]:
     """Return `(element type, is_multi, hop_is_multi)` for the `INSPECTION OF base -> a -> b` path.
 
-    `hop_is_multi[i]` says whether `path[i]` is itself a `BAG`/`LIST OF`
-    attribute - `_evaluate_inspection` needs this for EVERY hop, not just
-    the last (`is_multi`), to unwrap a multi-value wrapper into its
-    occurrences before matching the NEXT hop's tag on each occurrence (an
-    indirect path through a `BAG`/`LIST OF` structure at an intermediate
-    level, not only at the end). Always `len(path)` long, even when a hop
-    fails to resolve (padded with `False` - best-effort, same
-    graceful-degradation stance as everywhere else, RULE #5).
+    `hop_is_multi[i]` says whether `path[i]` is a `BAG`/`LIST OF` attribute, so `_evaluate_inspection` can unwrap
+    every intermediate hop; it is always `len(path)` long (padded with `False` when a hop fails to resolve).
     """
     current: MetaInstance | None = base_view
     is_multi = False
@@ -2037,11 +1550,7 @@ def _as_line(value: list[list[float]] | dict[str, Any]) -> dict[str, Any]:
 
 
 def _join_pieces(pieces: list[dict[str, Any]]) -> dict[str, Any]:
-    """Concatenate the consecutive POLYLINE pieces of one boundary into a single line.
-
-    eCH-0031 SS3.15 builds the `SurfaceEdge`s of a boundary so that their
-    number is minimal: consecutive polylines are merged into one.
-    """
+    """Concatenate the consecutive POLYLINE pieces of one boundary into a single line (minimal edge count)."""
     if len(pieces) == 1:
         return pieces[0]
     if all(p["type"] == "LineString" for p in pieces):
@@ -2114,7 +1623,7 @@ def _reverse_line(edge: dict[str, Any]) -> dict[str, Any]:
 
 
 def _edge_key(edge: dict[str, Any]) -> str:
-    """Identity of an edge line for `AREA INSPECTION`: a line equals its reversal (eCH-0031 SS4.3.11.15)."""
+    """Identity of an edge line for `AREA INSPECTION`: a line equals its reversal."""
     forward, backward = (json.dumps(e, sort_keys=True) for e in (edge, _reverse_line(edge)))
     return min(forward, backward)
 
@@ -2188,13 +1697,10 @@ def _evaluate_geometry_inspection(
     symbol_table: SymbolTable,
     repository: ModelRepository | None = None,
 ) -> list[dict[str, Any]]:
-    """One Feature per element of an `INSPECTION OF` a SURFACE/AREA/POLYLINE attribute (eCH-0031 SS3.15).
+    """One Feature per element of an `INSPECTION OF` a SURFACE/AREA/POLYLINE attribute.
 
-    Each view attribute is a derived value (a GeoJSON geometry, or a typed
-    attribute of the owning object read through `PARENT`/`THISAREA`/
-    `THATAREA`), set in `properties` and never promoted to `place`: it is
-    not the object's own designated geometry. Mirrors the SQL translation
-    (`views.py`); `view_formation.inspection_reading` fixes what is readable.
+    Each view attribute is a derived value set in `properties`, never promoted to `place`; mirrors the SQL
+    translation, with `view_formation.inspection_reading` fixing what is readable.
     """
     members = schema_members_of(base_view, symbol_table)
     resolved_members = {name: resolve_attribute(attr) for name, attr in members.items()}
@@ -2245,18 +1751,9 @@ def _evaluate_inspection(
     symbol_table: SymbolTable,
     repository: ModelRepository | None = None,
 ) -> list[dict[str, Any]]:
-    """One Feature per element of the inspected attribute (`INSPECTION OF base -> attr`) on each base object.
+    """One Feature per element of the inspected attribute (`INSPECTION OF base -> attr`) of each base object.
 
-    The element type is resolved from the path (`_inspection_target`) so
-    `object_to_feature` emits the ELEMENT's own attributes, not the base's;
-    `View` still supplies `featureType`. A `BAG`/`LIST OF` attribute
-    transfers its occurrences as DIRECT CHILDREN of one wrapper element
-    (the same wire convention `_multi_value` relies on) - those children
-    are the elements; a single reference/structure attribute is itself the
-    element. An INDIRECT path (`-> a -> b`) unwraps every multi-value hop
-    (`hop_is_multi`), not just the last one. A path ending on a
-    SURFACE/AREA/POLYLINE attribute has no element type at all and is
-    decomposed by `_evaluate_geometry_inspection`.
+    Geometry attributes are handled by `_evaluate_geometry_inspection`.
     """
     insp = geometry_inspection(view, base_view, symbol_table)
     if insp is not None:
@@ -2301,16 +1798,10 @@ def _inspection_elements(
     path: list[str],
     symbol_table: SymbolTable,
 ) -> tuple[list[XtfObject], MetaInstance | None, list[dict[str, list[RawNode]]]]:
-    """Every element of `INSPECTION OF base -> path` as a synthetic `XtfObject`, its resolved element type and the
-    attributes of each element's immediate parent (the owning object, or the enclosing structure element).
+    """Every element of `INSPECTION OF base -> path` as a synthetic `XtfObject`, with its element type and parents.
 
-    Extracted from `_evaluate_inspection`'s own construction loop - shared
-    with `evaluate_view_objects`'s INSPECTION branch (`convert/xtf_writer.py`'s
-    write-xtf path), which needs the raw `XtfObject`s rather than
-    `object_to_feature`'s JSON-FG output. See `_evaluate_inspection`'s
-    docstring for the wire-unwrapping rule at each multi-value hop. Does
-    NOT cover a geometry inspection (`geometry_inspection`): it has no
-    element TYPE to resolve (see `_evaluate_geometry_inspection`).
+    The parent of each element is the owning object or enclosing structure element, given as its attributes.
+    Shared by `_evaluate_inspection` and `evaluate_view_objects`; a geometry inspection is not covered.
     """
     element_type, is_multi, hop_is_multi = _inspection_target(base_view, path, symbol_table)
     elements: list[XtfObject] = []
@@ -2345,18 +1836,8 @@ def _inspection_elements(
 def _join_members(bases: list[MetaInstance], combo: list[XtfObject | None]) -> list[dict[str, Any]]:
     """Return `{"featureType": ..., "id": ...}` for every real (non-`None`) participant of one JOIN combination.
 
-    A `JOIN OF` collection is GET-only (no natural single writable
-    target for a multi-base combination, by analogy with non-updatable
-    SQL views). This is what makes that limitation actionable rather than
-    a dead end: each base object this runtime ALREADY publishes as
-    its own, independently fully-writable collection (a plain `Class` -
-    `transfer_to_feature_collection` emits it via `resolve_class`
-    regardless of any `views=` given), so a client that needs to edit a
-    property coming from one specific base can resolve WHICH collection/
-    id to `PUT`/`PATCH` instead, straight off the JOIN Feature itself -
-    no need to reverse-engineer `_merge_join_combo`'s `tid` join
-    convention. `featureType` mirrors `object_to_feature`'s own
-    convention (`cls.Name`, falling back to the wire tag).
+    A JOIN collection is GET-only, so this lets a client resolve which base collection/id to `PUT`/`PATCH` for a
+    property coming from one specific base.
     """
     return [
         {"featureType": getattr(base.BaseView, "Name", None) or obj.qualified_class, "id": obj.tid}
@@ -2377,81 +1858,8 @@ def transfer_to_feature_collection(
 ) -> dict[str, Any]:
     """Convert every resolvable object of `transfer` into one JSON-FG FeatureCollection.
 
-    `include_child_rows` (opt-in, `False` by default - zero behavior
-    change for every existing caller): also appends one Feature per
-    `BAG`/`LIST OF` occurrence (`_child_row_features`), each carrying its
-    own `"featureType"` matching a `convert/sql.py` child table name.
-    GDAL's own `"featureType"`-based table splitting (already relied on
-    for the main data) routes them into the SAME child tables in the SAME
-    `ogr2ogr -append` call as everything else.
-
-    Walks all of `transfer`'s baskets (real corpus evidence: 11/12
-    xtf_corpus/geoadmin files hold exactly 1 basket, the one exception
-    holds 2 - not worth a separate per-basket entry point) and resolves
-    each object's Class itself (xtf.schema.resolve_class), same
-    architecture as xtf/validate.py's `validate_transfer` (which likewise
-    resolves internally, unlike the single-object `object_to_feature`/
-    `_validate_object` pair - a whole-transfer entry point naturally has
-    `symbol_table`/`repository` on hand already, e.g. from
-    `cli.cmd_convert_jsonfg`). An object whose class doesn't resolve is
-    skipped - not this converter's job to flag (validate() does), same
-    stance `object_to_feature` already takes for an unknown attribute
-    NAME; there is no schema to draw even a featureType/properties from
-    without a resolved class, so there is nothing to emit for it.
-
-    Each Feature is produced with `standalone=False` (no per-feature
-    "conformsTo" - the FeatureCollection is the JSON-FG root object here,
-    RULE /req/core/metadata.C). When every produced Feature shares the
-    same "featureType", it is hoisted once onto the collection itself
-    (clause 13 Recommendation A, "homogeneous feature collections") AND
-    removed from every Feature - same hoist-and-remove pattern as
-    "coordRefSys" below, and matching the Standard's own official example
-    (`core/examples/airports.json`: `"featureType"` on the collection,
-    absent from every feature). Clause 13 Requirement B's "either...or"
-    is satisfied by the collection alone; a real third-party validator
-    (`geonovum.github.io/ogc-checker`) rejects a document carrying both.
-
-    "coordRefSys" hoisting (uniform case only) is NOT an optional
-    optimization - it is what `/req/core/same-crs` actually requires
-    ("A 'coordRefSys' member SHALL only be included in the JSON-FG root
-    object and not in any other JSON-FG objects") and what the
-    Standard's OWN official example demonstrates verbatim
-    (`core/examples/airports.json`, opengeospatial/ogc-feat-geo-json):
-    `"coordRefSys"` declared once on the `FeatureCollection`, entirely
-    ABSENT from each nested Feature. When every Feature that has a
-    "place" shares the same "coordRefSys", it is moved to the collection
-    and removed from every Feature. When they differ (heterogeneous CRS
-    within one collection - no real corpus evidence found: every basket
-    seen so far uses one CRS throughout), per-feature "coordRefSys" is
-    left as a conservative fallback rather than inventing an unverified
-    geometry-level placement with no official example to check it
-    against.
-
-    `views` (optional): PROJECTION OF/JOIN OF Views
-    already filtered by the caller to ones `evaluate_view` can actually
-    handle (same `unsupported_view_reason` check `cmd_convert_jsonfg`
-    applies before calling this - this function assumes every given view
-    IS evaluable, raising via `evaluate_view` rather than silently
-    skipping one that isn't). Evaluated against the SAME `transfer` and
-    folded into the SAME feature list BEFORE the featureType/coordRefSys
-    uniformity hoisting below runs, so a transfer producing only
-    view-shaped Features (or a homogeneous mix of both) still benefits
-    from collection-level hoisting exactly like class-shaped Features do.
-
-    `schema_url` (optional): when given, wires "featureSchema" (clause 13)
-    at the COLLECTION level only (same "single root object carries it"
-    stance as "conformsTo" - never duplicated per-Feature here). A
-    homogeneous collection (single "featureType", the same condition
-    already used above) gets a plain string URI (`_feature_schema_ref`,
-    clause 13 requirement `single-feature-schema`); a heterogeneous one
-    gets the OTHER value shape the standard allows instead - an object
-    mapping every distinct "featureType" to its own `$defs` fragment
-    (`featureschema.json`'s `oneOf` - a bare string would otherwise wrongly
-    claim just one schema covers every Feature). `None` (the default)
-    omits "featureSchema" entirely, same as `object_to_feature`.
-
-    `unmapped` (optional, out): receives each value passed through untyped or left out, for
-    `collect_diagnostics` - the document itself never carries a marker.
+    Objects whose class does not resolve are skipped. A "featureType" or "coordRefSys" shared by all
+    Features is moved onto the collection. `unmapped` collects values that were left untyped or dropped.
     """
     with _recording(unmapped):
         return _transfer_to_feature_collection(
@@ -2574,12 +1982,9 @@ def _transfer_to_feature_collection(
 
 
 def view_skip_diagnostic(view: MetaInstance, *, file: str | None = None):
-    """Return a `Diagnostic` for a VIEW `cmd_convert_jsonfg` has to skip, or `None` if it can be evaluated.
+    """Return a `Diagnostic` for a VIEW that `evaluate_view` cannot handle, or `None` if it can be evaluated.
 
-    Same check as `unsupported_view_reason`, classified onto a stable id:
-    a missing base model is class C (`--repo`), a WHERE the CONSTRAINT
-    evaluator can't do is class B, an unbuilt INSPECTION path is a class-A
-    builder gap.
+    Same check as `unsupported_view_reason`, mapped onto a stable rule id.
     """
     from interlis.diagnostics import Diagnostic, Location
 
@@ -2612,10 +2017,8 @@ def _geojson_request_body(
 ) -> tuple[dict[str, str], dict[str, Any]]:
     """`(headers, body)` of a request a plain GeoJSON server takes: `place` becomes `geometry`, in its own CRS.
 
-    `rename` maps the properties onto the keys the server stores them under (a SQL column per attribute).
-
-    The CRS travels in the `Content-Crs` header of OGC API Features Part 4. A `place` GeoJSON cannot hold
-    (arcs, solids, ...) leaves `geometry` null.
+    `rename` maps properties onto the server's keys. The CRS goes in the `Content-Crs` header; a `place` GeoJSON
+    cannot hold (arcs, solids, ...) leaves `geometry` null.
     """
     place = feature.get("place")
     usable = place is not None and place_type_names(place) <= _GEOJSON_TYPES
@@ -2641,13 +2044,10 @@ def iter_change_requests(
     body_profile: str = "jsonfg",
     rename_properties: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
 ) -> Iterator[dict[str, Any]]:
-    """The objects of an incremental transfer as OGC API Features Part 4 requests, in file order, one at a time.
+    """Yield the objects of an incremental transfer as OGC API Features Part 4 requests, in file order.
 
-    INSERT = `POST /collections/{class}/items` (the Feature as body), UPDATE = `PUT .../items/{tid}` (the whole
-    Feature replaces the stored one), DELETE = `DELETE .../items/{tid}`; `{class}` is the Feature's `featureType`.
-    A `DeleteObject` names no class, so no collection: its TID goes to `skipped` and no request is written.
-    `body_profile` `"geojson"` writes plain GeoJSON bodies (see `_geojson_request_body`) instead of JSON-FG ones;
-    `rename_properties(qualified_class, properties)` then gives their keys the names the server stores them under.
+    INSERT is `POST /collections/{class}/items`, UPDATE `PUT .../items/{tid}`, DELETE `DELETE .../items/{tid}`.
+    A delete names no class, so its TID goes to `skipped` instead.
     """
     seen: set[tuple[str, str]] = set()
     for obj in objects:

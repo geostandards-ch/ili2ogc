@@ -1,18 +1,7 @@
 """Convert a resolved INTERLIS `StandardSymbology` sign instance into a pycartosym `Symbolizer`/`StylingRule`.
 
-`FontSymbol`'s composite geometry (`Font.Type = symbol`) tries, in order:
-a circular `FontSymbol_Surface` composite (native `CircleGraphic`s, see
-`font_symbol_geometry_to_circle_graphics`), a square/triangle one (native
-`RectangleGraphic`s - also how a diamond mark is expressed - and
-`ClosedPathGraphic` triangles, see
-`font_symbol_geometry_to_polygon_graphics`), an all-`FontSymbol_Image`
-composite (see `font_symbol_geometry_to_image_graphics`), then a general
-SVG render of any mix of `FontSymbol_Polyline`/`FontSymbol_Surface`
-(see `font_symbol_geometry_to_svg_data_uri`). `Fill.hatch`/`Stroke.casing`/
-`centerLine`/`pattern` are not attempted at all - they raise
-`NotImplementedError` in pycartosym's current SLD writer regardless of
-dialect (confirmed empirically), so no value built here for them could
-ever be written out.
+`FontSymbol` composite geometry is tried as native circles, then squares/triangles, then images, then a general
+inline-SVG render. `Fill.hatch`/`Stroke.casing`/`centerLine` are not built: pycartosym's SLD writer rejects them.
 """
 
 import base64
@@ -69,10 +58,7 @@ _RASTER_SIGN_CLASS = "RasterSign"
 _SHAPE_TOLERANCE = 1e-9
 
 _H_ALIGNMENT = {"Left": "left", "Center": "center", "Right": "right"}
-# VALIGNMENT has 5 levels (Top/Cap/Half/Base/Bottom), pycartosym's v_alignment
-# only 3 (top/middle/bottom) - Cap/Base approximate to the nearest of the
-# two, losing the box-vs-baseline distinction (no finer SLD/SE target
-# exists: se:AnchorPoint only has 3 vertical positions).
+# VALIGNMENT has 5 levels but se:AnchorPoint only 3 vertical positions, so Cap/Base are approximated.
 _V_ALIGNMENT = {"Top": "top", "Cap": "top", "Half": "middle", "Base": "bottom", "Bottom": "bottom"}
 
 
@@ -90,13 +76,10 @@ _MM_PER_PIXEL = 0.28
 
 @contextmanager
 def paper_as_pixels(dpi: float | None) -> Iterator[None]:
-    """Write every `StandardSymbology` length as pixels at `dpi`, inside the block (`None`: keep paper metres).
+    """Within the block, write symbology lengths (metres on paper) as pixels at `dpi`; `None` keeps metres.
 
-    StandardSymbology sizes are metres on paper at scale 1.0 (a 0.2 mm line is `0.0002`). pycartosym's SLD writer
-    drops the unit, and an SLD number without `uom` is a pixel, so the raw metres draw nothing (0.0002 px). Converting
-    at the output resolution (`px = m / 0.0254 * dpi`, 96 dpi: 0.2 mm = 0.756 px) keeps the printed size, independent
-    of the map scale, which is what a paper symbology means. `DashRec.DLength` is relative to the line width, so a
-    dash becomes `DLength * width` in pixels instead of `round(DLength)`.
+    SLD numbers without a unit are pixels, so raw metres would draw nothing. A dash length is relative to the
+    line width and becomes `DLength * width` pixels.
     """
     global _PX_PER_M
     previous, _PX_PER_M = _PX_PER_M, (dpi / 0.0254 if dpi else None)
@@ -153,25 +136,9 @@ def polyline_sign_to_stroke(
     cap: str | None = None,
     dash_pattern: list[float] | None = None,
 ) -> Stroke:
-    """Build a `Stroke` from a `PolylineSign` + its resolved `Style` (`LineStyle_Solid`/`LineStyle_Dashed`) and `Color`.
+    """Build a `Stroke` from a polyline sign's resolved style and color.
 
-    `join`/`cap` pass through unchanged: `PolylineAttrs.Join`
-    (`bevel`/`round`/`miter`) and `.Caps` (`round`/`butt`) already use the
-    exact `stroke-linejoin`/`stroke-linecap` keywords pycartosym's SLD
-    writer expects.
-
-    KNOWN LOSSY: `Stroke.dash_pattern` is `list[int]`, matching the OGC
-    CartoSym-JSON standard's own `dashPattern` definition exactly (verified
-    against the standard's schema, not a pycartosym gap - it has no
-    `unitValue`/`numericExpression` alternative there either, unlike
-    `width`). `DashRec.DLength` values below 1.0 (real corpus,
-    `RoadsExgm2ien_Symbols.xtf`'s `LineStyle_Dashed`: 0.1m dashes) round
-    straight to 0 with a bare `round()`, collapsing the whole pattern to
-    indistinguishable-from-solid - `round()` used as-is for now (no scaling
-    applied), since SE 1.1.0's `stroke-dasharray` has no per-value unit
-    either way (only a whole-symbolizer `uom`) so some precision loss is
-    unavoidable at this layer regardless. Picking a target scale (e.g. mm)
-    before rounding would reduce it - not done yet, backlog.
+    Lossy: `Stroke.dash_pattern` holds integers, so dash lengths below 1.0 round to 0 and may make the line solid.
     """
     return Stroke(
         color=color,
@@ -186,7 +153,7 @@ def polyline_sign_to_stroke(
 def surface_sign_to_fill(
     *, fill_color: RGBColor | None = None, opacity: float | None = None, pattern: ImageGraphic | None = None
 ) -> Fill:
-    """Build a `Fill` from `SurfaceSign.FillColor`/`HatchSymb` - `Clip`/`HatchOrg`/`HatchOffset` have no target."""
+    """Build a `Fill` from `SurfaceSign.FillColor`/`HatchSymb` - `Clip`/`HatchOrg`/`HatchOffset` not resolved."""
     return Fill(color=fill_color, opacity=opacity, pattern=pattern)
 
 
@@ -210,12 +177,7 @@ def text_sign_to_label(
 ) -> Label:
     """Build a `Label` from a `TextSign` - `Striked`/`ClipBox`/`ClipFont` have no pycartosym target, dropped.
 
-    `h_alignment`/`v_alignment` take INTERLIS's own `HALIGNMENT`/
-    `VALIGNMENT` enum values, translated via `_H_ALIGNMENT`/`_V_ALIGNMENT`.
-    `text`/`rotation` accept either a literal value or a CQL2 `PropertyRef`
-    dict (`{"property": "..."}`, e.g. from `to_cql2` on a `DrawingRule`'s
-    `Txt := Street -> Name`/`Rotation := NamOri` attribute-path assignment)
-    - both are attribute-driven per real corpus usage, not fixed per style.
+    Alignments take INTERLIS's own enum values; `text`/`rotation` accept a literal or a CQL2 `PropertyRef` dict.
     """
     alignment = (
         TextAlignment(
@@ -239,12 +201,8 @@ def symbolizer_z_order(priority: float | None) -> float | None:
 class SignLibrary:
     """A parsed `SIGN BASKET` data section, indexed for `Sign := {name}` resolution.
 
-    `by_name` resolves the metaobject identity (`ili:Name`, a raw wire
-    child every real SIGN BASKET data object carries even though it is
-    never a declared `StandardSymbology` class attribute - confirmed
-    against `Point_Graphics_Signatures.xtf`). `by_tid` resolves the
-    `ili:ref` target of a REFERENCE-typed attribute (`Color`/`Symbol`/
-    `FillColor`/...) to the object it points at, within the same basket.
+    `by_name` resolves the wire `ili:Name` metaobject identity; `by_tid` resolves a REFERENCE attribute's `ili:ref`
+    target within the same basket.
     """
 
     def __init__(self, basket: XtfBasket) -> None:
@@ -286,15 +244,7 @@ class SignLibrary:
     def dash_pattern(self, obj: XtfObject) -> list[float] | None:
         """Read a `LineStyle_Dashed.Dashes` (`LIST OF DashRec`) as a flat `DLength` list, in wire order.
 
-        Each `LIST OF` occurrence is its own top-level `<Dashes>` sibling
-        element (one `DashRec` inside), not one `<Dashes>` wrapper holding
-        every `DashRec` as a child - confirmed against real refman data
-        (`RoadsExgm2ien_Symbols.xtf`'s `LineStyle_Dashed`, 2 separate
-        `<Dashes>` elements), same convention already used correctly by
-        `font_symbol_geometry_to_circle_graphics` for `FontSymbol.Geometry`.
-        Reading only the first occurrence's children (a hand-built
-        synthetic fixture had assumed the single-wrapper shape) silently
-        dropped every dash length after the first on real data.
+        Each `LIST OF` occurrence is its own top-level `<Dashes>` sibling, not one wrapper holding every `DashRec`.
         """
         occurrences = obj.attributes.get("Dashes") or []
         lengths = []
@@ -309,13 +259,8 @@ class SignLibrary:
 def _circle_radius_from_surface(node: RawNode) -> float | None:
     """Read an `SS_Surface` boundary as a circle's own radius, from real wire ARC segments.
 
-    Only a single-boundary surface whose segments (after the mandatory
-    StartSegment COORD) are all ARC segments carrying an explicit
-    optional `<R>` (eCH-0031 SS4.3.11.14, the same element
-    `xtf/validate.py::_validate_arc_node` already checks) is handled - a
-    circle whose radius must instead be derived from 3 raw boundary
-    points (no `<R>` on the wire) has no real corpus example and returns
-    `None` here.
+    Only a single-boundary surface whose segments after the start COORD are all ARCs carrying an explicit `<R>` is
+    handled; otherwise `None`.
     """
     surface = find_child(node, "SURFACE")
     boundary = find_child(surface, "BOUNDARY") if surface is not None else None
@@ -336,11 +281,7 @@ def _circle_radius_from_surface(node: RawNode) -> float | None:
 def _font_symbol_items(symbol_obj: XtfObject, structure_suffix: str | tuple[str, ...]) -> list[RawNode] | None:
     """Every `FontSymbol.Geometry` item's structure node, or `None` unless all of them are `structure_suffix`.
 
-    A `FontSymbol` is "a collection of lines and surfaces" (its own model
-    comment), so a composite of several stacked items is intended, not an
-    edge case; every native-shape builder below is all-or-nothing on it -
-    one foreign item aborts the whole symbol instead of silently dropping
-    just that item, leaving the SVG fallback to render the mix.
+    The native-shape builders are all-or-nothing: one foreign item aborts the symbol (SVG fallback).
     """
     occurrences = symbol_obj.attributes.get("Geometry") or []
     nodes: list[RawNode] = []
@@ -361,9 +302,7 @@ def _surface_fill(library: SignLibrary, structure_node: RawNode) -> Fill:
 def _boundary_ring(node: RawNode) -> list[tuple[float, float]] | None:
     """Read a single-boundary `SS_Surface` as a straight-segment ring, without the repeated closing vertex.
 
-    `None` for anything that is not one BOUNDARY of one all-COORD
-    POLYLINE - an ARC segment, a hole, or a custom LINE FORM is not a
-    polygon ring this way.
+    `None` for anything but one BOUNDARY of one all-COORD POLYLINE (ARC segments, holes, custom LINE FORMs).
     """
     surface = find_child(node, "SURFACE")
     boundaries = [c for c in surface.children if geom_tag(c) in BOUNDARY_TAGS] if surface is not None else []
@@ -400,19 +339,9 @@ def _closed_polyline_ring(node: RawNode) -> list[tuple[float, float]] | None:
 
 
 def _square_from_ring(ring: list[tuple[float, float]] | None) -> tuple[float, float] | None:
-    """Read a symbol ring as `(side, orientation in degrees)` - a square, possibly rotated.
+    """Read a symbol ring as `(side, orientation in degrees)` - a square, possibly rotated (this renders a diamond).
 
-    Deliberately limited to the square case. A square's own 90-degree
-    symmetry makes the rotation SIGN immaterial, so the emitted
-    `Transform2D.orientation` is correct whichever way round CartoSym
-    Part 2 means it (its `transform2D.orientation` carries no documented
-    clockwise/counter-clockwise convention, and `se:Rotation` is
-    clockwise while an INTERLIS symbol space is y-up); for an oblong
-    rectangle the two conventions give visibly different results and
-    nothing settles which is right, so those keep falling through to the
-    SVG fallback. This is what renders a diamond: SE 1.1.0 has no
-    `diamond` well-known mark name, and a diamond is a square turned 45
-    degrees.
+    Oblong rectangles are excluded: the CartoSym vs INTERLIS (y-up) rotation sign is only immaterial for a square.
     """
     if ring is None or len(ring) != 4:
         return None
@@ -427,12 +356,10 @@ def _square_from_ring(ring: list[tuple[float, float]] | None) -> tuple[float, fl
 
 
 def _well_known_from_ring(ring: list[tuple[float, float]] | None) -> tuple[tuple, float, float] | None:
-    """Read a symbol ring as one of pycartosym's well-known shapes (`triangle`, `star`, `cross`, `x`):
-    `(its canonical nodes, size, clockwise orientation in degrees)`, or `None`.
+    """Read a symbol ring as one of pycartosym's well-known shapes (`triangle`, `star`, `cross`, `x`).
 
-    Matched whatever the ring's offset, start vertex, winding and rotation; the canonical nodes, scaled by `size`,
-    are what pycartosym's SLD writer turns back into the `se:WellKnownName`. The orientation is clockwise, as
-    `se:Rotation` is, the INTERLIS symbol space being y-up; the smallest one that matches is kept.
+    Returns `(canonical nodes, size, clockwise orientation in degrees)` or `None`, matched whatever the ring's
+    offset, start vertex and winding; the smallest matching rotation is kept.
     """
     if ring is None or len(ring) < 3:
         return None
@@ -510,10 +437,7 @@ def font_symbol_geometry_to_polygon_graphics(
     """Build one native mark per `FontSymbol_Surface`/closed `FontSymbol_Polyline` item that is a square or an SE
     `triangle`, else `None`.
 
-    Gives a native `se:Mark`/`se:WellKnownName` - a square, the diamond
-    real Sachplan symbology uses (a square turned 45 degrees), or a
-    triangle - instead of the inline-SVG `ImageGraphic` fallback. See
-    `_square_from_ring` for why oblong rectangles don't qualify.
+    Gives a native `se:Mark` (square, diamond, triangle) instead of the inline-SVG `ImageGraphic` fallback.
     """
     structure_nodes = _font_symbol_items(symbol_obj, ("FontSymbol_Surface", "FontSymbol_Polyline"))
     if structure_nodes is None:
@@ -532,9 +456,7 @@ def font_symbol_geometry_to_circle_graphics(
 ) -> list[CircleGraphic] | None:
     """Build one `CircleGraphic` per circular `FontSymbol_Surface` item in a `Font.Type = symbol` `FontSymbol`.
 
-    Only the case where EVERY item is a `FontSymbol_Surface` whose
-    boundary is a real circle (`_circle_radius_from_surface`) is handled
-    - see `_font_symbol_items` for that all-or-nothing contract.
+    All-or-nothing: every item must be a `FontSymbol_Surface` with a real circular boundary (see `_font_symbol_items`).
     """
     structure_nodes = _font_symbol_items(symbol_obj, "FontSymbol_Surface")
     if structure_nodes is None:
@@ -553,21 +475,8 @@ def font_symbol_geometry_to_circle_graphics(
 def font_symbol_geometry_to_image_graphics(symbol_obj: XtfObject) -> list[ImageGraphic] | None:
     """Build one `ImageGraphic` per `FontSymbol_Image` item in a `Font.Type = symbol` `FontSymbol`.
 
-    `FontSymbol_Image` (`Uri: TEXT`) is a PROJECT EXTENSION of
-    `FontSymbol.Geometry`'s `RESTRICTION`, not part of the official
-    `StandardSymbology.ili` - proposed for "15-image-marker" and validated
-    conditionally by the user pending `pycartosym` `ImageGraphic.hotSpot`
-    support (confirmed working in v0.3.2 - see
-    `tests/fixtures/cartosym/fontsymbol_image_repo/StandardSymbology_ext.ili`
-    for the adapted model this was checked to actually build against).
-    Only the case where EVERY item is a `FontSymbol_Image` is handled -
-    same all-or-nothing contract as `font_symbol_geometry_to_circle_graphics`,
-    a mix with `FontSymbol_Polyline`/`_Surface` aborts rather than
-    guessing which one wins. No `Resource.type` (MIME type) is set - the
-    official model proposal has no attribute to source it from, so
-    `se:Format` is simply omitted rather than guessed from the URI's file
-    extension. No `hot_spot` either, for the same reason (no anchor-point
-    attribute proposed on `FontSymbol_Image`).
+    `FontSymbol_Image` (`Uri: TEXT`) is a project extension of the standard model; all-or-nothing like the other
+    builders. No MIME type or hot spot is set, as the model has no attribute to source them from.
     """
     structure_nodes = _font_symbol_items(symbol_obj, "FontSymbol_Image")
     if structure_nodes is None:
@@ -586,13 +495,9 @@ def _rgb_to_hex(color: RGBColor | None) -> str:
 
 
 def _svg_arc_command(prev: tuple[float, float], mid: tuple[float, float], end: tuple[float, float]) -> str | None:
-    """SVG elliptical-arc `A` command from `prev` to `end` through `mid` - all 3 points already in SVG (Y-down) space.
+    """SVG elliptical-arc `A` command from `prev` to `end` through `mid`, all in SVG (Y-down) space.
 
-    Derives the circumcircle radius and the large-arc/sweep flags from
-    the 3 points directly (INTERLIS's own 3-point arc encoding, eCH-0031
-    V2.1.0 SS4.3.11.14) rather than trusting the optional `<R>` on the
-    wire. `None` for 3 collinear/degenerate points - aborts the whole
-    symbol rather than guessing a geometry (RULE #7 spirit).
+    Radius and flags come from the circumcircle of the 3 points, not the wire `<R>`; `None` if they are collinear.
     """
     (ax, ay), (bx, by), (cx, cy) = prev, mid, end
     d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
@@ -606,11 +511,7 @@ def _svg_arc_command(prev: tuple[float, float], mid: tuple[float, float], end: t
     a0 = math.atan2(ay - uy, ax - ux)
     r1 = (math.atan2(by - uy, bx - ux) - a0) % (2 * math.pi)
     r2 = (math.atan2(cy - uy, cx - ux) - a0) % (2 * math.pi)
-    # In SVG's y-down space, an increasing atan2 angle sweeps visually
-    # clockwise (sweep-flag 1) - r1 < r2 means the increasing (clockwise)
-    # direction from `prev` reaches `mid` before `end`, so that's the
-    # right direction; otherwise the decreasing (sweep-flag 0) direction
-    # is, spanning (2*pi - r2) instead of r2.
+    # y-down: increasing atan2 angle is clockwise (sweep 1); r1 < r2 means that direction reaches `mid` before `end`.
     sweep, span = (1, r2) if r1 < r2 else (0, (2 * math.pi) - r2)
     large_arc = 1 if span > math.pi else 0
     return f"A {radius:.6g} {radius:.6g} 0 {large_arc} {sweep} {cx:.6g} {cy:.6g}"
@@ -619,11 +520,7 @@ def _svg_arc_command(prev: tuple[float, float], mid: tuple[float, float], end: t
 def _svg_path_d(node: RawNode) -> str | None:
     """Build an SVG path `d` string from a POLYLINE SegmentSequence (COORD start, then COORD/ARC segments).
 
-    Y is negated throughout - SVG's y-axis points down, an INTERLIS local
-    symbol space is a standard y-up 2D plane (`FontSymbol`'s own comment:
-    "defined for size 1.0 and scale 1.0" in user units). `_svg_arc_command`
-    only ever sees already-flipped points, so its own flag derivation
-    stays entirely within SVG's coordinate convention.
+    Y is negated throughout: SVG is y-down, an INTERLIS symbol space is y-up.
     """
     if geom_tag(node) != "POLYLINE" or not node.children:
         return None
@@ -671,19 +568,8 @@ def _svg_boundary_path_d(node: RawNode) -> str | None:
 def font_symbol_geometry_to_svg_data_uri(library: SignLibrary, symbol_obj: XtfObject) -> str | None:
     """Render a `FontSymbol`'s composite geometry as an inline `data:image/svg+xml` URI.
 
-    Covers what `font_symbol_geometry_to_circle_graphics` doesn't (a
-    `FontSymbol_Polyline` item, or a `FontSymbol_Surface` whose boundary
-    isn't a plain circle) - real corpus data (`RoadsExgm2ien_Symbols.xtf`'s
-    `FontSymbol ili:tid="101"/"102"`, "Triangle"/"NoParking") mixes both
-    item kinds. `viewBox="-0.5 -0.5 1 1"` matches the model's own stated
-    convention ("All font symbols are defined for size 1.0 and scale
-    1.0") rather than a data-dependent bounding box, so every symbol
-    renders at the same visual scale regardless of its own extent.
-    `FontSymbol_Surface`'s 2nd+ boundary is a hole (`fill-rule="evenodd"`,
-    same "first ring exterior, rest holes" convention as
-    `convert/jsonfg.py::_read_surface`). `FontSymbol_Polyline.LineAttrs`
-    (width/join/cap) is not read - a hairline default stroke is used, no
-    real corpus example yet needs a specific width here.
+    Covers what the circle builder does not. The fixed `viewBox="-0.5 -0.5 1 1"` follows the model's "size 1.0,
+    scale 1.0" convention; a surface's 2nd+ boundary is a hole (`evenodd`). `LineAttrs` is not read (hairline stroke).
     """
     occurrences = symbol_obj.attributes.get("Geometry") or []
     if not occurrences:
@@ -728,19 +614,10 @@ def font_symbol_geometry_to_svg_data_uri(library: SignLibrary, symbol_obj: XtfOb
 def symbol_sign_object_to_marker(library: SignLibrary, obj: XtfObject) -> Marker:
     """Build a `Marker` from a real `SymbolSign` data object (`Color`/`Symbol` resolved within the same SIGN BASKET).
 
-    `Font.Type = text` (`Symbol` -> `FontSymbol` -> `Font`) builds a
-    single glyph `TextGraphic`; `Font.Type = symbol` tries the native
-    shape builders (circle, then square/diamond/triangle), then
-    `font_symbol_geometry_to_image_graphics` (a project-extension
-    `FontSymbol_Image`, see its own docstring), and finally an inline-SVG
-    render of any remaining mix. Verified against real corpus data
-    (`Point_Graphics_Signatures.xtf`'s `SymbolSign`/`FontSymbol`/`Font`)
-    for the text case.
+    `Font.Type = text` builds a glyph `TextGraphic`; `symbol` tries native circle, polygon and image builders, then
+    an inline-SVG render of any remaining mix.
     """
-    # `color` (from `SymbolSignColorAssoc`) has no confirmed pycartosym
-    # target for a text-glyph Marker yet (neither `TextGraphic` nor `Font`
-    # has a color field) - only `opacity` (`Color.T`) is applied here,
-    # left as a follow-up rather than guessed.
+    # Only `opacity` is applied: `TextGraphic` has no color field to receive `Color`.
     _color, opacity = library.resolve_color(obj, "Color")
     elements: list[Any] | None = None
     symbol_obj = library.resolve_ref(obj, "Symbol")
@@ -771,15 +648,7 @@ def symbol_sign_object_to_marker(library: SignLibrary, obj: XtfObject) -> Marker
 def text_sign_object_to_font_kwargs(library: SignLibrary, obj: XtfObject) -> dict[str, Any]:
     """Build `text_sign_to_label` kwargs (`font_face`/`height`/`italic`/`color`/`opacity`) from a `TextSign` object.
 
-    `Font` (`TextSignFontAssoc`) gives the face; `Height`/`Slanted` are
-    `TextSign`'s own attributes directly (not references). `Color`
-    (`TextSignColorAssoc`) resolves via the same `Color` wire mechanism as
-    `SurfaceSign.FillColor`/`PolylineSign.Color`, now that `Font.color`/
-    `opacity` exist in pycartosym (v0.3.0). `Underlined` is deliberately
-    NOT read: pycartosym's SLD writer raises `NotImplementedError` for
-    `Font.underline` unconditionally (confirmed reading its source) -
-    wiring it would only ever produce a crash, not a silently-wrong value,
-    but there is no real `TextSign` data to verify against either way.
+    `Underlined` is deliberately not read: pycartosym's SLD writer raises `NotImplementedError` for `Font.underline`.
     """
     kwargs: dict[str, Any] = {}
     font_obj = library.resolve_ref(obj, "Font")
@@ -804,25 +673,8 @@ def text_sign_object_to_font_kwargs(library: SignLibrary, obj: XtfObject) -> dic
 def surface_sign_object_to_hatch_pattern(library: SignLibrary, obj: XtfObject) -> ImageGraphic | None:
     """Build a `Fill.pattern` `ImageGraphic` from `SurfaceSign.HatchSymb` (a `PolylineSign` reference).
 
-    `Fill.pattern`/`Stroke.pattern` write correctly as of `pycartosym`
-    v0.3.0 (`se:GraphicFill`/`se:GraphicStroke`, confirmed against the
-    published wheel - a previous "blocked, NotImplementedError" note here
-    was stale, tested against 0.2.2 and never rechecked after this
-    project bumped past it) - but only `Dot`/`Circle`/`Rectangle`/`Image`
-    graphic types are supported in that position (confirmed reading the
-    writer source), never the free-form `ShapeGraphic` (`type: str`,
-    e.g. a "vertline"/"cross" WKN) that would otherwise be the obvious
-    match for a repeated hachure LINE. `Image` is the only viable target
-    left - a single horizontal line across a `viewBox="-0.5 -0.5 1 1"`
-    tile (same convention as `font_symbol_geometry_to_svg_data_uri`),
-    tiled by `se:GraphicFill`. `HatchAng` (`SS_Angle`, default 0.0)
-    rotates the whole tile via `Transform2D.orientation` - real corpus
-    data (`Surface_Hatching_Stipples_GS.xtf`) never actually sets it, so
-    the 0deg (untransformed) case is what's verified, not the rotated
-    one. `HatchOffset`/`HatchOrg` have no target - `se:GraphicFill` has
-    no separate pattern-spacing/anchor knob beyond the tile's own
-    `se:Size`, so a value here couldn't be expressed without inventing a
-    tiling convention `pycartosym`/SE doesn't have.
+    `se:GraphicFill` accepts only `Dot`/`Circle`/`Rectangle`/`Image` graphics, so the hachure is one horizontal
+    line on a `viewBox="-0.5 -0.5 1 1"` tile, rotated by `HatchAng`. `HatchOffset`/`HatchOrg` have no SE target.
     """
     polyline_obj = library.resolve_ref(obj, "HatchSymb")
     if polyline_obj is None:
@@ -841,13 +693,7 @@ def surface_sign_object_to_hatch_pattern(library: SignLibrary, obj: XtfObject) -
 
 
 def surface_sign_object_to_fill(library: SignLibrary, obj: XtfObject) -> Fill:
-    """Build a `Fill` from `SurfaceSign.FillColor`/`HatchSymb` - `Clip`/`HatchOrg`/`HatchOffset` not resolved.
-
-    Same `Color` wire mechanism as `symbol_sign_object_to_marker`
-    (verified there against real data) applied to a different attribute
-    name (`FillColor` vs `Color`) - verified end to end against real
-    `SurfaceSign` data (`Surface_Hatching_Stipples_GS.xtf`).
-    """
+    """Build a `Fill` from `SurfaceSign.FillColor`/`HatchSymb` - `Clip`/`HatchOrg`/`HatchOffset` not resolved."""
     color, opacity = library.resolve_color(obj, "FillColor")
     pattern = surface_sign_object_to_hatch_pattern(library, obj)
     return surface_sign_to_fill(fill_color=color, opacity=opacity, pattern=pattern)
@@ -856,9 +702,7 @@ def surface_sign_object_to_fill(library: SignLibrary, obj: XtfObject) -> Fill:
 def surface_sign_object_border_to_stroke(library: SignLibrary, obj: XtfObject) -> Stroke | None:
     """Build a `Stroke` from a `SurfaceSign` data object's `Border` (`SurfaceSignBorderAssoc`, a `PolylineSign` REF).
 
-    Reuses `polyline_sign_object_to_stroke` on the referenced object - the
-    border IS a real `PolylineSign` object, same wire shape as one
-    referenced directly by a `PolylineSign` `Sign := {name}`.
+    The border is a real `PolylineSign`, so `polyline_sign_object_to_stroke` is reused.
     """
     border_obj = library.resolve_ref(obj, "Border")
     return polyline_sign_object_to_stroke(library, border_obj) if border_obj is not None else None
@@ -867,19 +711,8 @@ def surface_sign_object_border_to_stroke(library: SignLibrary, obj: XtfObject) -
 def polyline_sign_object_to_stroke(library: SignLibrary, obj: XtfObject) -> Stroke:
     """Build a `Stroke` from a real `PolylineSign` data object's `Color` and `Style` (width/join/cap/dash pattern).
 
-    `Style` (`PolylineSignLineStyleAssoc`) resolves to a `LineStyle_Solid`/
-    `_Dashed` object; its own `LineAttrs` association
-    (`LineStyle_SolidPolylineAttrsAssoc`/`_DashedLineAttrsAssoc`) gives
-    `Width`/`Join`/`Caps`, and a `LineStyle_Dashed` additionally gives its
-    own `Dashes` (`LIST OF DashRec`) as the dash pattern. `PolylineSign.Color`
-    (`PolylineSignColorAssoc`) and `LineStyle_Solid`/`_Dashed.Color`
-    (`LineStyle_SolidColorAssoc`/`_DashedColorAssoc`) are BOTH `{0..1}` per
-    `StandardSymbology.ili` - genuinely separate associations, not a
-    redundant duplicate. Real corpus data (`RoadsExgm2ien_Symbols.xtf`'s
-    `continuous`/`dotted` `PolylineSign`) sets only the `LineStyle`'s own
-    `Color`, leaving `PolylineSign.Color` unset - `PolylineSign.Color`
-    wins when both are set (no real corpus example exercises that case
-    either way), the `LineStyle`'s is the fallback.
+    `PolylineSign.Color` and the `LineStyle`'s own `Color` are separate associations: the former wins, the latter
+    is the fallback.
     """
     color, opacity = library.resolve_color(obj, "Color")
     width = join = cap = dashes = None
@@ -901,11 +734,9 @@ def polyline_sign_object_to_stroke(library: SignLibrary, obj: XtfObject) -> Stro
 
 
 def _pattern_stroke(library: SignLibrary, style_obj: XtfObject) -> Stroke:
-    """A `LineStyle_Pattern` as a `Stroke.pattern` repeated every `PLength` along the line (`se:GraphicStroke`).
+    """A `LineStyle_Pattern` as a `Stroke.pattern` repeated every `PLength` along the line.
 
-    Its first `Pattern_Symbol` gives the graphic (a native mark built from its `FontSymbol`, at `Scale`, filled with
-    `ColorRef`), `Dist` the initial gap; the gap between two graphics is `PLength` less the graphic's own size, SE
-    measuring it edge to edge. Further `Pattern_Symbol`s and `Offset` have no target in one `Stroke`.
+    Only the first `Pattern_Symbol` is used; further symbols and `Offset` have no equivalent in one `Stroke`.
     """
     occurrence = (style_obj.attributes.get("Symbols") or [None])[0]
     symbol_node = occurrence.children[0] if occurrence is not None and occurrence.children else None
@@ -953,26 +784,8 @@ def _surface_sign_kwargs(library: SignLibrary, obj: XtfObject) -> dict[str, Any]
 def raster_sign_object_to_color_map(library: SignLibrary, obj: XtfObject) -> list[list[Any]] | None:
     """Build a `Symbolizer.color_map` from `RasterSign.ColorMapEntries` (a `LIST OF RasterColorMapEntry`).
 
-    `RasterSign` is a PROJECT EXTENSION of `StandardSymbology` (a
-    raster/coverage styling proposal covering only `ColorMap` so far, the
-    one target confirmed to write a real `se:CoverageStyle/
-    se:RasterSymbolizer/se:ColorMap` in `pycartosym`; channel selection
-    and hill-shading are deliberately not built yet). `Symbolizer.color_map`
-    is untyped (`Any`) - a plain list of `[value, color]` entries, in wire
-    order, is what the writer actually expects (`_validated_map_pairs`,
-    confirmed empirically against the real writer, NOT the separate
-    standalone `ColorMap` Pydantic class which has an unrelated
-    `{colors, values}` shape). `RasterColorMapEntry.Label` is deliberately
-    NOT included here: `pycartosym`'s default `sld` dialect renders
-    `se:Categorize`, which has no label/name slot at all in SE 1.1.0 (only
-    `se:Threshold`/`se:Value`) - a 3-element `[value, color, label]` entry
-    past the first used to crash its writer outright, now fixed upstream
-    to a clean `NotImplementedError` instead (not yet released). Only the
-    `sld:1.0.0`/`sld:geoserver` dialects (`se:ColorMapEntry`) support a
-    label at all - staying on the default `sld` dialect and omitting
-    `Label` is the choice made here, not a workaround for a bug anymore.
-    Entirely synthetic (no real `.xtf` can exist yet for a class this
-    project just proposed) - `tests/fixtures/cartosym/rastersign_repo/`.
+    `RasterSign` is a project extension. Entries are plain `[value, color]` lists in wire order; `Label` is omitted
+    because the default `sld` dialect's `se:Categorize` has no label slot.
     """
     occurrences = obj.attributes.get("ColorMapEntries") or []
     entries: list[list[Any]] = []
@@ -994,15 +807,7 @@ def raster_sign_object_to_color_map(library: SignLibrary, obj: XtfObject) -> lis
 def raster_sign_object_to_channel_selection(library: SignLibrary, obj: XtfObject) -> dict[str, Any]:
     """Build `Symbolizer.color_channels`/`single_channel` kwargs from `RasterSign`'s `*Band` attributes.
 
-    Mutually exclusive per `pycartosym`'s own writer constraint
-    (`Symbolizer.colorChannels and Symbolizer.singleChannel cannot both
-    be set`) - mirrored as a `MANDATORY CONSTRAINT` on the proposed
-    `RasterSign` class. `{"property": <band name>}` is the only channel
-    reference form the writer accepts (`_channel_source_name`) - band
-    names are plain `TEXT` attributes, since INTERLIS carries no pixel
-    data itself, only a reference to an external raster resource's bands.
-    `GrayBand` wins if both happen to be set (the model's own constraint
-    should already rule that out).
+    Mutually exclusive in pycartosym's writer; `GrayBand` wins if both are set. Band names are plain `TEXT`.
     """
     gray = library.scalar(obj, "GrayBand")
     if gray is not None:
@@ -1014,12 +819,9 @@ def raster_sign_object_to_channel_selection(library: SignLibrary, obj: XtfObject
 
 
 def raster_sign_object_to_hill_shading(library: SignLibrary, obj: XtfObject) -> dict[str, Any] | None:
-    """Build a `Symbolizer.hill_shading` dict from `RasterSign.HillShadeFactor` - the one non-blocked field.
+    """Build a `Symbolizer.hill_shading` dict from `RasterSign.HillShadeFactor`.
 
-    `hill_shading.sun`/`.colorMap`/`.opacityMap` are NOT proposed on
-    `RasterSign` at all - confirmed blocked by SE 1.1.0's own Annex B
-    (`_build_shaded_relief` raises for each, regardless of dialect), so
-    there is nothing to gain from adding INTERLIS attributes for them.
+    `sun`/`colorMap`/`opacityMap` are not modelled: SE 1.1.0 rejects them in pycartosym's writer.
     """
     factor = library.scalar(obj, "HillShadeFactor")
     return {"factor": float(factor)} if factor is not None else None
@@ -1093,31 +895,10 @@ def scale_selector(params: dict[str, Any]) -> dict[str, Any] | None:
 def styling_rule_from_drawing_rule(
     drawing_rule: MetaInstance, sign_library: SignLibrary | None = None, feature_type: str | None = None
 ) -> StylingRule:
-    """Build one pycartosym `StylingRule` from a built INTERLIS `DrawingRule`.
+    """Build one pycartosym `StylingRule` from an INTERLIS `DrawingRule`.
 
-    The `WHERE` selector compiles via `cql2.to_cql2` (the same CQL2-JSON
-    shape `StylingRule.selector` expects natively). `feature_type`
-    (typically the enclosing `Graphic.Base.Name` - `DrawingRule` has no
-    back-reference to it, so the caller must pass it) is prepended as a
-    `dataLayer.id` conjunct, pycartosym's own convention for `se:
-    FeatureTypeName` (confirmed against its writer source). `Priority` ->
-    `z_order`; `MinScaleDenominator`/`MaxScaleDenominator` -> `viz.sd` bounds
-    (`scale_selector`, ANDed with the `WHERE`). A `Sign := {name}` reference resolves (via `sign_library`,
-    a parsed SIGN BASKET data section - `None` skips it entirely, same as
-    before this was wired) to its own library-object data, dispatched by
-    `drawing_rule.Class` to `_symbol_sign_kwargs`/`_surface_sign_kwargs`/
-    `_polyline_sign_kwargs` - those hold color/width/symbol/border; a
-    `TextSign`'s `Txt`/`Rotation`/`HAli`/`VAli` are genuine `PARAMETER`s
-    (`AbstractSymbology.Signs.TextSign`) set directly on the
-    `DrawingRule`, unlike `Height`/`Font` which are OWN attributes only
-    ever set via the referenced Sign object - resolved via
-    `text_sign_object_to_font_kwargs` when `sign_object` is present (not
-    itself corpus-verified, no real `TextSign` data object found).
-
-    A `DrawingRule` with more than one `CondSignParamAssignment` (several
-    independent `WHERE (...)` blocks under the same rule name, which would
-    need `StylingRule.nested_rules`) has no real corpus example - only the
-    first is used here (RULE #7).
+    `WHERE` becomes a CQL2 filter (with `feature_type` as a layer condition), `Priority` the z-order, and the sign
+    reference is resolved through `sign_library`. Only the first `CondSignParamAssignment` is used.
     """
     conditions = drawing_rule.Rule if isinstance(drawing_rule.Rule, list) else [drawing_rule.Rule]
     cond = conditions[0]
@@ -1170,12 +951,8 @@ def styling_rule_from_drawing_rule(
 def _text_with_suffix(params: dict[str, Any]) -> Any:
     """`Txt`, or `Txt` + `Separator` + `Suffix` when the sign interface is extended with those two parameters.
 
-    INTERLIS cannot concatenate text, so a display rule such as DMAV's
-    Grundstueck.Nummer & "." & Liegenschaft.NummerTeilgrundstueck is written
-    `Txt := Nummer; Separator := "."; Suffix := Teil` on a `TextSign (EXTENDED)`
-    (`StandardSymbologyText.ili` of cartosym-dmav). The case without a suffix is
-    a rule of its own (`WHERE NOT (DEFINED(Teil))`), so no conditional
-    expression is needed (an SLD label cannot hold one).
+    INTERLIS cannot concatenate text, so such a rule sets `Suffix` on a `TextSign (EXTENDED)`; the no-suffix case is
+    a separate rule (`WHERE NOT (DEFINED(...))`) since an SLD label cannot hold a conditional.
     """
     txt, suffix = params.get("Txt"), params.get("Suffix")
     if suffix is None:
@@ -1205,10 +982,8 @@ def graphic_attribute_problems(
 ) -> list[str]:
     """One message per attribute a `GRAPHIC`'s rules cite (in `WHERE` or as an assigned value) that its base lacks.
 
-    A style is bound to a VIEW or class in the model, so an attribute name
-    it cites can be checked against that base before any rendering. The
-    embedded association roles of a class count as attributes, including those
-    of an association declared in an imported model (hence the `repository`).
+    Embedded association roles count as attributes, including those of an association from an imported model
+    (hence `repository`).
     """
     base = getattr(graphic, "Base", None)
     if base is None:
@@ -1233,12 +1008,7 @@ def graphic_attribute_problems(
 
 
 def _priority_sort_key(rule: StylingRule) -> tuple[bool, float]:
-    """Ascending `Priority` draws last/on top - this project's own convention, undocumented in `StandardSymbology.ili`.
-
-    A rule whose `Priority` isn't a literal number (attribute-driven, no
-    real corpus example) sorts after every literal one rather than being
-    dropped or guessed at.
-    """
+    """Ascending `Priority` draws last/on top (this project's convention); a non-literal `Priority` sorts last."""
     z_order = rule.symbolizer.z_order if rule.symbolizer else None
     return (not isinstance(z_order, (int, float)), z_order if isinstance(z_order, (int, float)) else 0.0)
 
@@ -1261,10 +1031,7 @@ def _add_visualization_passes(styling_rules: list[StylingRule]) -> None:
 def graphic_to_style(graphic: MetaInstance, sign_library: SignLibrary | None = None) -> Style:
     """Build one pycartosym `Style` from a built INTERLIS `GRAPHIC`, one `StylingRule` per `DrawingRule`.
 
-    `feature_type` (`Graphic.Base.Name`) is prepended to every rule's
-    selector (see `styling_rule_from_drawing_rule`). Rules are sorted by
-    `Priority`, ascending (`_priority_sort_key`), and each distinct
-    Priority becomes a `viz.pass` - one SLD FeatureTypeStyle per pass.
+    Rules are sorted by `Priority` ascending, and each distinct Priority becomes a `viz.pass`.
     """
     feature_type = getattr(getattr(graphic, "Base", None), "Name", None)
     drawing_rules = graphic.DrawingRule if isinstance(graphic.DrawingRule, list) else [graphic.DrawingRule]
@@ -1279,18 +1046,9 @@ def graphic_to_style(graphic: MetaInstance, sign_library: SignLibrary | None = N
 
 
 def write_sld(style: Style) -> str:
-    """Write `style` to SLD, working around pycartosym's SLD writer not yet supporting attribute-driven text rotation.
+    """Write `style` to SLD, working around the SLD writer's lack of attribute-driven text rotation.
 
-    `Transform2D.orientation` accepts a `PropertyRef` at the pycartosym
-    model level, but the SLD writer's angle formatter raises
-    `NotImplementedError` for anything but a literal number (confirmed
-    empirically - real corpus data, e.g. `RoadsExgm2ien.ili`'s `Rotation
-    := NamOri`, needs exactly the dynamic form). Reported to the
-    pycartosym maintainer - remove this workaround once fixed there.
-    Strips any `PropertyRef`-driven text rotation before handing `style`
-    to the real writer, then patches the resulting XML to add it back as
-    `se:Rotation><ogc:PropertyName>`, the same shape pycartosym already
-    writes for other dynamic fields (`stroke-width`, `fill`, ...).
+    A `PropertyRef` rotation is stripped before writing, then re-added to the XML as `se:Rotation/ogc:PropertyName`.
     """
     pending: dict[str, str] = {}
     patched_rules = []
@@ -1329,9 +1087,7 @@ def _inject_dynamic_text_rotations(sld_xml: str, rotations: dict[str, str]) -> s
         point_placement = placement.find(f"{{{_SE_NS}}}PointPlacement")
         if point_placement is None:
             point_placement = etree.SubElement(placement, f"{{{_SE_NS}}}PointPlacement")
-        # SE 1.1.0 PointPlacementType sequence: AnchorPoint?, Displacement?,
-        # Rotation? - always appended last, after any AnchorPoint pycartosym
-        # itself already wrote for HAli/VAli.
+        # SE 1.1.0 sequence is AnchorPoint?, Displacement?, Rotation?, so Rotation goes last.
         rotation_el = etree.SubElement(point_placement, f"{{{_SE_NS}}}Rotation")
         etree.SubElement(rotation_el, f"{{{_OGC_NS}}}PropertyName").text = attr_name
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8").decode()

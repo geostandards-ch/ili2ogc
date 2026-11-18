@@ -1,29 +1,7 @@
-"""Evaluate a built CONSTRAINT's Expression tree against one Feature's properties.
+"""Evaluate a `CONSTRAINT`'s expression tree against one Feature's `properties`.
 
-`class_to_json_schema`/`validate_feature_properties` (convert/jsonschema.py)
-only check STRUCTURAL conformance (types, cardinalities, values) - no JSON
-Schema 2020-12 keyword expresses an arbitrary compiled boolean expression
-over several attributes, so a `CONSTRAINT`'s semantics were never checked
-against real data by this runtime (see the `Constraint` entry in
-mappings/ilismeta16-to-jsonschema-rules.yml). This module is the second,
-complementary check: it walks the already-correctly-built `Expression` AST
-(`SimpleConstraint.LogicalExpression` etc.) directly against a candidate
-JSON-FG Feature's `properties` dict, producing the same "list of human
-messages, empty = valid" contract as `validate_feature_properties` - not a
-new JSON Schema keyword.
-
-Scope of this first pass: relational operators (`Equal`/`NotEqual`/`Less`/
-`Greater`/`LessOrEqual`/`GreaterOrEqual`), logical operators (`And`/`Or`/
-`Not`/`Implication`), `DEFINED(...)`, and plain (possibly multi-hop)
-attribute-name path resolution. `THIS`/`PARENT`/aggregate paths/
-`FunctionCall`/arithmetic (`Mult`/`Div`) need object-graph or numeric-domain
-context a single Feature's `properties` dict cannot provide - raised as
-`UnsupportedExpressionError` rather than guessed at. `check_feature_constraints`
-only evaluates `SimpleConstraint` entries with no `Percentage` (plain
-`MANDATORY CONSTRAINT`/bare-expression forms): `UniqueConstraint`/
-`SetConstraint`/`ExistenceConstraint` and the percentage-based plausibility
-form (`Kind` `LowPercC`/`HighPercC`) are population/basket-level checks that
-need more than one Feature to evaluate, out of scope here.
+Returns a list of messages (empty means valid). Supports relational and logical operators, `DEFINED(...)` and
+attribute paths; anything else raises `UnsupportedExpressionError`. Constraints spanning several Features are skipped.
 """
 
 import re
@@ -226,17 +204,10 @@ def _evaluate_constant(expr: MetaInstance) -> Any:
 
 
 def check_feature_constraints(properties: dict[str, Any], class_instance: MetaInstance) -> list[str]:
-    """Evaluate every per-Feature `SimpleConstraint` declared on `class_instance` against `properties`.
+    """Evaluate every per-Feature `SimpleConstraint` of `class_instance` against `properties`; empty list = valid.
 
-    Same "list of human messages, empty = valid" contract as
-    `validate_feature_properties` (convert/jsonschema.py) - meant to be
-    called alongside it, not as a replacement (this checks CONSTRAINT
-    semantics, not payload shape). A constraint this evaluator cannot
-    resolve for this particular Feature (an unsupported node, or a
-    relational comparison against an attribute absent from `properties`)
-    is silently skipped rather than reported - "not checked" is not the
-    same verdict as "violated", and this function never fails a valid
-    payload over a construct outside its documented scope.
+    A constraint this evaluator cannot resolve for the Feature (unsupported node, absent attribute) is skipped:
+    "not checked" is not "violated".
     """
     messages: list[str] = []
     for constraint in getattr(class_instance, "Constraint", None) or []:

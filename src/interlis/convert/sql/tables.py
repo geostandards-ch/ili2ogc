@@ -1,8 +1,5 @@
 """IlisMeta16 `Class` -> SQL `Table`: columns, `BAG`/`LIST OF` child tables, ABSTRACT structure subclass tables,
-UNIQUE/CHECK/FOREIGN KEY constraints.
-
-`build_tables` is the public entry point - see its own docstring and
-`mappings/ilismeta16-to-sql-rules.yml` for the full per-concept scope.
+UNIQUE/CHECK/FOREIGN KEY constraints. `build_tables` is the public entry point.
 """
 
 from __future__ import annotations
@@ -93,17 +90,9 @@ def _columns_for_class(
     dict[str, list[list[str]]],
     list[tuple[str, MetaInstance, bool, bool]],
 ]:
-    """Return `(columns, foreign_keys, notes, child_specs, local_unique, abstract_specs)` for `cls`'s own+inherited
-    members, flattening up to `_MAX_STRUCT_FLATTEN_DEPTH` levels of STRUCTURE nesting inline.
+    """Return `(columns, foreign_keys, notes, child_specs, local_unique, abstract_specs)` for the members of `cls`.
 
-    `prefix`/`depth` track the recursive STRUCTURE-flattening call.
-    `role_tables`: further symbol tables whose associations may embed a
-    role on `cls` (a base class's association declared in another model).
-    `presence_checks` (out): `(label, columns, required)` per OPTIONAL
-    flattened STRUCTURE - its MANDATORY parts only bind when it is present.
-    `child_specs` are `BAG`/`LIST OF` members for `_build_child_table`;
-    `local_unique` merges up nested `UNIQUE (LOCAL)`; `abstract_specs` are
-    ABSTRACT-structure attributes, one child table per concrete subclass.
+    STRUCTURE attributes are flattened inline up to `_MAX_STRUCT_FLATTEN_DEPTH`.
     """
     columns: list[Column] = []
     foreign_keys: list[ForeignKey] = []
@@ -321,15 +310,10 @@ def _build_child_table(
     symbol_table: SymbolTable | None,
     name_tables: tuple[SymbolTable, ...] = (),
 ) -> tuple[Table | None, dict[str, str], str | None, list[tuple[str, MetaInstance]]]:
-    """Return `(child_table, renamed, None, nested_child_specs)` on success or `(None, {}, reason, [])` on failure,
-    for one `BAG`/`LIST OF` attribute.
+    """Return `(child_table, renamed, None, nested_child_specs)` or `(None, {}, reason, [])` for a `BAG`/`LIST OF`.
 
-    Companion to `convert/jsonfg.py`'s `include_child_rows` synthetic
-    Features (same `"featureType"` routing). Schema: a `<parent>_fk`
-    `FOREIGN KEY` + `seq` (if `Ordered`) + the element's own value
-    column(s). A `BAG`/`LIST OF` nested inside is returned as
-    `nested_child_specs`, not built here - `build_tables` makes it its
-    own `<this table>_<subattr>` child table, one level deeper.
+    Schema: a `<parent>_fk` FOREIGN KEY, `seq` (if `Ordered`) and the element's value column(s). A nested
+    `BAG`/`LIST OF` is returned as `nested_child_specs` for `build_tables` to build one level deeper.
     """
     base_type = getattr(multi_value, "BaseType", None)
     if not isinstance(base_type, MetaInstance):
@@ -422,9 +406,7 @@ def _build_nested_child_tables(
 ) -> list[Table]:
     """Build one `<parent_child_table>_<attr>` table per `BAG`/`LIST OF` attribute found one level inside it.
 
-    `INSPECTION OF <class> -> a -> b` needs exactly this chain of tables
-    to exist. Bounded to ONE level (no real corpus evidence of a third
-    nesting level) - a further-nested `BAG`/`LIST OF` is noted, not built.
+    Bounded to ONE level; a further-nested `BAG`/`LIST OF` is noted, not built.
     """
     out: list[Table] = []
     for attr_name, multi_value in child_specs:
@@ -469,11 +451,8 @@ def _structure_child_table(
 ) -> tuple[Table, dict[str, str]]:
     """One child table holding instances of a concrete STRUCTURE `struct_cls`.
 
-    Used for an ABSTRACT structure attribute's concrete subclasses (one
-    table per subclass, `concrete_structure_subclasses`) - same shape as
-    `_build_child_table`'s own STRUCTURE branch (a `<parent>_fk` back to the
-    parent, `seq` when `ordered`, then the structure's own flattened
-    columns), factored out so `build_tables` can call it per subclass.
+    Used per concrete subclass of an ABSTRACT structure attribute: a `<parent>_fk`, `seq` when `ordered`, then the
+    structure's flattened columns.
     """
     fk_column = _sql_identifier(f"{parent_table}_fk")
     columns: list[Column] = [Column(fk_column, "bigint", nullable=False)]
@@ -511,13 +490,10 @@ def _check_constraints_for_class(
     column_names: set[str],
     renamed: dict[str, str],
 ) -> tuple[list[CheckConstraint], list[str]]:
-    """Return `(constraints, notes)` for `cls`'s own row-local `MANDATORY CONSTRAINT`s - same scope as
-    `constraint_eval.py`'s `check_feature_constraints`.
+    """Return `(constraints, notes)` for `cls`'s own row-local `MANDATORY CONSTRAINT`s.
 
-    `UniqueConstraint` is handled separately. `SetConstraint`/
-    `ExistenceConstraint`/percentage-based plausibility are
-    population/basket-level checks no single-row `CHECK` can express -
-    surfaced as a `-- NOTE`, never dropped silently (RULE #5).
+    `UniqueConstraint` is handled separately. Set/existence/plausibility constraints are population-level and
+    cannot be a single-row `CHECK`: they become a `-- NOTE`.
     """
     result: list[CheckConstraint] = []
     notes: list[str] = []
@@ -591,11 +567,8 @@ def _unique_constraints_for_class(
 ) -> tuple[list[UniqueConstraint], list[str], dict[str, list[list[str]]]]:
     """Return `(constraints, notes, struct_global_unique)` for `cls`'s own `Kind=GlobalU` `UniqueConstraint`s.
 
-    `constraints`: plain `UNIQUE (...)` over own columns. `struct_global_unique`:
-    `{struct attr: [[sub-attr column, ...], ...]}` for a `UNIQUE X->Y`
-    where `X` is a `BAG`/`LIST OF STRUCTURE` attribute - `build_tables`
-    turns each group into a `UNIQUE` on the `<parent>_<attr>` child table.
-    `Kind=LocalU` is handled separately (`_local_unique_constraints_for_class`).
+    `constraints` are plain `UNIQUE (...)` over own columns; `struct_global_unique` maps a `BAG`/`LIST OF STRUCTURE`
+    attribute to its column groups, which `build_tables` turns into a `UNIQUE` on the child table.
     """
     result: list[UniqueConstraint] = []
     notes: list[str] = []
@@ -627,9 +600,7 @@ def _unique_constraints_for_class(
                 bad = True
                 break
         if bad or (own_columns and two_hop):
-            # 3+ hops, an unexpected PathEl kind, or a mix of an own column
-            # and a navigated one in the SAME constraint - not one plain
-            # UNIQUE and not one child-table UNIQUE either.
+            # 3+ hops, an unexpected PathEl kind, or own and navigated columns mixed: not expressible as one UNIQUE.
             notes.append(
                 _diag(
                     "SQL-UNIQUE-CROSS-REF",
@@ -656,13 +627,10 @@ def _unique_constraints_for_class(
 
 
 def _local_unique_constraints_for_class(cls: MetaInstance) -> tuple[dict[str, list[list[str]]], list[str]]:
-    """Return `({BAG/LIST attr name: [[sub-attr column, ...], ...]}, notes)` for `cls`'s own `Kind=LocalU`
-    `UniqueConstraint`s.
+    """Return `({BAG/LIST attr name: [[sub-attr column, ...], ...]}, notes)` for `cls`'s own `Kind=LocalU` constraints.
 
-    E.g. `UNIQUE (LOCAL) Entries: Code;` -> `PathEls=[Entries, Code]`: the
-    role path must be exactly ONE hop naming the `BAG`/`LIST OF` attribute,
-    shared by every entry of the same constraint (RULE #7: a multi-hop or
-    mixed role path is grammatically possible but unseen in the corpus).
+    The role path must be exactly ONE hop naming the `BAG`/`LIST OF` attribute, shared by every entry of the
+    constraint; anything else is noted.
     """
     result: dict[str, list[list[str]]] = {}
     notes: list[str] = []
@@ -775,11 +743,9 @@ def _presence_check(table_name: str, label: str, columns: list[str], required: l
 
 
 def _reference_target_classes(target: MetaInstance, converted: list[MetaInstance]) -> list[MetaInstance]:
-    """Every converted concrete class a `REFERENCE TO target` may point at: `target` unless ABSTRACT, then its
-    concrete subclasses by name.
+    """Every converted concrete class a `REFERENCE TO target` may point at: `target` unless ABSTRACT, then subclasses.
 
-    Tables are one per concrete class with inherited columns inlined, so a
-    subclass instance has a row in its own table only, never in its base's.
+    Each concrete class has its own table with inherited columns inlined.
     """
     subclasses = sorted(
         (
@@ -795,11 +761,9 @@ def _reference_target_classes(target: MetaInstance, converted: list[MetaInstance
 def _split_polymorphic_fk(
     table: Table, fk: ForeignKey, targets: list[tuple[MetaInstance, str]], *, keeps_column: bool
 ) -> None:
-    """Replace `fk`'s single column by one nullable FK column per target table, plus a CHECK that at most one (exactly
-    one when MANDATORY) is set.
+    """Replace `fk`'s single column by one nullable FK column per target table, plus a CHECK that at most one is set.
 
-    A concrete base keeps the original column; every other target gets
-    `<column>_<table>`, the per-target column layout ili2db also uses.
+    Exactly one when MANDATORY. A concrete base keeps the original column; other targets get `<column>_<table>`.
     """
     column = next(c for c in table.columns if c.name == fk.columns[0])
     used = {c.name for c in table.columns} - {column.name}
@@ -852,30 +816,19 @@ def _build_tables(
     class_table_names: dict[int, str] | None = None,
     name_tables: tuple[SymbolTable, ...] = (),
 ) -> list[Table]:
-    """Convert every `Class(Kind=Class)` in `classes` into a `Table` - the dialect-neutral IR every renderer consumes.
+    """Convert every `Class(Kind=Class)` in `classes` into a `Table`.
 
-    No reachability discovery beyond `classes` itself: a STRUCTURE-typed
-    attribute flattens INLINE, never becomes a separate `Table`.
-    `class_table_names` (optional out-param) lets `build_views` map a
-    View's base classes to their tables by identity. `class_symbol_tables`
-    overrides `symbol_table` per-class for a `--catalog` class whose
-    embedding association lives in a different model's own table.
-    `name_tables` (the imported models' tables) only serve to name columns
-    after the attribute they hold, for T_ILI2DB_ATTRNAME.
+    A STRUCTURE-typed attribute is flattened inline and never becomes a table of its own.
     """
     tables = []
     used_table_names: set[str] = set()
     table_name_by_class_id: dict[int, str] = {}
-    # For abstract-STRUCTURE subclass discovery: the root table plus every
-    # distinct per-class table (--catalog / folded-in models) - a concrete
-    # subclass can be registered in a different model's table than the
-    # abstract base it extends.
+    # Abstract-STRUCTURE subclass discovery spans the root and every per-class table (a concrete subclass can live
+    # in another model's table than its abstract base).
     _distinct_catalog_tables = {id(t): t for t in (class_symbol_tables or {}).values()}.values()
     scan_symbol_tables: list[SymbolTable] = [st for st in [symbol_table, *_distinct_catalog_tables] if st is not None]
-    # A non-embedded association (n:m, or more than 2 roles) is transferred
-    # as its own object (eCH-0031 §4.3.9.2): it needs its own link table.
-    # ABSTRACT classes never have instances: their concrete subclasses hold
-    # the rows and are the FOREIGN KEY targets (`_reference_target_classes`).
+    # A non-embedded association (n:m, or >2 roles) is its own object and needs a link table. ABSTRACT classes have
+    # no rows: their concrete subclasses are the FOREIGN KEY targets (`_reference_target_classes`).
     table_classes = [
         c
         for c in classes
@@ -1023,11 +976,8 @@ def _build_tables(
                     _build_nested_child_tables(child_table, nested_specs, home_table, used_table_names, name_tables)
                 )
 
-        # An ABSTRACT structure attribute (single-valued or BAG/LIST OF):
-        # one child table per concrete subclass reachable in the symbol
-        # table, mirroring the JSON Schema pipeline's `anyOf`. The table
-        # name (`<parent>_<attr>_<subclass>`) is the discriminant - no
-        # extra `kind` column. No subclass in the conversion -> a `-- NOTE`.
+        # An ABSTRACT structure attribute: one child table per concrete subclass (`<parent>_<attr>_<subclass>`, the
+        # name is the discriminant). No subclass in the conversion -> a `-- NOTE`.
         for attr_name, abstract_cls, ordered, from_multivalue in abstract_specs:
             subclasses = concrete_structure_subclasses(abstract_cls, home_table, *scan_symbol_tables)
             if not subclasses:
@@ -1068,19 +1018,14 @@ def _build_tables(
                     child_table.unique_constraints.append(UniqueConstraint(name, full_columns))
                 tables.append(child_table)
 
-        # Any UNIQUE (LOCAL) whose role hop never matched a real BAG/LIST OF
-        # attribute on this class (typo, or a role path this project's
-        # grammar mapping doesn't reach) - never silently dropped (RULE #5).
+        # A UNIQUE (LOCAL) whose role hop matched no BAG/LIST OF attribute: noted, never silently dropped.
         for attr_name in local_unique:
             parent_table.notes.append(
                 _diag("SQL-UNIQUE-LOCAL-UNSUPPORTED", f"UNIQUE (LOCAL) {attr_name}: no matching BAG/LIST OF attribute")
             )
 
-        # `UNIQUE X->Y` whose first hop `X` is not a `BAG`/`LIST OF STRUCTURE`
-        # attribute of this class: a real `REFERENCE TO`/role navigation to
-        # another table's column (or an abstract structure split across
-        # subtype tables). No single table/index constraint expresses it -
-        # a BEFORE INSERT/UPDATE trigger would.
+        # `UNIQUE X->Y` whose first hop is not a `BAG`/`LIST OF STRUCTURE` attribute navigates to another table's
+        # column; only a BEFORE INSERT/UPDATE trigger could express it.
         for attr_name, groups in struct_global_unique.items():
             for group_columns in groups:
                 parent_table.notes.append(
@@ -1091,25 +1036,8 @@ def _build_tables(
                     )
                 )
 
-    # A real bug found the same way (PostgreSQL, live `psycopg`-free
-    # verification against a real `postgis/postgis` container):
-    # a `REFERENCE TO`/Role target belonging to a DIFFERENT model (real
-    # corpus case, `ili_corpus/LWB_Bewirtschaftungseinheiten_V3_0.ili`'s
-    # `Zone_Ausland` -> `LWB_Landwirtschaftliche_Zonengrenzen_Kataloge_V2_0.
-    # LZ_Kataloge.LZ_Katalog_TypRef`) resolves to a REAL Class via
-    # `reference_target_class` (repository-loaded, so not caught by the
-    # "unresolved reference" check in `_columns_for_class`) but that class
-    # is NOT among `classes` - this function deliberately converts ONE
-    # model's OWN classes only (no cross-model reachability discovery,
-    # unlike `convert/jsonschema.py`'s `_discover_classes`). The FK column itself
-    # (a valid OID string either way) is kept; only the now-dangling
-    # `FOREIGN KEY` constraint - which would `ALTER TABLE ... REFERENCES` a
-    # table this conversion never creates - is dropped.
-    # A FK built from the target's bare Name (`_columns_for_class` cannot
-    # know the suffix a name collision forces) is retargeted by identity
-    # here - without it, a `REFERENCE TO` across two same-named classes
-    # (an LV03 and an LV95 `Facility`) both point at whichever one happened
-    # to take the unsuffixed table name.
+    # A target from another model is not among `classes`: keep the FK column, drop the dangling constraint.
+    # Retarget by identity, since `_columns_for_class` cannot know the suffix a name collision adds.
     converted = [c for c in classes if getattr(c, "Kind", None) == "Class"]
     class_by_id = {id(c): c for c in converted}
     for table in tables:
@@ -1141,9 +1069,8 @@ def _build_tables(
                 table, fk, [(t, table_name_by_class_id[id(t)]) for t in targets], keeps_column=targets[0] is target
             )
 
-    # An ABSTRACT class with concrete subclasses becomes a polymorphic VIEW of
-    # its inherited columns over their tables - what a `VIEW ... OF` it, or a
-    # reader wanting every instance, needs (INTERLIS views are polymorphic).
+    # An ABSTRACT class with concrete subclasses becomes a polymorphic VIEW over their tables (INTERLIS views are
+    # polymorphic).
     tables_by_name = {t.name: t for t in tables}
     for cls in classes:
         if getattr(cls, "Kind", None) != "Class" or not getattr(cls, "Abstract", False):

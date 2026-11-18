@@ -1,12 +1,7 @@
-"""Typing-only description of what a VIEW/OID/TRANSLATION mixin can assume `self` provides.
+"""Typing-only description of what the builder mixins can assume `self` provides.
 
-Never a real runtime base of anything - referenced under `TYPE_CHECKING`
-by `view_mixin.py`/`oid_mixin.py`/`translation_mixin.py` so mypy can see
-`self.registry`/`self.attachment`/... without a circular import back to
-`model_builder.py` (which imports all three mixins as real runtime
-bases, so a mixin importing the concrete `InterlisModelBuilder` class -
-even under `TYPE_CHECKING` - creates a cycle mypy cannot resolve; this
-Protocol lives in its own leaf module instead).
+Lives in its own leaf module because a mixin importing the concrete builder, even under
+`TYPE_CHECKING`, creates a cycle mypy cannot resolve.
 """
 
 from __future__ import annotations

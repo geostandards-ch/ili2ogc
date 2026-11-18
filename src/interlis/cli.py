@@ -1,11 +1,7 @@
-"""INTERLIS runtime CLI: `interlis build <file.ili>`.
+"""INTERLIS runtime CLI: `interlis <command>`.
 
-Thin entry point - all the logic lives in interlis.runtime/interlis.builder.
-mappings/ and spec/grammar/mapping/ are resolved via _resource_dirs() below:
-data embedded in the installed package (force-include at wheel build time,
-see pyproject.toml) if present, otherwise falls back to a development repo
-checkout (editable install/`uv run` - the data only exists at the repo
-root in that mode, never copied under src/interlis/).
+Thin entry point; the logic lives in interlis.runtime/interlis.builder. The grammar mapping data is read from the
+installed package when present, else from the development checkout.
 """
 
 import argparse
@@ -64,12 +60,7 @@ _DEV_ROOT = Path(__file__).resolve().parent.parent.parent
 
 @contextmanager
 def _resource_dirs():
-    """Yield (mappings_dir, spec_dir) as real filesystem `Path`s.
-
-    Uses the installed package's data (`importlib.resources.as_file`,
-    extracted to a temp dir if the package is zipped) when present,
-    otherwise falls back to the repo root (dev mode).
-    """
+    """Yield (mappings_dir, spec_dir) as real `Path`s: the installed package's data if present, else the repo root."""
     spec_pkg = importlib.resources.files("interlis") / "spec_data" / "grammar" / "mapping"
     if spec_pkg.is_dir():
         with ExitStack() as stack:
@@ -123,11 +114,9 @@ def _add_diagnostic_args(subparser: argparse.ArgumentParser) -> None:
 
 
 def _finish(bag: DiagnosticBag, args: argparse.Namespace, *, extra_exit: int = 0) -> int:
-    """Render `bag` per `args`, write `--report`, and return the process exit code.
+    """Render `bag` per `args`, write `--report`, and return the exit code (0 clean, 2 degraded, 1 failed).
 
-    Exit code: 0 clean · 2 completed-with-degradations · 1 failed (an
-    `error`, or `--strict` with any diagnostic). `extra_exit` (a non-zero
-    from an earlier hard failure) always wins.
+    A non-zero `extra_exit` from an earlier hard failure always wins.
     """
     fmt = getattr(args, "output_format", "text")
     report = getattr(args, "report", None)
@@ -218,11 +207,7 @@ def cmd_build(args: argparse.Namespace) -> int:
     return ExitCode.OK
 
 
-# All five `View` formation laws are translated by every converter,
-# except the parts that stay a `-- NOTE` (an AGGREGATION column that is a
-# user-FUNCTION result over the implicit AGGREGATES bag, an INSPECTION
-# member the target cannot express, a PostGIS-only AREA INSPECTION in a
-# GeoPackage).
+# Every converter translates all five `View` formation laws, except the parts that stay a `-- NOTE`.
 _SUPPORTED_VIEW_FORMATION_KINDS = _jsonschema_mod.SUPPORTED_VIEW_FORMATION_KINDS
 _SQL_VIEW_FORMATION_KINDS = _SUPPORTED_VIEW_FORMATION_KINDS
 
@@ -230,22 +215,8 @@ _SQL_VIEW_FORMATION_KINDS = _SUPPORTED_VIEW_FORMATION_KINDS
 def cmd_convert(args: argparse.Namespace) -> int:
     """Convert an .ili model to JSON Schema.
 
-    See `mappings/ilismeta16-to-jsonschema-rules.yml` for scope - a mapped
-    type outside this converter's coverage gets an explicit
-    `x-unsupported` marker rather than being silently dropped.
-
-    Every `Class` becomes its own `$defs` entry, as before. A `VIEW` is
-    ALSO a root, for every `FormationKind`
-    (`_SUPPORTED_VIEW_FORMATION_KINDS` -
-    Projection/Join/Union/Aggregation/Inspection). `View` extends
-    `Class` in the metamodel (`ilismeta16-classes.yml`) and its
-    `ClassAttribute` list is populated the same way -
-    `class_to_json_schema`/`model_to_json_schema` need no View-
-    specific code at all, confirmed empirically: a View's flattened
-    attribute set (whatever the formation law) already produces a correct
-    JSON Schema `$defs` entry through the exact same path as a plain
-    Class. `x-crud` is GET-only for every derived View except a plain
-    `PROJECTION OF` (`_crud_operations`).
+    Every Class, and every VIEW whatever its `FormationKind`, becomes a `$defs` entry; types outside the converter's
+    coverage get an explicit `x-unsupported` marker.
     """
     path = Path(args.file)
     if not path.exists():
@@ -264,22 +235,14 @@ def cmd_convert(args: argparse.Namespace) -> int:
     builder = open_builder(repository)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        # eCH-0117 `!!@Name=Value` meta-attributes declared directly in
-        # THIS file (technicalContact/furtherInformation/IDGeoIV at MODEL
-        # level, CRS on a locally-declared CoordType domain, etc.) -
-        # previously never captured here (only an IMPORTED model's own
-        # comments were, via ModelRepository._get_table), so a model that
-        # declares its own geometry domain rather than importing
-        # CHBase_Part1_GEOMETRY_V1 silently lost its CRS, and MODEL-level
-        # metadata had nowhere to attach at all.
+        # Pass this file's own `!!@Name=Value` meta-attributes so its MODEL-level metadata and a locally
+        # declared CoordType's CRS are captured (an imported model's are handled by ModelRepository).
         root = builder.build(tree, meta_attributes=meta_attribute_comments_in_file(path))
     bag.extend(builder_warnings_to_diagnostics(caught, file=str(path)))
 
     roots = _jsonschema_mod.convertible_roots(builder.symbol_table)
-    # `build()` returns the root Model instance directly for the (real-corpus
-    # dominant) single-MODEL-per-file case - a file declaring more than one
-    # MODEL yields something else here, so `x-meta` is simply omitted rather
-    # than guessing which MODEL the file-level metadata belongs to.
+    # `build()` returns the root Model only for a single-MODEL file; otherwise `x-meta` is omitted rather than
+    # guessing which MODEL the metadata belongs to.
     root_model = (
         root if isinstance(root, MetaInstance) and root._qualified_class.rsplit(".", 1)[-1] == "Model" else None
     )
@@ -334,20 +297,9 @@ def _inherited_topic_classes(root_table) -> list[MetaInstance]:
 
 
 def _fold_in_dependency_models(classes, views, root_table, repository, class_symbol_tables) -> None:
-    """Append the imported-model classes this conversion actually depends on to `classes` (in place).
+    """Append to `classes` (in place) the imported-model classes this conversion depends on.
 
-    "Depends on" = a VIEW base class, the cross-model target of a
-    REFERENCE TO/embedded role, or a class of an imported base topic that a
-    root `TOPIC ... EXTENDS` inherits (its baskets carry those objects),
-    that lives in an IMPORTED model rather than the root file - PLUS the
-    STRUCTURE-containment closure of those (a nested structure needs its
-    own table too). Only models
-    `builder.build()` already pulled in via `--repo`
-    (`repository.loaded_models()`) are considered. A base class reached only
-    through inheritance is NOT folded: SQL is table-per-concrete-class with
-    the base's columns inlined, so an abstract library base (e.g.
-    `Dictionaries_V1.Dictionary`) would only produce a dead table. Mirrors
-    `--catalog`, without the caller naming each file.
+    These are VIEW bases, cross-model reference targets and the STRUCTURE closure; only models on `--repo` count.
     """
     if repository is None:
         return
@@ -379,9 +331,7 @@ def _fold_in_dependency_models(classes, views, root_table, repository, class_sym
                 loaded.setdefault(id(instance), (instance, model_table))
 
     already_ids = {id(c) for c in classes}
-    # A model already supplied via --catalog is built by a SEPARATE builder,
-    # so its classes are different instances than repository.loaded_models()'s
-    # - dedup by Name too, so --catalog + this path don't both add it.
+    # A --catalog model comes from a separate builder (distinct instances), so dedup by Name too.
     already_names = {getattr(c, "Name", None) for c in classes}
 
     keep: dict[int, MetaInstance] = {}
@@ -406,9 +356,7 @@ def _fold_in_dependency_models(classes, views, root_table, repository, class_sym
             if resolved.type_kind in ("Class", "ReferenceType"):
                 queue.extend(reference_target_classes(resolved))
 
-    # Declaration order, not discovery order: `needed_ids` is a set of
-    # `id()`s, so discovery order follows memory addresses - and decides
-    # which of two same-named classes keeps the unsuffixed table name.
+    # Declaration order, not set/`id()` order: it decides which of two same-named classes keeps the unsuffixed name.
     position = {instance_id: n for n, instance_id in enumerate(loaded)}
     for instance_id, instance in sorted(keep.items(), key=lambda item: position.get(item[0], len(position))):
         if getattr(instance, "Name", None) in already_names:
@@ -422,11 +370,7 @@ def _fold_in_dependency_models(classes, views, root_table, repository, class_sym
 def _catalog_symbol_table(catalog_path: Path, repository: ModelRepository | None) -> SymbolTable | None:
     """The `--repo`-built table for a `--catalog` file, or `None` if the repository cannot reach it.
 
-    Reusing it is what keeps identity: building the file a second time
-    with its own builder yields classes that are never `is`-identical to
-    the ones the converted model's own `EXTENDS`/`REFERENCE TO` already
-    resolved through `--repo`, so the promoted copy ends up as a separate
-    table no subclass row ever reaches.
+    Reusing it keeps class identity; a second build would yield classes that `EXTENDS`/`REFERENCE TO` never reach.
     """
     if repository is None:
         return None
@@ -501,10 +445,7 @@ def _sql_schema(args: argparse.Namespace, bag: DiagnosticBag) -> SimpleNamespace
             and instance._qualified_class.rsplit(".", 1)[-1] == "View"
             and getattr(instance, "FormationKind", None) not in _SQL_VIEW_FORMATION_KINDS
         ):
-            # Every known FormationKind is now handled by `build_views`
-            # (a real CREATE VIEW, or a `-- NOTE` from inside it when a
-            # branch is untranslatable). This only fires for a View whose
-            # `FormationKind` the builder never set at all.
+            # Only a View whose `FormationKind` the builder never set reaches here.
             kind = str(getattr(instance, "FormationKind", None))
             bag.add(
                 Diagnostic(
@@ -515,10 +456,8 @@ def _sql_schema(args: argparse.Namespace, bag: DiagnosticBag) -> SimpleNamespace
                 )
             )
 
-    # `id(cls) -> its OWN symbol table`, for every `--catalog` class - see
-    # `build_tables`'s `class_symbol_tables` docstring: a catalogue class's
-    # embedding association (if any) is declared in ITS OWN model's table,
-    # never in `builder.symbol_table` (the root file being converted).
+    # `id(cls) -> its own symbol table` for each `--catalog` class: its embedding association is declared there,
+    # not in the root file's table.
     class_symbol_tables: dict[int, SymbolTable] = {}
 
     seen_catalog_paths: set[Path] = set()
@@ -552,13 +491,8 @@ def _sql_schema(args: argparse.Namespace, bag: DiagnosticBag) -> SimpleNamespace
         classes.extend(catalog_classes)
         class_symbol_tables.update({id(instance): catalog_table for instance in catalog_classes})
 
-    # An imported model this conversion actually depends on - a VIEW's
-    # JOIN OF/PROJECTION OF base classes, or the target of a cross-model
-    # REFERENCE TO/role - must be part of the SAME conversion for its
-    # tables (and the CREATE VIEW / FOREIGN KEY that need them) to exist.
-    # Any such model that `builder.build()` already resolved through
-    # `--repo` is folded in automatically here, so `--catalog` is only
-    # needed for a model NOT reachable via `--repo`.
+    # Fold in the imported models this conversion depends on (VIEW bases, cross-model REFERENCE TO targets) that
+    # `--repo` already resolved; `--catalog` is only needed for models `--repo` cannot reach.
     _fold_in_dependency_models(classes, views, builder.symbol_table, repository, class_symbol_tables)
 
     class_table_names: dict[int, str] = {}
@@ -605,47 +539,7 @@ def _with_crs_fallback(command):
 def cmd_convert_sql(args: argparse.Namespace) -> int:
     """Convert an .ili model to SQL DDL, PostgreSQL or GeoPackage/SQLite.
 
-    This project generates the full schema (`CREATE TABLE` + `UNIQUE` +
-    `FOREIGN KEY` + `CHECK`, the latter from a row-local `MANDATORY
-    CONSTRAINT`); GDAL (`ogr2ogr -append`) is expected to load the actual
-    .xtf-derived data into the tables this command creates, never the
-    other way around. `--dialect gpkg` assumes the target `.gpkg` file
-    already has the standard GeoPackage system tables (created by GDAL
-    beforehand) and declares every constraint INLINE, at `CREATE TABLE`
-    time (SQLite cannot add one to an existing table at all, unlike
-    `--dialect postgresql`'s default, which uses a separate `ALTER TABLE
-    ... ADD CONSTRAINT` pass for `FOREIGN KEY` only - `UNIQUE`/`CHECK` are
-    inline in both dialects). `Kind=Class` roots become a `CREATE TABLE`;
-    every `View` becomes a `CREATE VIEW` - Projection/Join as
-    `SELECT ... FROM <bases> WHERE`, Union as `SELECT ... UNION ALL ...`,
-    Inspection as a `SELECT` over the child table `build_tables` already
-    emits for the inspected `BAG`/`LIST OF` attribute, Aggregation as
-    `SELECT ... GROUP BY <key>`. A branch that can't be translated
-    faithfully (an AGGREGATION column that is a user-FUNCTION call over the
-    implicit `AGGREGATES` bag, an INSPECTION member such as `ArcPoint`)
-    demotes that whole
-    View to a `-- NOTE`. A View's
-    base classes live in an IMPORTED model, so pass that model via
-    `--catalog` too - a View whose base table isn't in this conversion, or
-    whose `Where`/`ATTRIBUTE` expressions fall outside the translatable
-    subset, is emitted as a `-- NOTE` rather than a half-built `CREATE
-    VIEW`. An attribute/constraint outside this module's mapped set never
-    disappears silently - it becomes a `-- NOTE` SQL comment instead
-    (RULE #5).
-
-    `--catalog FILE.ili` (repeatable): each is built with its OWN
-    `InterlisModelBuilder` (sharing `repository` so cross-references
-    between `file` and a catalogue, or between two catalogues, still
-    resolve) and its classes are appended to the SAME `classes` list
-    `build_tables` receives - closes `build_tables`'s own documented
-    cross-model FK-drop (see its "3rd real bug" comment): a `REFERENCE TO`
-    a class NOT among `classes` gets its `FOREIGN KEY` constraint dropped,
-    column kept, because that target table doesn't exist in THIS
-    conversion's output. A catalogue model (e.g. a value-list Class
-    hierarchy extending `CatalogueObjects_V1.Catalogues.Item`) is the
-    single most common real case - but
-    this flag is generic, not catalogue-specific: any additional model
-    works the same way.
+    Untranslatable constructs become `-- NOTE` comments; `--catalog` files are appended to the converted classes.
     """
     bag = DiagnosticBag()
     schema = _sql_schema(args, bag)
@@ -696,23 +590,9 @@ def _resolve_schema_model_path(
     args: argparse.Namespace,
     repository: ModelRepository | None,
 ) -> tuple[Path, str | None] | ExitCode:
-    """Resolve the .ili file describing `transfer`'s schema, or print an error and return the `ExitCode` to exit with.
+    """Resolve the .ili file describing `transfer`'s schema, or print an error and return an `ExitCode`.
 
-    Shared between `cmd_validate` and `cmd_convert_jsonfg` (same
-    resolution rule):
-    - an explicit `--model <file.ili>` (historical behavior, still
-      supported);
-    - otherwise, auto-detected from the transfer itself (never a Model
-      Repository queried directly): the "root" models actually used by its
-      DATASECTION (see xtf.model_resolution) are looked up in the given
-      `--repo` directories - one is enough as an entry point, the rest
-      (remaining roots, or an imported "core" model) resolve through the
-      existing cross-model mechanism (ModelRepository.resolve_external).
-
-    Returns `(model_path, root_model_name)` - `root_model_name` is `None`
-    for the explicit `--model` path (never looked up by name in that
-    case) - or an `ExitCode` (USAGE: neither `--model` nor `--repo` given;
-    NOT_FOUND: `--model` path, or every candidate root model, missing).
+    Uses an explicit `--model`, else the root models of the transfer looked up in `--repo`.
     """
     if args.model:
         model_path = Path(args.model)
@@ -736,12 +616,7 @@ def _resolve_schema_model_path(
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
-    """Validate an .xtf transfer file against its schema.
-
-    Checks base types, MANDATORY, structure, cross-basket TID/REF
-    resolution, and the model's CONSTRAINTs.
-    Schema resolution: see `_resolve_schema_model_path`.
-    """
+    """Validate an .xtf transfer against its schema (types, MANDATORY, structure, TID/REF resolution, CONSTRAINTs)."""
     xtf_path = Path(args.xtf)
     if not xtf_path.exists():
         _error(f".xtf file not found: {xtf_path}")
@@ -768,18 +643,11 @@ def cmd_validate(args: argparse.Namespace) -> int:
         builder.build(tree)
 
     if repository is not None and root_model_name is not None:
-        # Avoids rebuilding the root model twice (already built above via
-        # its own parse_file/build()) when header_completeness() checks its
-        # resolvability below.
+        # Avoids rebuilding the root model when header_completeness() checks it.
         repository.register_prebuilt(root_model_name, builder.symbol_table)
 
-    # header_completeness only makes sense when a --repo is given - without
-    # it, no model can be checked/resolved anyway, and this mode (`--model`
-    # alone, historical) never assumed cross-model resolution: don't change
-    # its default behavior/output. Same warning suppression as the root
-    # build above: without it, every header model built HERE (potentially
-    # never touched otherwise) would emit its own UserWarning (known spec
-    # gaps) straight to stderr, even under -q.
+    # header_completeness needs a --repo (`--model` alone never resolved cross-model). Warnings are suppressed as
+    # for the root build, so header models built here do not print UserWarnings even under -q.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         header_status = header_completeness(transfer, repository) if repository is not None else []
@@ -1090,32 +958,7 @@ def _write_change_requests(
 def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
     """Convert an .xtf transfer to a JSON-FG FeatureCollection.
 
-    Scope: the "core" and
-    "types-schemas" JSON-FG requirements classes, plus "circular-arcs"/
-    "polyhedra" when "place" needs them: scalar properties,
-    OID, featureType, and single-attribute point/line/polygon/solid
-    geometry (`"place"`) with its `"coordRefSys"` resolved from the
-    eCH-0117 `!!@CRS` meta-attribute; `"geometry"` (the WGS84 GeoJSON
-    fallback) always stays `null`. Schema resolution: see
-    `_resolve_schema_model_path` (same `--model`/`--repo` rule as
-    `interlis validate-xtf`).
-
-    Backlog item 8: every `VIEW` is evaluated into Features -
-    `PROJECTION`/`JOIN`/`UNION`/`AGGREGATION`/`INSPECTION`
-    (`convert/jsonfg.evaluate_view`). A `WHERE` clause narrows a
-    `JOIN`/`PROJECTION` and is evaluated by the CONSTRAINT evaluator
-    (`And`/`Or`/`Not`/`Defined`/`Implication`/relational, constants,
-    nested-STRUCTURE paths). The only VIEWs skipped, each with a clear
-    stderr diagnostic (`unsupported_view_reason`): one whose base model
-    isn't on `--repo` (provide it), and one whose `WHERE` needs a
-    construct the CONSTRAINT evaluator itself doesn't support (arithmetic,
-    a function call).
-
-    `--feature-schema-url`, when given, wires "featureSchema" (JSON-FG
-    clause 13) to the companion JSON Schema `interlis convert-jsonschema` would
-    produce for the SAME `.ili` model - this runtime has no schema-hosting
-    story of its own, so the URL is always user-supplied (same stance as
-    `--repo`/`--model`), never derived automatically.
+    A VIEW is skipped with a diagnostic when its base model is not on `--repo` or it needs an unsupported construct.
     """
     xtf_path = Path(args.xtf)
     if not xtf_path.exists():
@@ -1144,13 +987,7 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
     builder = open_builder(repository)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        # eCH-0117 `!!@Name=Value` meta-attributes declared directly in the
-        # schema model itself - previously never captured here (only an
-        # IMPORTED model's own comments were, via
-        # ModelRepository._get_table), so a model that declares its own
-        # geometry domain locally (rather than importing
-        # CHBase_Part1_GEOMETRY_V1) would never resolve a CRS, and "place"
-        # would silently stay unsupported.
+        # Capture the schema model's own `!!@` meta-attributes so a locally declared CoordType resolves a CRS.
         builder.build(tree, meta_attributes=meta_attribute_comments_in_file(model_path))
     bag.extend(builder_warnings_to_diagnostics(caught, file=str(model_path)))
 
@@ -1240,20 +1077,8 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
 def cmd_write_xtf(args: argparse.Namespace) -> int:
     """Write one `VIEW TOPIC` VIEW's data as an .xtf transfer, evaluated against a source .xtf.
 
-    See `convert/xtf_writer.py`'s module docstring for the refman grounding
-    (eCH-0031 V2.1.0 SS4182/SS4728/SS4.3.7/SS4.3.8). `model` is the VIEW
-    TOPIC `.ili` (its base model resolved via `--repo`, RULE #9 - a base
-    model missing from `--repo` degrades this the same way as any other
-    conversion here, a clear diagnostic, never a crash); `xtf` is the
-    source transfer the VIEW is evaluated against. `--view` picks which
-    VIEW when the model declares more than one; with exactly one VIEW in
-    the model, it's used automatically. Every `FormationKind` is
-    supported (`evaluate_view_objects`) EXCEPT an `INSPECTION` of a
-    SURFACE/AREA/POLYLINE geometry, which has no XTF-transferable shape
-    (derived geometry values, JSON-FG-only - a clear `ValueError`). A VIEW declared in a plain `TOPIC`
-    rather than a `VIEW TOPIC` is refused outright (refman: it would
-    never actually be transferred by a compliant tool - `ili2c` compiles
-    it silently absent from the generated schema).
+    `--view` picks the VIEW when the model declares several. An INSPECTION of a SURFACE/AREA/POLYLINE has no
+    XTF-transferable shape (ValueError), and a VIEW declared in a plain `TOPIC` is refused.
     """
     model_path = Path(args.model)
     if not model_path.exists():
@@ -1299,11 +1124,7 @@ def cmd_write_xtf(args: argparse.Namespace) -> int:
 
     qualified_view = builder.symbol_table.qualified_name_of(view)
     topic_instance = builder.symbol_table.resolve(qualified_view.rsplit(".", 1)[0]) if qualified_view else None
-    # `ViewUnit` lives on the DataUnit twin, not the SubModel `topic_instance`
-    # itself (topicDef builds both linked instances, `_build_multi_target`
-    # in model_builder.py - only the SubModel gets registered in the symbol
-    # table under its qualified name, so the twin has to be reached via
-    # `_twin`).
+    # `ViewUnit` lives on the DataUnit twin, not the registered SubModel, so reach it via `_twin`.
     data_unit = getattr(topic_instance, "_twin", None)
     if not getattr(data_unit, "ViewUnit", False):
         _error(
@@ -1342,18 +1163,10 @@ def cmd_write_xtf(args: argparse.Namespace) -> int:
 
 
 def cmd_convert_sld(args: argparse.Namespace) -> int:
-    """Convert an .ili `GRAPHIC`'s `DrawingRule`s to SLD - one file per `GRAPHIC` (SLD is inherently per-layer).
+    """Convert an .ili `GRAPHIC`'s `DrawingRule`s to SLD, one file per `GRAPHIC`.
 
-    `Sign := {name}` PARAMETER assignments resolve against `--sign-xtf`'s
-    first basket (a real `SIGN BASKET` data section) when given; omitted,
-    they're simply left unresolved (the same documented degrade path
-    `styling_rule_from_drawing_rule`/`SignLibrary` already use elsewhere).
-    A `GRAPHIC` citing an attribute its base VIEW/class does not declare is
-    refused (exit code 1, the other GRAPHICs are still written).
-    A `GRAPHIC` whose every `DrawingRule` ends up with no SLD-representable
-    symbolizer content (pycartosym's writer refuses a `se:Rule` with none)
-    is skipped with a diagnostic rather than aborting every other GRAPHIC
-    in the same model.
+    `Sign` parameters resolve against `--sign-xtf` when given, else stay unresolved. A GRAPHIC citing an attribute its
+    base does not declare is refused (exit 1); one with no SLD-representable symbolizer is skipped with a diagnostic.
     """
     if args.dpi and args.paper_units:
         _error("--dpi and --paper-units both say how to write paper lengths: use one.")
@@ -1446,19 +1259,10 @@ def cmd_convert_sld(args: argparse.Namespace) -> int:
 
 
 def cmd_convert_cql2(args: argparse.Namespace) -> int:
-    """Compile every per-Feature CONSTRAINT of an .ili model to a CQL2-JSON filter.
+    """Compile every per-Feature CONSTRAINT of an .ili model to a CQL2-JSON filter (OGC API - Features Part 3).
 
-    OGC API - Features Part 3: Filtering. Walks every Class/View's
-    `Constraint` list; only a plain `SimpleConstraint` (`Kind` `None`/
-    `MandC`, no `Percentage`) is a per-Feature boolean filter at all -
-    `UNIQUE`/`SET`/`EXISTENCE` and the percentage-based plausibility form
-    are population/basket-level checks, skipped with a clear diagnostic
-    (`convert/cql2.py`'s `cql2_unsupported_reason`) rather than omitted
-    silently. Scope mirrors `convert/constraint_eval.py` exactly
-    (relational operators, `And`/`Or`/`Not`/`Implication`,
-    `DEFINED(...)`, a plain possibly-multi-hop attribute path, constants)
-    - arithmetic, spatial predicates, `THIS`/`PARENT`, and function calls
-    are out of scope, reported the same way (`UnsupportedExpressionError`).
+    Only a plain `SimpleConstraint` qualifies; population/basket-level constraints and expressions outside
+    `constraint_eval.py`'s scope are skipped with a diagnostic.
     """
     path = Path(args.file)
     if not path.exists():

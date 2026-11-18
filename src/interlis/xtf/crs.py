@@ -1,9 +1,7 @@
-"""Coordinate reference system of a coordinate domain, shared by every converter and validator.
+"""Coordinate reference system of a coordinate domain, shared by the converters and the validators.
 
-The EPSG code comes from ONE source only: the eCH-0117 `!!@CRS=EPSG:<digits>` annotation written directly above a
-concrete domain (`Coord2 EXTENDS Geometry_V2.Coord2 = COORD ...`). A generic domain (`Coord2 (GENERIC) = COORD ...`)
-has none; its concrete one reaches it through `EXTENDS` or a `CONTEXT` rebinding. Nothing is ever inferred from the
-bounds of a domain or from the name of its axes' reference system.
+The EPSG code comes only from a `!!@CRS=EPSG:<digits>` annotation above a concrete domain; a generic domain
+gets it through `EXTENDS` or a `CONTEXT` rebinding. It is never guessed from bounds or axis names.
 """
 
 from __future__ import annotations
@@ -27,15 +25,9 @@ _MODEL_CLASS = "IlisMeta16.ModelData.Model"
 
 @dataclass(frozen=True)
 class CrsResolution:
-    """The CRS of a coordinate domain, or why it has none.
+    """The CRS of a coordinate domain, or the reason it has none.
 
-    `provenance` says where the code came from: `"annotation"` (on the domain itself), `"extends"` (on an ancestor
-    in its `EXTENDS` chain), `"context"` (on the concrete domain a `CONTEXT` binds the generic one to) or `"cli"`
-    (the explicit `--crs` fallback for a domain that declares none).
-    `reason` (when unresolved) is one of `unresolved-type`, `unresolved-super` (a base model is missing),
-    `generic-unbound` (a generic domain no imported `CONTEXT` binds), `undeclared` (no annotation anywhere on the
-    chain), `ambiguous-context`, `invalid-annotation` or `duplicate-annotation`.
-    `warnings` are `(rule, detail)` findings that did not prevent the resolution.
+    `provenance` is "annotation", "extends", "context" or "cli"; `warnings` are `(rule, detail)` findings.
     """
 
     epsg: int | None = None
@@ -53,10 +45,9 @@ class CrsResolution:
 
 @contextlib.contextmanager
 def fallback_crs(epsg: int | None) -> Iterator[None]:
-    """Inside the block, a domain that declares NO `!!@CRS` anywhere gets `epsg` (the user's explicit `--crs`).
+    """Within the block, a domain that declares no `!!@CRS` gets `epsg` (the user's `--crs`).
 
-    Only the `undeclared` case: an ambiguous `CONTEXT`, an invalid or duplicated annotation and an unbound
-    generic domain stay unresolved, since the user's value would silence a real model problem.
+    Other failures (ambiguous context, bad annotation, unbound generic domain) stay unresolved.
     """
     token = _FALLBACK.set(epsg)
     try:
@@ -140,13 +131,9 @@ def _chain(domain: MetaInstance) -> list[MetaInstance]:
 
 
 def context_instances(symbol_table: SymbolTable | None, repository: ModelRepository | None) -> list[MetaInstance]:
-    """Every `Context` (`CONTEXT <Name> = ...;`) declared directly in a MODEL actually IMPORTed, deduplicated.
+    """Every `Context` declared in a MODEL that is actually imported, without duplicates.
 
-    Scoped to `Model.Element` of the SPECIFIC model each name in `repository.loaded_models()` was resolved
-    through: a file can declare several sibling `MODEL`s sharing one symbol table (swisstopo's
-    `CHBase_Part7_CONTEXT_V2.ili`: `ContextCH_V2`/`ContextCHLV03_V2`/`ContextCHLV95_V2`), and only the model named in
-    an `IMPORTS` clause may contribute its rebindings - an unrelated sibling's (possibly ambiguous, `OR`-joined)
-    rebinding of the SAME generic domain must never shadow it.
+    Sibling models in one file share a symbol table, so only the imported model's own contexts are kept.
     """
     models: list[MetaInstance] = []
     if symbol_table is not None:
@@ -179,9 +166,9 @@ def context_instances(symbol_table: SymbolTable | None, repository: ModelReposit
 def context_binding(
     domain: MetaInstance | None, symbol_table: SymbolTable | None, repository: ModelRepository | None
 ) -> list[MetaInstance] | None:
-    """The concrete domains a `CONTEXT` binds the generic `domain` (or an ancestor of it) to, `None` if none does.
+    """The concrete domains a `CONTEXT` binds `domain` (or an ancestor) to, `None` if none does.
 
-    Several entries mean OR-ed alternatives (`ContextCH_V2`'s `Coord2=...LV03 OR ...LV95`): ambiguous.
+    Several entries are OR-ed alternatives, which makes the binding ambiguous.
     """
     if domain is None:
         return None
@@ -234,10 +221,9 @@ def _resolve(
     symbol_table: SymbolTable | None = None,
     repository: ModelRepository | None = None,
 ) -> CrsResolution:
-    """Resolve the CRS of a coordinate domain: its own `!!@CRS`, else its `EXTENDS` chain's, else its `CONTEXT`'s.
+    """Resolve a domain's CRS: its own `!!@CRS`, else its `EXTENDS` chain's, else its `CONTEXT`'s.
 
-    Never guessed: an absent, duplicated or malformed annotation, or an ambiguous `CONTEXT`, gives an unresolved
-    `CrsResolution` carrying the reason.
+    A missing, duplicated or malformed annotation, or an ambiguous `CONTEXT`, gives an unresolved result.
     """
     if coord_type is None:
         return CrsResolution(reason="unresolved-type", detail="vertex CoordType not resolved")

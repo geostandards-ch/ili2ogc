@@ -1,8 +1,5 @@
 """IlisMeta16 `View` -> SQL `CREATE VIEW`: PROJECTION/JOIN/UNION/AGGREGATION/INSPECTION formation kinds, `WHERE`
-translation, VIEW-level `UNIQUE` -> `BEFORE INSERT`/`UPDATE` trigger.
-
-`build_views` is the public entry point - see its own docstring for the
-translatable subset.
+translation, VIEW-level `UNIQUE` -> `BEFORE INSERT`/`UPDATE` trigger. `build_views` is the public entry point.
 """
 
 from __future__ import annotations
@@ -42,12 +39,9 @@ from .tables import _columns_for_class, _inherited_constraints
 
 
 class _UnsupportedView(Exception):
-    """A View shape this module cannot faithfully turn into a `CREATE VIEW` - caught per-View, surfaced as a `-- NOTE`
-    (RULE #5), never a crash.
+    """A View shape that cannot faithfully become a `CREATE VIEW`: caught per View and surfaced as a `-- NOTE`.
 
-    `rule` is the stable diagnostic id - defaults to the "expression
-    outside the translatable subset" family; a "base/target table
-    missing" site passes `SQL-VIEW-BASE-MISSING` explicitly.
+    `rule` is the diagnostic id, defaulting to the "outside the translatable subset" family.
     """
 
     def __init__(self, message: str, rule: str = "SQL-VIEW-EXPR-UNTRANSLATABLE") -> None:
@@ -58,8 +52,7 @@ class _UnsupportedView(Exception):
 class _MultilingualAttribute(_UnsupportedView):
     """A path ending on a LocalisationCH multilingual text: one SQL expression per language, not one column.
 
-    `columns` maps a column suffix (`""` for the undefined language, else `"_de"`...) to its SQL; only a whole
-    VIEW attribute can hold it (`build_views`), anywhere else it stays an untranslatable expression.
+    `columns` maps a column suffix (`""` or `"_de"`...) to its SQL; only a whole VIEW attribute can hold it.
     """
 
     def __init__(self, name: str, columns: dict[str, str]) -> None:
@@ -98,12 +91,8 @@ def _equality_alternatives(expr: MetaInstance | None, attribute: str) -> set[str
 class _ViewResolver:
     """Resolves a View's `RenamedBaseView`/`ClassAttribute`/`Where` paths against the already-built `Table`s.
 
-    Base `Table`s must be part of the same conversion (`--catalog
-    <base>.ili`) - a missing one raises `_UnsupportedView` rather than
-    emitting a `CREATE VIEW` that would not compile. `assoc_near_roles`
-    (from `_resolve_view_bases`) marks a base that is really an embedded
-    2-role `ASSOCIATION`'s "near" role - navigating it is a self-reference
-    no-op, not a real member lookup.
+    A base `Table` missing from the conversion raises `_UnsupportedView`. `assoc_near_roles` marks a base that is
+    an embedded 2-role `ASSOCIATION`'s near role: navigating it is a self-reference no-op.
     """
 
     def __init__(
@@ -133,10 +122,7 @@ class _ViewResolver:
     def _flattened_struct_column(self, resolved: ResolvedAttribute, col: str, table: str) -> str | None:
         """Resolve a VIEW attribute naming a single-valued STRUCTURE to its ONE flattened column, or `None`.
 
-        `_columns_for_class` flattens a single-valued STRUCTURE inline
-        (`"<attr>_<subattr>"`) - a VIEW attribute naming the STRUCTURE
-        itself, not a sub-field, only resolves when it flattens to
-        EXACTLY one column (else ambiguous which one it means).
+        Only resolves when the STRUCTURE flattens to exactly one column, otherwise it is ambiguous.
         """
         if resolved.type_kind != "Class" or not is_structure(resolved.type_instance):
             return None
@@ -309,13 +295,10 @@ class _ViewResolver:
         return new_alias
 
     def defined_sql(self, factor: MetaInstance) -> str:
-        """Return a SQL boolean for `DEFINED(<base-alias> -> role -> role ...)` - an association-navigation existence
-        test.
+        """Return a SQL boolean for `DEFINED(<base-alias> -> role -> ...)`, an association-navigation test.
 
-        The DMAV `*_Gueltig` VIEW idiom: a `WHERE` built only from nested
-        `DEFINED()` over association-role paths. Each hop becomes an
-        `EXISTS (...)` reading the FK from whichever side carries it. A
-        scalar attribute or many-to-many hop demotes the whole VIEW.
+        Each hop becomes an `EXISTS (...)` reading the FK from whichever side carries it; a scalar attribute or
+        many-to-many hop demotes the whole VIEW.
         """
         if not factor._qualified_class.endswith("PathOrInspFactor") or getattr(factor, "Inspection", None):
             raise _UnsupportedView("DEFINED(...) argument is not a plain association path")
@@ -331,8 +314,6 @@ class _ViewResolver:
             raise _UnsupportedView("DEFINED(...) path element has no name")
         if not rest:
             # A final scalar attribute: DEFINED(...->attr) == <attr> IS NOT NULL.
-            # The DMAV `*_Gueltig` idiom ends on `GSNachfuehrung.Grundbucheintrag`,
-            # a plain XMLDateTime, not another association hop.
             col = _sql_identifier(hop)
             if col in self._columns(cur_table):
                 return f'{cur_alias}."{col}" IS NOT NULL'
@@ -348,10 +329,9 @@ class _ViewResolver:
         return f'EXISTS (SELECT 1 FROM "{target_table}" {v_quoted} WHERE {join}{tail})'
 
     def _resolve_association_hop(self, cls: MetaInstance, hop: str) -> tuple[MetaInstance, str, bool, str]:
-        """Find the 2-role association connecting `cls` to `hop`; return `(target class, target table, fk_on_current,
-        fk_column)`.
+        """Find the 2-role association connecting `cls` to `hop`; return `(target class, table, fk_on_cur, fk_col)`.
 
-        FK placement mirrors `xtf.schema.embedded_roles_of` exactly.
+        FK placement mirrors `xtf.schema.embedded_roles_of`.
         """
         st = self.symbol_for(cls)
         candidates = st.all_registered() if st is not None else []
@@ -429,9 +409,7 @@ def _view_where_conjuncts(expr: MetaInstance | None, resolver: _ViewResolver) ->
 def _view_where_sql(expr: MetaInstance, resolver: _ViewResolver) -> str:
     """One View `Where` sub-expression as a parenthesised SQL boolean.
 
-    Same supported subset as `constraint_eval.py`/`jsonfg.py`'s
-    `evaluate_view`: relational comparison, `And`/`Or`/`Not`, `DEFINED()`.
-    Anything else (a function call, arithmetic) demotes the whole VIEW.
+    Supports relational comparison, `And`/`Or`/`Not` and `DEFINED()`; anything else demotes the whole VIEW.
     """
     qname = expr._qualified_class.rsplit(".", 1)[-1]
     op = getattr(expr, "Operation", None)
@@ -471,14 +449,9 @@ def build_views(
     class_symbol_tables: dict[int, SymbolTable] | None = None,
     class_table_names: dict[int, str] | None = None,
 ) -> list[SqlView]:
-    """Translate each `View` (`FormationKind` Projection/Join only) into a `CREATE VIEW` body, or a `-- NOTE` when it
-    can't be done faithfully.
+    """Translate each Projection/Join `View` into a `CREATE VIEW` body, or a `-- NOTE` if it cannot be translated.
 
-    Becomes `SELECT <attr := path> ... FROM <base tables, comma-joined>
-    WHERE <predicates>`. Base classes must be among `tables` (`--catalog`). An attribute naming a multilingual
-    text becomes one column per language (`<attr>`, `<attr>_de`...).
-    Anything outside the translatable subset demotes the WHOLE view to
-    `body=None` with a note (RULE #5), never a half-built `CREATE VIEW`.
+    A view using anything untranslatable is skipped whole (`body=None`), never half-built.
     """
     tables_by_name = {t.name: t for t in tables}
     table_name_by_class_id = class_table_names or {}
@@ -528,10 +501,8 @@ def build_views(
                         for suffix, sql in multilingual.columns.items()
                     ]
                 except _UnsupportedView as exc:
-                    # An `ALL OF` pass-through re-exports every base attribute; one it
-                    # cannot project as a single column (a STRUCTURE, an unmapped type)
-                    # is dropped with a note. An explicit `Name := expression` was asked
-                    # for by name and still fails the whole VIEW.
+                    # An `ALL OF` pass-through drops an attribute it cannot project as one column, with a note; an
+                    # explicit `Name := expression` still fails the whole VIEW.
                     if not getattr(derivates[0], "_all_of_identity", False):
                         raise
                     notes.append(_diag("SQL-VIEW-ATTR-DROPPED", f"attribute {aname!r} not in the CREATE VIEW: {exc}"))
@@ -582,11 +553,8 @@ def _build_union_view(
 ) -> str:
     """Return a `SELECT ... UNION ALL SELECT ...` body for a `FormationKind=Union` view.
 
-    Each `ClassAttribute` carries one `Derivates` entry per base; branch
-    `i` projects `Derivates[i]` from base `i` alone. `UNION ALL`, not
-    `UNION` - INTERLIS union is a merge, not a set operation. Each branch
-    resolves independently, so one branch's join never leaks into
-    another's.
+    Branch `i` projects each attribute's `Derivates[i]` from base `i` alone, resolved independently so one branch's
+    join never leaks into another. `UNION ALL`, as INTERLIS union is a merge, not a set operation.
     """
     attrs = getattr(view, "ClassAttribute", None) or []
     if not attrs:
@@ -615,16 +583,9 @@ def _build_inspection_view(
     tables_by_name: dict[str, Table],
     symbol_for,
 ) -> tuple[str, str | None]:
-    """Return `(body, postgis_only reason)` for a `FormationKind=Inspection` view.
+    """Return `(body, postgis_only reason)` for an `INSPECTION OF` view over a structure path.
 
-    `INSPECTION OF <base> -> attr (-> attr)*` yields every element of the
-    inspected `BAG`/`LIST OF`; `build_tables` already emits that extent as
-    the child table chain `<base>_<attr>[_<attr>]`, so the view is a
-    projection over the last one. `out := PARENT -> field` joins back to
-    the immediate parent table (the base for a single hop, the previous
-    element table beyond) on the child's `<parent>_fk` column. A path
-    ending on a SURFACE/AREA/POLYLINE attribute has no child table and is
-    decomposed in SQL by `_build_geometry_inspection_view`.
+    It projects over the child tables `<base>_<attr>`; a geometry path goes to `_build_geometry_inspection_view`.
     """
     if len(bases) != 1:
         raise _UnsupportedView("an inspection view has exactly one base", "SQL-VIEW-FORMATION-UNSUPPORTED")
@@ -702,16 +663,9 @@ def _build_geometry_inspection_view(
     base_table: str,
     tables_by_name: dict[str, Table],
 ) -> tuple[str, str | None]:
-    """Return `(body, postgis_only reason)` for an `INSPECTION OF` a SURFACE/AREA/POLYLINE column (eCH-0031 SS3.15).
+    """Return `(body, postgis_only reason)` for an `INSPECTION OF` a SURFACE/AREA/POLYLINE column.
 
-    Uses only OGC SFA functions both PostGIS and SpatiaLite provide, with a
-    recursive CTE to enumerate rings or vertices: a surface boundary is
-    `ST_Boundary`, its `SurfaceEdge`s are the exterior and interior rings,
-    a `LineGeometry` is the line itself, its `LineSegment`s are its
-    vertices (`ST_PointN`; arcs are stroked on load, so no `ArcPoint`
-    survives). An `AREA INSPECTION` is the noded union of every area's
-    boundary (`ST_Dump(ST_Union(...))`, PostGIS only): each shared edge
-    appears once, split where other boundaries meet it.
+    Uses a recursive CTE over standard OGC SFA functions to list rings or vertices.
     """
     col = _sql_identifier(insp.attr)
     if base_table not in tables_by_name or col not in {c.name for c in tables_by_name[base_table].columns}:
@@ -801,15 +755,10 @@ def _build_aggregation_view(
     symbol_for,
     assoc_near_roles: dict[str, str],
 ) -> str:
-    """Return a `SELECT [DISTINCT] ... FROM "<base>" [GROUP BY ...]` body for a `FormationKind=Aggregation` view,
-    or demote.
+    """Return a `SELECT [DISTINCT] ... FROM "<base>" [GROUP BY ...]` body for a `Aggregation` view, or demote.
 
-    `AGGREGATION OF <base> (ALL | EQUAL(key))` collapses base objects into
-    one instance; a user FUNCTION over the implicit `AGGREGATES` bag
-    demotes the view, EXCEPT `INTERLIS.objectCount`/`elementCount` on the
-    bag itself, which become `COUNT(*)`. `EQUAL(key)` adds a real
-    `GROUP BY`; `ALL` with an aggregate AND a plain column has no
-    well-defined single value and demotes too.
+    A user FUNCTION over `AGGREGATES` demotes, except `objectCount`/`elementCount` on the bag itself
+    (`COUNT(*)`). `EQUAL(key)` adds a `GROUP BY`; `ALL` mixing an aggregate and a plain column also demotes.
     """
     if len(bases) != 1:
         raise _UnsupportedView("an aggregation view has exactly one base", "SQL-VIEW-FORMATION-UNSUPPORTED")
@@ -867,9 +816,7 @@ def _build_aggregation_view(
 def _standard_aggregate_function_sql(factor: MetaInstance, aname: str | None) -> str:
     """Return `COUNT(*)` for `INTERLIS.objectCount(AGGREGATES)`/`elementCount(AGGREGATES)`, or demote.
 
-    Refman signature ("count of objects/elements") is exactly `COUNT(*)`
-    applied to the grouped bag itself - any other function, or these two
-    applied to anything but the bare `AGGREGATES` argument, demotes.
+    Any other function, or these two applied to anything but the bare `AGGREGATES`, demotes.
     """
     if is_standard_count_call(factor):
         return "COUNT(*)"
@@ -884,8 +831,7 @@ def _standard_aggregate_function_sql(factor: MetaInstance, aname: str | None) ->
 def _view_constraint_notes(view: MetaInstance) -> list[str]:
     """Return a `-- NOTE` per VIEW-level `UNIQUE` / `SET` / `EXISTENCE` constraint - a `CREATE VIEW` cannot carry them.
 
-    Neither is expressible on a SQL view - surfaced here rather than
-    dropped silently (RULE #5); enforce downstream.
+    A SQL view cannot express them, so they are reported rather than dropped silently.
     """
     notes: list[str] = []
     for constraint in getattr(view, "Constraint", None) or []:
@@ -930,15 +876,9 @@ def _view_unique_constraint_ddl(
     *,
     extra_joins_present: bool,
 ) -> tuple[list[str], list[UniqueViewTrigger]]:
-    """Return `(notes, triggers)` for every VIEW-level `Constraint` of a PROJECTION/JOIN view (`Union`/`Aggregation`/
-    `Inspection` still go through `_view_constraint_notes` unchanged - no real corpus case combines them with a
-    view-level `UNIQUE`).
+    """Return `(notes, triggers)` for the VIEW-level constraints of a Projection/Join view.
 
-    A `UniqueConstraint` whose key is a plain view attribute on a
-    SINGLE-base view with no `extra_joins` becomes a real
-    `UniqueViewTrigger` instead of a dropped note (real corpus case: DMAV
-    `*_Gueltig`). A geometry-typed key stays a note - SQL `=` is
-    bounding-box equality on PostGIS `geometry`, not exact equality.
+    A UNIQUE on plain attributes of a single-base view becomes a trigger; a geometry key stays a note.
     """
     notes: list[str] = []
     triggers: list[UniqueViewTrigger] = []
@@ -994,10 +934,8 @@ def _view_unique_constraint_ddl(
 def _association_embedding(assoc_cls: MetaInstance) -> tuple[MetaInstance, str, str] | None:
     """Return `(carrier_class, near_role_name, far_role_name)` for a 2-role embedded `ASSOCIATION`.
 
-    Mirrors `xtf.schema.embedded_roles_of`, but from the association's own
-    perspective. `near_role_name`'s own target class IS the carrier (a
-    self-reference when navigated from the association). `None` for a
-    many-to-many association (not embedded) or a non-2-role one.
+    Mirrors `xtf.schema.embedded_roles_of` from the association's perspective; the near role targets the carrier.
+    `None` for a many-to-many or non-2-role association.
     """
     roles = [r for r in getattr(assoc_cls, "Role", None) or [] if isinstance(r, MetaInstance)]
     if len(roles) != 2:
@@ -1021,9 +959,7 @@ def _direct_association_join(
 ) -> tuple[bool, str] | None:
     """Find the (unique) 2-role association directly linking `cls_a` and `cls_b`.
 
-    Returns `(fk_on_a, fk_col)` (True = `cls_a`'s table carries the FK).
-    `None` for no such association, a many-to-many one, or 2+ candidates
-    that disagree (ambiguous, left to an explicit `WHERE`).
+    Returns `(fk_on_a, fk_col)` (True = `cls_a`'s table carries the FK); `None` when absent, many-to-many or ambiguous.
     """
     if symbol_table is None:
         return None
@@ -1066,11 +1002,8 @@ def _auto_join_conditions(
 ) -> list[str]:
     """Derive `WHERE` join predicates connecting every JOIN OF base, for a `Where`-less multi-base VIEW.
 
-    Real corpus `JOIN OF A, B;` with no `WHERE` relies on the classes
-    being linked by their OWN association (confirmed against `ili2c`).
-    Builds a spanning tree over `bases`; a base with no direct association
-    to the rest can't join without risking a Cartesian product and
-    demotes the whole VIEW instead.
+    Builds a spanning tree over `bases` using the classes' own associations; a base with no direct association
+    demotes the whole VIEW rather than risk a Cartesian product.
     """
     connected = {bases[0][0]}
     conditions: list[str] = []
@@ -1114,13 +1047,9 @@ def _resolve_view_bases(
     tables_by_name: dict[str, Table],
     table_name_by_class_id: dict[int, str],
 ) -> tuple[list[tuple[str, MetaInstance, str]], dict[str, str]]:
-    """Return `(bases, assoc_near_roles)` - `assoc_near_roles` (`alias -> role name`) for `_ViewResolver`, see its
-    own docstring.
+    """Return `(bases, assoc_near_roles)` (`alias -> role name`, for `_ViewResolver`).
 
-    A base that is `Kind=Association` has no `CREATE TABLE` of its own -
-    resolved instead to its 2-role embedding's CARRIER class/table
-    (`_association_embedding`), the real corpus shape for `PROJECTION OF
-    <association>`.
+    A `Kind=Association` base has no table of its own and resolves to its 2-role embedding's CARRIER class/table.
     """
     bases: list[tuple[str, MetaInstance, str]] = []
     assoc_near_roles: dict[str, str] = {}
@@ -1197,13 +1126,10 @@ def _render_views(views: tuple[SqlView, ...]) -> list[str]:
 
 
 def _view_unique_trigger_predicate(trig: UniqueViewTrigger, new_ref: str) -> tuple[str, str]:
-    """Return `(new_is_in_the_view, a_duplicate_exists)` SQL booleans for `trig` - `new_ref` is the trigger row
-    reference (`"NEW"` in both dialects).
+    """Return `(new_is_in_the_view, a_duplicate_exists)` SQL booleans for `trig` (`new_ref` is the trigger row).
 
-    `new_is_in_the_view` reapplies the view's own `WHERE` to the row being
-    written - without it, a not-yet-valid row would be wrongly rejected
-    just for sharing a key with an already-valid one. `a_duplicate_exists`
-    re-queries the base table (simpler than the `CREATE VIEW` itself).
+    `new_is_in_the_view` reapplies the view's `WHERE` to the new row, so a not-yet-valid row is not rejected for
+    sharing a key with a valid one; `a_duplicate_exists` re-queries the base table.
     """
     substituted = [w.replace(f'"{trig.alias}".', f"{new_ref}.") for w in trig.where]
     not_null = " AND ".join(f'{new_ref}."{c}" IS NOT NULL' for c in trig.columns)
@@ -1221,12 +1147,7 @@ def _view_unique_trigger_message(trig: UniqueViewTrigger) -> str:
 
 
 def _render_view_unique_triggers_postgresql(views: tuple[SqlView, ...]) -> list[str]:
-    """Render each `SqlView.triggers` entry as a PL/pgSQL trigger function + `CREATE TRIGGER`.
-
-    A single `BEFORE INSERT OR UPDATE` trigger covers both events -
-    PostgreSQL, unlike SQLite, allows combining them in one `CREATE
-    TRIGGER`.
-    """
+    """Render each `SqlView.triggers` entry as a PL/pgSQL trigger function + one `BEFORE INSERT OR UPDATE` trigger."""
     statements: list[str] = []
     for view in views:
         for trig in view.triggers:
@@ -1251,12 +1172,7 @@ def _render_view_unique_triggers_postgresql(views: tuple[SqlView, ...]) -> list[
 
 
 def _render_view_unique_triggers_gpkg(views: tuple[SqlView, ...]) -> list[str]:
-    """Render each `SqlView.triggers` entry as two SQLite `CREATE TRIGGER` statements (INSERT + UPDATE).
-
-    SQLite's trigger event is singular (`INSERT`/`UPDATE`/`DELETE`) -
-    unlike PostgreSQL's `BEFORE INSERT OR UPDATE`, it cannot be combined
-    into one `CREATE TRIGGER`.
-    """
+    """Render each `SqlView.triggers` entry as two SQLite `CREATE TRIGGER` statements (SQLite allows one event each)."""
     statements: list[str] = []
     for view in views:
         for trig in view.triggers:

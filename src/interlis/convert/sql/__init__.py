@@ -1,15 +1,6 @@
-"""IlisMeta16 -> SQL DDL conversion: tables, columns, UNIQUE/FOREIGN KEY/CHECK constraints.
+"""IlisMeta16 -> SQL DDL conversion: tables, columns, constraints and views.
 
-Generates the SCHEMA only - GDAL (`ogr2ogr -append`) does the actual data
-loading. Unsupported constructs are never silently dropped: collected
-into `Table.notes` and rendered as a `-- NOTE` (RULE #5).
-
-Package layout (concept -> module): `identifiers.py` (naming/quoting),
-`model.py` (dialect-neutral IR), `types.py` (type mapping),
-`expressions.py` (CONSTRAINT/WHERE -> SQL text), `tables.py` (`Class` ->
-`Table`), `views.py` (`View` -> `CREATE VIEW`), `render.py`
-(PostgreSQL/GeoPackage rendering). This file re-exports the public API
-below.
+Unsupported constructs are collected into `Table.notes` and rendered as `-- NOTE`, never dropped silently.
 """
 
 from __future__ import annotations

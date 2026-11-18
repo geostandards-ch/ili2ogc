@@ -1,17 +1,7 @@
-"""AttachmentResolver: decide how a resolved value attaches to an instance.
+"""AttachmentResolver: attach a resolved value to an instance as an attribute or an association link.
 
-Decides how a value resolved by source_resolver attaches to the instance
-being built: as an own/inherited attribute, or as an association link.
-Used for both attribute_bindings and `parent`.
-
-Resolution order (first match wins):
-1. Explicit association+role given by the caller (binding or `parent`).
-2. Key matches an own/inherited attribute of the instance's class -> direct assignment.
-3. An association in ilismeta16-associations.yml has one end targeting the
-   class (or a superclass via all_superclasses) and the other end's role
-   matches the key -> association link.
-4. No match -> explicit BuildError (defensive: should not happen for a
-   well-formed binding, but keeps the engine robust against a future one).
+Resolution order (first match wins): explicit association+role from the caller; an own/inherited
+attribute named by the key; an association whose other end's role matches the key; else BuildError.
 """
 
 from interlis.builder.errors import BuildError
@@ -64,40 +54,24 @@ class AttachmentResolver:
                 upper = end.get("upper")
 
         if assoc_el.get("qualified_name") == instance._qualified_class:
-            # `instance` IS an instance of THIS association itself
-            # (e.g. Import, built as a link object via
-            # InterlisModelBuilder.wrap_bag_as_instance/for_each - see
-            # registry.MetamodelRegistry._build_association_class): each
-            # end of a link instance holds EXACTLY one value, even if the
-            # other side's '*' multiplicity describes how many DIFFERENT
-            # links can share the same Package, not how many values THIS
-            # instance carries for this role.
+            # `instance` is itself a link object of this association: each end holds exactly one value,
+            # whatever the other side's '*' multiplicity says.
             setattr(instance, role, value)
             return
 
         current = getattr(instance, role, None)
         if upper != "*" and current is not None and isinstance(current, MetaInstance):
-            # Singular role already occupied (e.g. EnumType.TopNode, upper=1):
-            # several successive elements (e.g. enumElement x N, each
-            # self-attaching via its own parent: TopNode) must form a CHAIN,
-            # not overwrite the previous one - look for a self-referencing
-            # association on `value`'s class (same pattern as
-            # SubNode: ParentNode<->Node) and attach `value` at the END of
-            # the chain rather than losing it.
+            # Singular role already occupied (e.g. EnumType.TopNode): successive elements must form a
+            # chain via a self-referencing association rather than overwrite the previous one.
             chained = self._chain_onto_self_referencing_association(current, value, rule)
             if chained:
                 return
         self._set_field(instance, role, value, upper)
 
     def _chain_onto_self_referencing_association(self, head: MetaInstance, value: MetaInstance, rule: str) -> bool:
-        """Chain `value` onto an existing self-referencing association, if any.
+        """Append `value` at the end of `head`'s chain via a self-referencing association (e.g. SubNode).
 
-        Looks, on `head`'s class (an instance already attached to a singular
-        role), for an association where BOTH ends target that same class
-        (e.g. SubNode: ParentNode<->Node on EnumNode) - walks to the end of
-        the existing chain (via the multi end) then attaches `value` there.
-        Returns False if no such association exists (the caller then falls
-        back to a plain replacement).
+        Returns False if `head`'s class has no such association, so the caller falls back to replacement.
         """
         own_classes = {
             head._qualified_class,
@@ -137,28 +111,15 @@ class AttachmentResolver:
                     return assoc_el.get("name"), other.get("role"), other.get("upper")
         return None
 
-    # Generic structural associations (already handled separately - extends/
-    # all_superclasses for Inheritance, composition tree for
-    # PackageElements/MetaAttributes): too promiscuous for this fallback
-    # (they connect almost any pair of classes via all_superclasses) -
-    # excluded from the class-connection search.
+    # Structural associations handled elsewhere; they connect almost any class pair via superclasses,
+    # so they are excluded from the class-connection search.
     _GENERIC_ASSOCIATIONS = {"Inheritance", "PackageElements", "MetaAttributes"}
 
     def find_association_connecting(self, from_class: str, to_class: str) -> tuple[str, str, str] | None:
-        """Find an association connecting two known classes.
+        """Find the association connecting two classes, as (name, role, upper) on the `to_class` side.
 
-        Unlike `_find_association_for_role`, this isn't a role-name lookup -
-        it's used when a child not claimed by attribute_bindings (sweep, see
-        InterlisModelBuilder) produces a result whose own rule has no
-        `parent:` (e.g. attrTypeDef, whose note explicitly says "feeds the
-        enclosing AttrOrParamType.Type association end (handled by the
-        parent construct)"): the enclosing rule must guess the association
-        from the two concrete classes, not from a key name. Prefers an
-        EXACT match (real classes, not superclasses); only falls back to
-        all_superclasses if no exact match exists, to avoid matching an
-        overly general association. Returns (name, role_on_to_class_side,
-        upper_on_to_class_side), or None if no association connects these
-        two classes.
+        Used when an unclaimed child result has no `parent:`, so the association must be guessed from the
+        two classes. Exact class matches win; superclasses are only a fallback to avoid over-general matches.
         """
         exact = self._search_connecting(from_class, {from_class}, to_class, {to_class})
         if exact is not None:
@@ -170,12 +131,8 @@ class AttachmentResolver:
         return self._search_connecting(from_class, from_classes, to_class, to_classes)
 
     def _search_connecting(self, from_class, from_classes, to_class, to_classes) -> tuple[str, str, str] | None:
-        # Several associations can link the same two classes (e.g.
-        # AttrOrParamType vs LocalType, both AttrOrParam<->Type): prefer a
-        # plain reference (aggregation: none) over a composition
-        # (aggregation: composite, locally-nested-type semantics, a more
-        # specific/rarer case) - otherwise, stable order by association
-        # name for a deterministic result.
+        # Several associations can link the same two classes: prefer a plain reference over a
+        # composition, then order by name for determinism.
         candidates: list[tuple[str, str, str, str]] = []  # (aggregation, name, role, upper)
         for assoc_el in self.uml.qualified.values():
             if assoc_el.get("kind") != "Association" or assoc_el.get("name") in self._GENERIC_ASSOCIATIONS:

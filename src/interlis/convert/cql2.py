@@ -1,31 +1,7 @@
-"""Compile a built `CONSTRAINT`'s Expression tree to a CQL2-JSON filter (OGC API - Features Part 3: Filtering).
+"""Compile a `CONSTRAINT`'s expression tree to a CQL2-JSON filter.
 
-Mirrors `constraint_eval.py`'s exact evaluated subset (relational
-operators, `And`/`Or`/`Not`/`Implication`, `DEFINED(...)`, a plain
-possibly-multi-hop attribute path, constants) - a structural transform of
-the SAME already-built `Expression` AST nodes that module evaluates
-against a Feature's `properties` dict, not a second implementation with
-its own scope. Anything `constraint_eval.py` itself raises
-`UnsupportedExpressionError` on (arithmetic, `THIS`/`PARENT`, aggregate/
-function-call context, indexed paths, INSPECTION-based factors) is out of
-scope here too, raised the same way - "zero silent loss": never emit a
-syntactically valid but semantically wrong/truncated CQL2-JSON filter.
-
-JSON shapes (verified against the OGC CQL2 standard, 21-065r2, not
-guessed): a comparison is `{"op": "=", "args": [{"property": "x"}, v]}`;
-`and`/`or`/`not` wrap predicates the same way (`{"op": "and", "args":
-[...]}`); `isNull` is `{"op": "isNull", "args": [{"property": "x"}]}`,
-negated via a `not` wrapper for `DEFINED(x)`; a property reference is
-`{"property": "name"}`, a multi-hop STRUCTURE path dotted
-(`"struct.sub"`); a named-function extension point (e.g. a hypothetical
-`interlis_mod` for `MOD`, not implemented here) uses the SAME
-`{"op": "<name>", "args": [...]}` shape as any built-in operator - no
-separate `"function"` wrapper.
-
-`UNIQUE`/`SetConstraint`/`ExistenceConstraint` and the percentage-based
-plausibility form (`Kind` `LowPercC`/`HighPercC`) are population/
-basket-level checks - categorically not a per-Feature CQL2 filter
-(`cql2_unsupported_reason`), not a gap to close later.
+Handles the same subset as `constraint_eval.py`; anything else raises `UnsupportedExpressionError`
+rather than producing a partial filter.
 """
 
 from typing import Any
@@ -51,15 +27,9 @@ def _describe_path(path_els: list[MetaInstance]) -> str:
 
 
 def _path_property_name(path_els: list[MetaInstance]) -> str:
-    """Dotted CQL2 `property` name for a `PathEls` list - same node validation as `constraint_eval._resolve_path`.
+    """Dotted CQL2 `property` name for a `PathEls` list.
 
-    A STATIC check (no `properties` dict to walk against - unlike
-    `_resolve_path`, this never learns whether the path actually exists in
-    a given Feature, only whether its SHAPE is CQL2-expressible): each hop
-    must be a plain `Attribute`/`ReferenceAttr` `PathEl` with no
-    `[FIRST]`/`[LAST]`/`[n]` index - the same restriction
-    `constraint_eval.py` applies at evaluation time, applied here at
-    compile time instead.
+    Static check mirroring `constraint_eval._resolve_path`: each hop must be a plain attribute/reference with no index.
     """
     names = []
     for path_el in path_els:
@@ -75,18 +45,9 @@ def _path_property_name(path_els: list[MetaInstance]) -> str:
 
 
 def to_cql2(expr: MetaInstance) -> Any:
-    """Compile one `Expression` node to its CQL2-JSON value.
+    """Compile one `Expression` node to its CQL2-JSON value (a `dict` predicate/property, or a bare JSON literal).
 
-    A predicate (`CompoundExpr`/`UnaryExpr`) or property reference
-    (`PathOrInspFactor`) returns a `dict`; a `Constant` returns the bare
-    JSON literal (`bool`/`int`/`float`/`str`) - CQL2-JSON's `"args"` array
-    is itself a mix of both shapes (e.g. `{"op": "=", "args":
-    [{"property": "x"}, 5]}`), so callers assembling a larger filter feed
-    this straight into their own `"args"` list without unwrapping.
-
-    Raises `UnsupportedExpressionError` for anything
-    `constraint_eval.evaluate_expression` itself couldn't evaluate against
-    a single Feature's `properties` - same scope, same exception type.
+    Raises `UnsupportedExpressionError` for anything `constraint_eval.evaluate_expression` cannot evaluate.
     """
     qualified = expr._qualified_class
     if qualified.endswith("CompoundExpr"):
@@ -146,14 +107,7 @@ def _compile_path_factor(expr: MetaInstance) -> dict[str, Any]:
 def _compile_constant(expr: MetaInstance) -> Any:
     """`_evaluate_constant`'s value, with `#true`/`#false` coerced to a real JSON boolean.
 
-    `#true`/`#false` build as `Type="Enumeration"` with a literal
-    `"true"`/`"false"` string `Value` - `constraint_eval.py`'s own
-    `_as_bool` already treats any such string as boolean-coercible
-    (deliberately not distinguishing it from a same-spelled domain enum
-    value, since a BOOLEAN comparison and a TEXT-domain one look identical
-    at this AST level) - mirrored here so `KBfrei == #false` compiles to
-    `{"op": "=", "args": [{"property": "KBfrei"}, false]}` (a proper JSON
-    boolean), not the string `"false"`.
+    Mirrors `constraint_eval._as_bool`, which treats those enum literals as booleans.
     """
     value = _evaluate_constant(expr)
     if value == "true":
@@ -164,15 +118,9 @@ def _compile_constant(expr: MetaInstance) -> Any:
 
 
 def cql2_unsupported_reason(constraint: MetaInstance) -> str | None:
-    """Why `constraint_to_cql2(constraint)` would raise, or `None` if it's in scope.
+    """Why `constraint_to_cql2(constraint)` would raise, or `None` if it is in scope.
 
-    Mirrors `check_feature_constraints`'s own `SimpleConstraint` gate
-    (`constraint_eval.py`): only a plain `SimpleConstraint` with `Kind`
-    `None`/`"MandC"` and no `Percentage` is a per-Feature filter at all -
-    `UniqueConstraint`/`SetConstraint`/`ExistenceConstraint` and the
-    percentage-based plausibility form are population/basket-level checks,
-    categorically not a CQL2 filter (`not_applicable`, not a gap - see
-    module docstring).
+    Only a plain `SimpleConstraint` (`Kind` `None`/`"MandC"`, no `Percentage`) is a per-Feature filter.
     """
     qualified = constraint._qualified_class
     if not qualified.endswith("SimpleConstraint"):
@@ -193,13 +141,8 @@ def cql2_unsupported_reason(constraint: MetaInstance) -> str | None:
 def constraint_to_cql2(constraint: MetaInstance) -> dict[str, Any]:
     """CQL2-JSON filter for one per-Feature `SimpleConstraint`'s `LogicalExpression`.
 
-    Raises `ValueError` if `cql2_unsupported_reason(constraint)` isn't
-    `None` - callers (e.g. a future CLI subcommand) are expected to check
-    that first and skip with a diagnostic, same contract as
-    `convert/jsonfg.py`'s `evaluate_view`/`unsupported_view_reason`.
-    Raises `UnsupportedExpressionError` for any `Expression` node outside
-    `constraint_eval.py`'s own evaluated subset - never a truncated or
-    silently-wrong filter.
+    Raises `ValueError` if `cql2_unsupported_reason` is not `None` (callers check it first) and
+    `UnsupportedExpressionError` for any expression outside the evaluated subset.
     """
     reason = cql2_unsupported_reason(constraint)
     if reason is not None:

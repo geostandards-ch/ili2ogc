@@ -11,10 +11,8 @@ class _DerivedAttributesMixin:
     def _apply_derived_role_flags(self) -> None:
         """Fill the derived flags of every association registered in this model's symbol table.
 
-        A role is always `Mandatory` (the reference exists whatever its cardinality, which `Multiplicity` carries);
-        `EmbeddedTransfer` marks the role transferred as a pseudo-attribute of the opposite class and
-        `EmbeddedRoleTransfer` the association carrying it (eCH-0031 V2.1.0 §4.3.9, the rule
-        `xtf.schema.association_embedding` applies).
+        A role is always `Mandatory`; `EmbeddedTransfer` marks the role transferred as a pseudo-attribute of the
+        opposite class and `EmbeddedRoleTransfer` the association carrying it (see `association_embedding`).
         """
         from interlis.xtf.schema import association_embedding
 

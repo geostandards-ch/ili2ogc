@@ -1,13 +1,6 @@
-"""Convert an INTERLIS `StandardSymbology.Color` (CIE LCh(ab)) to sRGB.
+"""Convert an INTERLIS `StandardSymbology.Color` (CIE LCh(ab), D65) to sRGB.
 
-`pycartosym` has no LCh notion at all (only `RGBColor`/`RGBColorNormalized`/
-`WebColorName`), so this conversion has to happen before any INTERLIS
-`Color` reaches it. Standard D65 LCh(ab) -> Lab -> XYZ -> linear sRGB ->
-gamma-encoded sRGB pipeline
-(Bruce Lindbloom's formulas, the de-facto reference for this conversion).
-Out-of-gamut results are clamped to 0..255, the industry-standard
-graceful degradation for a color space wider than sRGB - not a RULE #5
-concern (colorimetric rounding, not structural data loss).
+pycartosym has no LCh notion. Out-of-gamut results are clamped to 0..255.
 """
 
 import math

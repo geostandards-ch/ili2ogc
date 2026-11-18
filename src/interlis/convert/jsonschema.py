@@ -1,13 +1,7 @@
-""".ili -> JSON Schema conversion: scalar types, STRUCTURE/BAG/LIST nesting, plain REFERENCE TO, embedded association
+""".ili -> JSON Schema conversion: scalar types, STRUCTURE/BAG/LIST nesting, REFERENCE TO, embedded association
 roles, and ABSTRACT structure polymorphism.
 
-See `mappings/ilismeta16-to-jsonschema-rules.yml` /
-`spec/conversion/jsonschema-mapping.yml` for the concept/field contract this
-module implements. Walks IlisMeta16 instances already built by
-InterlisModelBuilder, reusing xtf.schema's type-resolution helpers
-(resolve_attribute/attributes_of/schema_members_of/enum_values) rather than
-duplicating any resolution logic - convert() is a decoupled stage from
-validate().
+Walks IlisMeta16 instances already built by InterlisModelBuilder, reusing xtf.schema's type-resolution helpers.
 """
 
 from collections.abc import Iterator
@@ -43,17 +37,7 @@ JSON_SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema"
 
 
 def _meta_marker(instance: MetaInstance | None) -> dict[str, str]:
-    """Return `instance`'s eCH-0117 `!!@Name=Value` meta-attributes as a plain `Name -> Value` dict, or `{}`.
-
-    A `MetaAttribute` is only ever
-    present when the caller built the model with `meta_attributes=...`
-    (`InterlisModelBuilder.build`); otherwise `instance.MetaAttribute` is
-    simply absent/empty, so this degrades to `{}` with no special-casing
-    needed. A duplicate `Name` on the SAME construct (not seen in the real
-    corpus so far) would have the later one win - consistent with this
-    codebase's existing stance on unproven collisions elsewhere (e.g.
-    `convert/jsonfg.py`'s JOIN attribute pooling).
-    """
+    """Return `instance`'s `!!@Name=Value` meta-attributes as a `Name -> Value` dict."""
     return {
         m.Name: m.Value
         for m in (getattr(instance, "MetaAttribute", None) or [])
@@ -66,25 +50,10 @@ _READ_ONLY = ("GET",)
 
 
 def _crud_operations(class_instance: MetaInstance) -> tuple[str, ...] | None:
-    """Return the HTTP operations a future OGC API Features publication of `class_instance` could support, or `None`.
+    """Return the HTTP operations an OGC API Features publication of `class_instance` could support, or `None`.
 
-    `None` for `Kind in ("Structure", "Association")` - nested/embedded
-    content is never its own collection, CRUD semantics don't apply.
-    A `View` is GET-only for every `FormationKind` EXCEPT a plain
-    `PROJECTION OF` (1:1 with its single base, the direct equivalent of a
-    single-table SQL view, so writes map straight back) - by direct
-    analogy with SQL view updatability (the report's own pipeline,
-    chapter 6 step 2a,
-    materializes `JOIN OF` as a real multi-table database VIEW via
-    `ili2db` - PostgreSQL/PostGIS, GeoPackage and ESRI FileGDB all require
-    a SINGLE source relation, or `INSTEAD OF` triggers INTERLIS provides
-    no metadata to generate, for a view to be automatically updatable; a
-    Union/Aggregation/Inspection view has no single writable target
-    either).
-    A plain `Class` gets full CRUD: OGC API Features - Part 4 doesn't
-    require every collection to be writable, a provider declares
-    per-collection which HTTP methods it supports (unsupported ones simply
-    answer 405).
+    `None` for Structure/Association (never their own collection). A View is GET-only unless it is a plain
+    `PROJECTION OF` (1:1 with its base, so writes map back, like an updatable SQL view); a Class gets full CRUD.
     """
     kind = getattr(class_instance, "Kind", None)
     if kind not in ("Class", "View"):
@@ -109,12 +78,8 @@ def _num_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
     return schema
 
 
-# eCH-0031 SS3.2.2 "Namen": Name = Letter {Letter|Digit|'_'} (255 chars max) -
-# and SS3.8.1: `NAME (FINAL) = TEXT*255` / `URI (FINAL) = TEXT*1023` (RFC 2396).
-# Both bounds are exact per the grammar's own alternative (`TextType = ...
-# | 'NAME' | 'URI'` - neither carries a `MaxLength-PosNumber`, so
-# `TextType.MaxLength` is never populated for them and is supplied here
-# instead), so `pattern`/`format`/`maxLength` are faithful, not approximated.
+# NAME is `Letter {Letter|Digit|'_'}` up to 255 chars and URI up to 1023; `TextType.MaxLength` is never set for
+# them, so the bounds are supplied here.
 _INTERLIS_NAME_PATTERN = r"^[A-Za-z][A-Za-z0-9_]{0,254}$"
 
 
@@ -138,25 +103,13 @@ def _text_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
     return schema
 
 
-# eCH-0118 ("Regles de codification GML pour INTERLIS") SS6.15.5 singles
-# out exactly these 3 well-known format names for a specific target type
-# (xsd:date/time/dateTime) - every OTHER (custom/STRUCT-based) format
-# stays a plain string, same as before. Values are stored bare (e.g.
-# "XMLDate", confirmed empirically - the "INTERLIS." qualifier is not
-# part of FormattedType.Format's own text). JSON Schema 2020-12's
-# "format" keyword (SS7.3.1) has the exact same 3-way vocabulary.
+# The three predefined date/time formats with a JSON Schema `format` equivalent; `FormattedType.Format` holds
+# the bare name (no "INTERLIS." qualifier). Any other format stays a plain string.
 _KNOWN_FORMAT_TO_JSON_FORMAT = {"XMLDate": "date", "XMLTime": "time", "XMLDateTime": "date-time"}
 
 
 def _formatted_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
-    """FormattedType always describes a formatted TEXT value - `type: string`.
-
-    `Format` names a predefined/custom format (e.g. `INTERLIS.XMLDate`) or
-    a STRUCT-based template - no regex `pattern` is derived from it, but
-    the 3 recognized date/time format names get the matching JSON Schema
-    `format` hint - additive, `type: string` alone still covers every
-    legal value regardless.
-    """
+    """FormattedType -> `type: string`, plus a JSON Schema `format` hint for the three known date/time formats."""
     schema: dict[str, Any] = {"type": "string"}
     json_format = _KNOWN_FORMAT_TO_JSON_FORMAT.get(getattr(type_instance, "Format", None))
     if json_format is not None:
@@ -165,17 +118,7 @@ def _formatted_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
 
 
 def _blackbox_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
-    """BlackboxType (XML or BINARY payload) -> `type: string`.
-
-    `Kind` ("Xml"/"Binary") is surfaced as an informational
-    `x-blackbox-kind` marker instead of being silently dropped
-    (RULE #5, same pattern as MultiValue's `x-ordered`). The
-    BINARY variant additionally gets `contentEncoding: "base64"` (JSON
-    Schema 2020-12 SS8.3) - matching eCH-0118 SS6.15.6, which maps BINARY
-    specifically to `xsd:base64Binary`. XML has no
-    equivalent native JSON Schema content-shape keyword, stays plain
-    `string`.
-    """
+    """BlackboxType -> `type: string`, with `x-blackbox-kind` and, for BINARY, `contentEncoding: base64`."""
     schema: dict[str, Any] = {"type": "string"}
     kind = getattr(type_instance, "Kind", None)
     if kind is not None:
@@ -186,8 +129,7 @@ def _blackbox_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
 
 
 def _enum_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
-    # "OTHERS" is a transfer-time escape valid for any INTERLIS enum
-    # (eCH-0031 SS4.3.11.3), not a declared domain value - excluded here.
+    # "OTHERS" is a transfer-time escape valid for any enum, not a declared value.
     values = enum_values(type_instance) - {"OTHERS"}
     return {"type": "string", "enum": sorted(values)}
 
@@ -212,17 +154,9 @@ def _scalar_type_schema(kind: str | None, type_instance: MetaInstance | None) ->
 
 
 def _reference_type_schema(resolved: ResolvedAttribute) -> dict[str, Any]:
-    """Plain `REFERENCE TO X` -> the OID value as `type: string`.
+    """Plain `REFERENCE TO X` -> the OID as `type: string` (the XTF wire format transfers a `REF`, never the object).
 
-    Matches the XTF wire format, which transfers a reference as a
-    `REF="<oid>"` XML attribute - never the referenced object inline
-    (unlike a Class/STRUCTURE attribute's `$ref`). The declared
-    target class and the `(EXTERNAL)` flag have no native JSON Schema
-    equivalent - surfaced as informational markers instead of being
-    silently dropped (RULE #5, same pattern as MultiValue's
-    `x-ordered`). Reuses `reference_target_class`/
-    `reference_external_status` directly (xtf.schema), no duplicated
-    resolution logic.
+    The target class and `(EXTERNAL)` flag are surfaced as `x-reference-target` / `x-reference-external`.
     """
     schema: dict[str, Any] = {"type": "string"}
     target = reference_target_class(resolved)
@@ -234,8 +168,6 @@ def _reference_type_schema(resolved: ResolvedAttribute) -> dict[str, Any]:
     return schema
 
 
-# `_concrete_subclasses` moved to `xtf.schema.concrete_structure_subclasses`
-# (shared with `convert/sql.py`'s abstract-structure child tables).
 _concrete_subclasses = concrete_structure_subclasses
 
 
@@ -244,34 +176,9 @@ def _class_ref_or_marker(
     ref_keys: dict[int, str],
     symbol_table: SymbolTable | None = None,
 ) -> dict[str, Any]:
-    """Return a `$ref` to `class_instance`'s own $defs entry, or the unsupported marker.
+    """Return a `$ref` to the class's `$defs` entry, or an `x-unsupported` marker if it is not in `ref_keys`.
 
-    Only called for genuine STRUCTURE nesting (`is_structure` already
-    checked by the caller) - a Class not present in `ref_keys` means it
-    wasn't reachable from the roots given to `model_to_json_schema` (e.g.
-    an unresolved cross-model reference, no `--repo` given) - RULE #5,
-    marked explicitly rather than emitting a dangling `$ref`.
-
-    An ABSTRACT structure (e.g. real `CHBase_Part8_GEOMETRY3D_V2.ili`:
-    `Curve3D (ABSTRACT)`/`Surface3D (ABSTRACT)`, used via `BAG`/`LIST OF`)
-    is transferred on the wire as one of its concrete subclasses - the XML
-    encoding's own element tag IS the concrete structure's name (eCH-0031
-    SS4.3.11.12), so a single `$ref` to the abstract class's own (often
-    empty) schema would misrepresent the actual possible shapes. Resolved
-    instead as `anyOf` over every concrete subclass found in
-    `symbol_table` (needs the symbol table to enumerate them - without one,
-    or when none is found, this falls back to the plain `$ref`). `anyOf`
-    rather than `oneOf`: a concrete subclass can itself be extended by
-    ANOTHER concrete subclass (real case: `Surface3D` -> `PlanarSurface3D`
-    -> `Triangle3D`, both concrete) - a `Triangle3D` value would then
-    validate against both branches (its extra own attributes are not
-    forbidden by `PlanarSurface3D`'s schema, which has no
-    `additionalProperties: false`), which `oneOf`'s "exactly one match"
-    requirement cannot tolerate. The plain-`$ref` fallback (no
-    `symbol_table`, or no concrete subclass found in it) still carries an
-    informational `x-abstract` marker (RULE #5) whenever
-    `class_instance` is ABSTRACT - never silently indistinguishable from a
-    concrete structure's `$ref`.
+    With a `symbol_table`, an ABSTRACT structure becomes an `anyOf` over its concrete subclasses.
     """
     if class_instance is not None:
         if symbol_table is not None and bool(getattr(class_instance, "Abstract", False)):
@@ -294,16 +201,9 @@ def _element_schema(
     ref_keys: dict[int, str],
     symbol_table: SymbolTable | None = None,
 ) -> dict[str, Any]:
-    """Return the schema for one "leaf" type - a plain attribute's type, or a MultiValue's BaseType.
+    """Return the schema for one leaf type: a plain attribute's type, or a MultiValue's BaseType.
 
-    `ReferenceType`/non-structure `Class` here (a `BAG`/`LIST OF
-    REFERENCE TO X` element or an embedded role reached via `MultiValue`
-    - neither seen in the real corpus so far, and the latter never
-    happens by construction of `embedded_roles_of`, but both
-    grammatically/structurally possible) fall back to a bare
-    `{"type": "string"}` - the richer `x-reference-*` markers
-    need a full `ResolvedAttribute` (see `_reference_type_schema`, used
-    instead for the direct-attribute case by `_attribute_schema`).
+    A `ReferenceType` or non-structure `Class` here (a BAG/LIST element) falls back to a bare `{"type": "string"}`.
     """
     scalar = _scalar_type_schema(kind, type_instance)
     if scalar is not None:
@@ -325,14 +225,9 @@ def _multi_value_schema(
     ref_keys: dict[int, str],
     symbol_table: SymbolTable | None = None,
 ) -> dict[str, Any]:
-    """`BAG {m..n} OF X` / `LIST {m..n} OF X` -> `type: array`.
+    """`BAG {m..n} OF X` / `LIST {m..n} OF X` -> `type: array` over `BaseType`.
 
-    `items` reuses the same scalar/$ref dispatch as a plain attribute,
-    applied to `MultiValue.BaseType` (the element type). `Ordered`
-    (True=LIST, False=BAG) has no native JSON Schema equivalent - it is
-    NOT the same as `uniqueItems` (a BAG still allows duplicates, it just
-    doesn't order them) - surfaced as an informational
-    `x-ordered` marker instead of being silently lost.
+    `Ordered` (LIST vs BAG) has no JSON Schema equivalent (it is not `uniqueItems`), so it is kept as `x-ordered`.
     """
     base = getattr(multi_value, "BaseType", None)
     base = base if isinstance(base, MetaInstance) else None
@@ -365,29 +260,9 @@ def _attribute_schema(
     ref_keys: dict[int, str],
     symbol_table: SymbolTable | None = None,
 ) -> dict[str, Any]:
-    """Return the JSON Schema for one resolved attribute.
+    """Return the JSON Schema for one attribute; an unmapped type gets an `x-unsupported` marker.
 
-    An attribute whose type falls outside the mapped set (NumType/
-    TextType/EnumType/BooleanType/FormattedType/BlackboxType/CoordType/
-    LineType/ReferenceType/Class/MultiValue) is never silently dropped -
-    it gets an explicit `x-unsupported` marker instead (RULE #5).
-
-    `type_kind == "Class"` covers two DIFFERENT things (see `is_structure`):
-    genuine STRUCTURE nesting (`$ref`/`anyOf` if ABSTRACT, see
-    `_class_ref_or_marker`) vs. an embedded association
-    role - which, like a plain `REFERENCE TO`, is
-    transferred as a `REF`/OID, not inlined, so it reuses
-    `_reference_type_schema` (`reference_target_class`/
-    `reference_external_status` already handle a `Role`-typed `resolved`
-    correctly, no separate code path needed).
-
-    eCH-0117 meta-attributes (`_meta_marker`) on the attribute's OWN
-    `AttrOrParam`/`Role` are surfaced as `x-meta` regardless of
-    which branch below produced the schema - real corpus evidence:
-    `!!@basketRef=...` lands on the FIRST attribute right after `CLASS
-    Datenbestand =` (this project's "first following construct"
-    attachment, not the CLASS itself),
-    confirmed empirically on `ili_corpus/Zones_reservees_V1_1_o1.ili`.
+    Embedded association roles are transferred as OIDs, like a plain `REFERENCE TO`.
     """
     if resolved.type_kind == "MultiValue" and resolved.type_instance is not None:
         schema = _multi_value_schema(resolved.type_instance, ref_keys, symbol_table)
@@ -409,23 +284,10 @@ def _attribute_schema(
 
 
 def _discover_classes(roots: list[MetaInstance], symbol_table: SymbolTable | None = None) -> dict[int, MetaInstance]:
-    """BFS over every Class reachable from `roots` via structure/BAG/LIST attributes.
+    """BFS over every Class reachable from `roots` via structure/BAG/LIST attributes, deduplicated by identity.
 
-    Reachable classes not among `roots` (e.g. a STRUCTURE declared in an
-    imported model, resolved via `--repo` but never registered in the
-    local model's own SymbolTable) are discovered here rather than left
-    unconverted. Dedups by Python identity, so a class is visited/
-    converted at most once - self-referencing or mutually recursive
-    structures terminate naturally (the second encounter is already in
-    `found`, no re-enqueue), which is what makes emitting a plain `$ref`
-    (rather than inlining) recursion-safe.
-
-    An ABSTRACT structure encountered along the way (`symbol_table`
-    given) also enqueues its concrete subclasses (`_concrete_subclasses`)
-    - needed so `_class_ref_or_marker`'s `anyOf` branches always resolve
-    to a real `$defs` entry, even for a concrete subclass never directly
-    named by any attribute (only reachable as "one of the possible
-    shapes" of the abstract type).
+    Finds classes outside `roots` (e.g. imported structures); the dedup makes recursive structures terminate. With a
+    `symbol_table`, an ABSTRACT structure also enqueues its concrete subclasses so each `anyOf` branch has an entry.
     """
     found: dict[int, MetaInstance] = {}
     queue: list[MetaInstance] = list(roots)
@@ -474,10 +336,8 @@ def _geometry_inspection_schemas(
 ) -> dict[str, dict[str, Any]]:
     """Property schemas of an `INSPECTION OF` a SURFACE/AREA/POLYLINE view, by view attribute name.
 
-    The values are derived, not the inspected attribute's own type: a
-    boundary/edge/line is a geometry object, a segment end point a `Point`,
-    and a `PARENT`/`THISAREA`/`THATAREA` read keeps the owning attribute's
-    schema.
+    Values are derived (boundary/line -> geometry, segment end point -> `Point`); a `PARENT`/`THISAREA`/`THATAREA`
+    read keeps the owning attribute's schema.
     """
     bases = [b for b in getattr(view, "RenamedBaseView", None) or [] if isinstance(b.BaseView, MetaInstance)]
     if getattr(view, "FormationKind", None) != "Inspection" or len(bases) != 1:
@@ -524,48 +384,9 @@ def class_to_json_schema(
     ref_keys: dict[int, str] | None = None,
     symbol_table: SymbolTable | None = None,
 ) -> dict[str, Any]:
-    """Convert one IlisMeta16 Class (or Structure - same metaclass) instance.
+    """Convert one IlisMeta16 Class or Structure into a JSON Schema object.
 
-    Own+inherited attributes: NumType/TextType/EnumType/BooleanType/
-    FormattedType/BlackboxType/CoordType/LineType/plain `REFERENCE TO X`
-    map to their respective scalar/string/array schema; a Class-typed
-    (nested structure) or
-    MultiValue-typed (BAG/LIST OF) attribute maps via `ref_keys` (instance
-    id -> its own `$defs` key - normally supplied by
-    `model_to_json_schema`, which discovers and assigns keys for every
-    reachable class first). Called standalone with `ref_keys=None` (e.g.
-    in a unit test), a nested Class-typed attribute falls back to the
-    `x-unsupported` marker rather than crashing.
-
-    `symbol_table`, when given, additionally includes EMBEDDED
-    ASSOCIATION ROLES (`xtf.schema.schema_members_of` instead of plain
-    `attributes_of`) as pseudo-attributes - mapped the SAME way as a
-    plain `REFERENCE TO` (a `REF`/OID, never inlined - see
-    `is_structure`), since that's how the XTF wire format actually
-    transfers them. `None` (the default) means own+inherited
-    `ClassAttribute`s only, no embedded roles.
-
-    ABSTRACT structure polymorphism (`anyOf` over concrete subclasses, see
-    `_class_ref_or_marker`) is included when `symbol_table` is given.
-    RESTRICTION-narrowed structure attributes, OID and formal constraints
-    remain backlog regardless (see mappings/ilismeta16-to-jsonschema-rules.yml).
-
-    eCH-0117 meta-attributes (`_meta_marker`) attached directly to
-    `class_instance` itself (as opposed to one of its attributes, see
-    `_attribute_schema`) are surfaced as a top-level `x-meta` -
-    no real corpus evidence of a CLASS-level meta-attribute has been found
-    so far (MODEL/DOMAIN/CONSTRAINT/ATTRIBUTE are the confirmed real
-    attachment points), but the
-    mechanism is generic (any `MetaElement`, `Class` included) and this
-    costs nothing extra to support - verified by a synthetic fixture
-    rather than real-corpus proof for this specific branch.
-
-    `x-crud` (`_crud_operations`) declares
-    which HTTP operations a future OGC API Features publication of this
-    `$defs` entry could support - `["GET"]` for a `JOIN OF` View,
-    otherwise the full CRUD set. Omitted entirely for `Kind in
-    ("Structure", "Association")` (nested content, never its own
-    collection).
+    Nested classes resolve through `ref_keys` (instance id -> `$defs` key); without it they become `x-unsupported`.
     """
     ref_keys = ref_keys or {}
     properties: dict[str, Any] = {}
@@ -608,11 +429,9 @@ def class_to_json_schema(
 
 
 def collection_schema(schema: dict[str, Any], key: str, *, schema_id: str | None = None) -> dict[str, Any]:
-    """Return one `$defs` entry as the standalone schema OGC API Schemas serves at `/collections/{id}/schema`.
+    """Return one `$defs` entry as a standalone schema, as served at `/collections/{id}/schema`.
 
-    Structures are inlined (the standard advises against `$ref`) and `$id` is set when `schema_id` is given.
-    A reference property gains `x-ogc-role: reference` and `x-ogc-collectionId` (the target class name, which
-    is the collection id when each class is a collection). Raises `KeyError` for an unknown class.
+    Structures are inlined and reference properties get `x-ogc-role`. Raises `KeyError` for an unknown class.
     """
     defs = schema.get("$defs", {})
     if key not in defs:
@@ -656,32 +475,10 @@ def property_validator(schema: dict[str, Any], key: str) -> jsonschema.Draft2020
 
 
 def validate_feature_properties(properties: dict[str, Any], schema: dict[str, Any], key: str) -> list[str]:
-    """Validate a candidate PUT/PATCH `properties` payload against one `$defs` entry of a `model_to_json_schema`
-    document.
+    """Validate a candidate PUT/PATCH `properties` payload against `$defs[key]` of a `model_to_json_schema` document.
 
-    The building block a future write-capable OGC API
-    Features layer (pygeoapi or otherwise, not implemented in this
-    project) would call before accepting
-    a write. Uses the standard `jsonschema` package rather than
-    reimplementing JSON Schema semantics (type/format/pattern/anyOf/
-    required/`$ref` resolution...) by hand - this runtime's own output
-    already conforms to draft 2020-12, so there is a real validator to
-    reuse rather than a problem to re-solve.
-
-    `schema` is a FULL `model_to_json_schema` document - its `$defs` is
-    needed to resolve the `$ref`s a single `class_to_json_schema` entry
-    contains (e.g. a nested STRUCTURE attribute), which can't resolve on
-    their own without the sibling `$defs` they were generated alongside.
-    `key` is the `$defs` key to validate against (the same key
-    `model_to_json_schema`/`_assign_keys` assigned - typically the class/
-    View's own `Name`, see `class_to_json_schema`'s `title`).
-
-    Returns every violation's human-readable message (empty list = valid)
-    rather than raising on the first one - a caller building an HTTP 400
-    response benefits from the full list, not just one error at a time.
-    Does NOT check `x-crud`/whether this write is even allowed
-    for this collection (a JOIN OF View) - that's `_crud_operations`'s
-    job, a separate concern from payload SHAPE validation.
+    `schema` must be the full document so the entry's `$ref`s resolve. Returns every violation message (empty list
+    = valid); whether the write is allowed at all (`x-crud`) is not checked here.
     """
     return [error.message for error in property_validator(schema, key).iter_errors(properties)]
 
@@ -689,8 +486,8 @@ def validate_feature_properties(properties: dict[str, Any], schema: dict[str, An
 def inherited_topic_classes(symbol_table: SymbolTable) -> Iterator[tuple[MetaInstance, MetaInstance]]:
     """`(topic, class)` pairs: the classes a registered topic inherits through `TOPIC ... EXTENDS` from its base topics.
 
-    A topic that extends another takes over every concept the base topic defines (eCH-0031 V2.1.0 §2.3), so the
-    objects of an extension-only topic are typed by classes the extending model never declares itself.
+    An extending topic inherits the classes of its base topic, so its objects can be typed by classes the
+    extending model never declares itself.
     """
     seen: set[int] = set()
     for topic in symbol_table.all_registered():
@@ -739,33 +536,7 @@ def model_to_json_schema(
 ) -> dict[str, Any]:
     """Convert every Class/Structure reachable from `classes` into one JSON Schema document.
 
-    `classes` is typically every `Class`-kind instance from a built
-    model's SymbolTable (`builder.symbol_table.all_registered()`,
-    filtered by `_qualified_class` - see `cli.cmd_convert`) - the roots
-    for `_discover_classes`, which also pulls in any nested structure
-    reachable only via an attribute (e.g. imported from another model).
-    Each discovered class becomes one `$defs` entry, keyed by its own
-    `Name` (not a fully model-qualified name - a short-name collision
-    across topics, while possible, is only disambiguated by an
-    incrementing suffix, not a qualified key; revisit if qualified
-    `$defs` keys turn out to be needed).
-
-    `symbol_table`, when given, is forwarded to `class_to_json_schema` so
-    each `$defs` entry also includes its embedded association roles, AND
-    to `_discover_classes` so an ABSTRACT structure's concrete subclasses
-    are pulled in too (needed for `_class_ref_or_marker`'s `anyOf`
-    branches to resolve) - an embedded role itself still contributes no
-    new reachable class (a reference, never containment, same as a plain
-    `REFERENCE TO` target).
-
-    `model`, when given, is the built root `Model` instance (`builder.build(tree,
-    meta_attributes=...)`'s own return value for a single-MODEL file, or
-    `builder.symbol_table.resolve(<Model-Name>)`) - its eCH-0117
-    meta-attributes (`technicalContact`/`furtherInformation`/`IDGeoIV`,
-    by far the most common real attachment point) are surfaced as a top-level
-    `"x-meta"`, the same mechanism already used at class/attribute level
-    (`_meta_marker`). `None` (the default): omitted entirely, unchanged
-    from before this parameter existed.
+    Each class becomes a `$defs` entry keyed by its short name (collisions get a numeric suffix).
     """
     reachable = _discover_classes(classes, symbol_table)
     ref_keys = _assign_keys(reachable)
@@ -784,11 +555,8 @@ def model_to_json_schema(
 def collect_diagnostics(document: dict, *, file: str | None = None):
     """Walk a built JSON Schema for `x-unsupported` markers and emit a `Diagnostic` per marker.
 
-    The marker stays in the document (a downstream reader still sees the
-    gap); this is the parallel machine-readable signal that feeds
-    `--output-format sarif` and the exit code. `{"x-unsupported": "Class"}`
-    is a missing-input case (a nested structure not reachable from the
-    roots - class C); every other value is an unmapped type (class A).
+    The marker stays in the document; this is the machine-readable counterpart feeding SARIF output and the exit
+    code. `"Class"` means an unreachable nested structure, any other value an unmapped type.
     """
     from interlis.diagnostics import Diagnostic, Location
 

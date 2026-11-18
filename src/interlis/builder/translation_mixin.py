@@ -1,9 +1,4 @@
-"""TRANSLATION OF - positional alignment of a translation model against its base.
-
-`_register_translation_of` records the clause during construction;
-`_apply_pending_translations` (called from `build()`, after
-`forward_refs.resolve_all()`) does the actual alignment.
-"""
+"""TRANSLATION OF: positional alignment of a translation model against its base, run after reference resolution."""
 
 from __future__ import annotations
 
@@ -21,40 +16,32 @@ if TYPE_CHECKING:
 
     _Base = _BuilderHost
 else:
-    _Base = object  # real runtime base - see _builder_protocol.py for why
+    _Base = object
 
 
 class _TranslationMixin(_Base):
     def _register_translation_of(self, model: MetaInstance, ctx: ParserRuleContext) -> None:
         """Record `MODEL X (fr) ... TRANSLATION OF Y ["ver"]` for deferred alignment against `Y`.
 
-        `Model` has no field for this clause - recorded here, actual
-        alignment (matched POSITIONALLY, no `==` rename syntax in the
-        grammar) happens in `_apply_pending_translations` after
-        `resolve_all()`.
+        `Model` has no field for this clause; alignment is positional and happens in
+        `_apply_pending_translations`.
         """
         if ca.call(ctx, "TRANSLATION") is None:
             return
         children = list(ctx.children or [])
         node = ca.call(ctx, "TRANSLATION")
         idx = children.index(node)
-        # TRANSLATION OF <Name> - the base model name is two tokens on
+        # The base model name is two tokens after TRANSLATION.
         if idx + 2 < len(children) and isinstance(children[idx + 2], TerminalNode):
             self._pending_translations.append((model, children[idx + 2].getText()))
 
     _TRANSLATION_CHILD_COLLECTIONS = ("Element", "ClassAttribute", "EnumElement")
 
     def _apply_pending_translations(self) -> None:
-        """Align every `TRANSLATION OF` model against its base, building an `IlisMeta16.ModelTranslation.Translation`.
+        """Align every `TRANSLATION OF` model with its base and build a `Translation` for it.
 
-        `_align_translation` walks `Model.Element`/`Class.ClassAttribute`/
-        `EnumType.EnumElement` of both trees in parallel; every renamed
-        base element becomes one `METranslation`, kept reachable as
-        `model._translation_object` (no real `Model <-> Translation`
-        association exists) - plus the `--lang` overlay's lookup maps
-        (`model._translation`). A base that did not resolve is skipped
-        with a warning; a structural mismatch aligns the common prefix
-        and warns, never guesses (RULE #5).
+        Renamed elements become translation entries on the model. An unresolved base is skipped and a structural
+        mismatch aligns the common prefix, each with a warning.
         """
         pending = self._pending_translations
         self._pending_translations = []
@@ -75,9 +62,7 @@ class _TranslationMixin(_Base):
 
             translation = self.registry.new_instance("IlisMeta16.ModelTranslation.Translation")
             translation.Language = getattr(model, "Language", None)
-            # METranslation.Of is `REFERENCE TO (EXTERNAL) MetaElement` in
-            # IlisMeta16.ili, flattened to a NAME by the metamodel
-            # extraction - the base element's fully-qualified name.
+            # METranslation.Of holds the base element's fully-qualified name.
             translation.Translations = [
                 self.registry.new_instance(
                     "IlisMeta16.ModelTranslation.METranslation",
@@ -106,9 +91,7 @@ class _TranslationMixin(_Base):
                     return inst
             return None
 
-        # A `TRANSLATION OF <base>` is not an IMPORTS, so the base is not
-        # loaded during the translation model's own build - ask the
-        # repository to build it now (network-free, from --repo).
+        # TRANSLATION OF is not an IMPORTS, so the base is not loaded yet; build it from the repository.
         return model_in(self.symbol_table) or model_in(self.repository.symbol_table_for(name))
 
     def _align_translation(

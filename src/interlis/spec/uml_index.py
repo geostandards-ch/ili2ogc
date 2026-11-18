@@ -1,11 +1,6 @@
 """Index of the IlisMeta16 metamodel (mappings/ilismeta16-*.yml).
 
-Reused both by static mapping validation (errors collected and reported
-at the end of a pass) and by interlis.builder (construction at runtime,
-errors propagated immediately as exceptions). Hence a side-effect-free
-API: resolve()/find_association() raise an exception instead of writing
-to a global list - it's up to the caller to decide whether to collect or
-let it propagate.
+Side-effect-free: lookups raise instead of recording errors, so callers choose to collect or propagate.
 """
 
 import warnings
@@ -23,7 +18,7 @@ UML_FILES = [
 
 
 class UnknownClassError(LookupError):
-    """Aucune classe/type/association ne correspond au nom demande."""
+    """No class/type/association matches the requested name."""
 
 
 def _load_yaml(path: Path):
@@ -31,12 +26,7 @@ def _load_yaml(path: Path):
 
 
 class UmlIndex:
-    """Index of qualified_name -> UML element, plus a short-name index.
-
-    The short-name index (name -> [qualified_name, ...]) resolves
-    unqualified references (e.g. resolves_to: Class, resolves_to:
-    SubModel).
-    """
+    """Index of qualified_name -> UML element, plus a short-name index (name -> [qualified_name, ...])."""
 
     def __init__(self, qualified: dict[str, dict], by_name: dict[str, list[str]]):
         self.qualified = qualified
@@ -64,12 +54,9 @@ class UmlIndex:
         return cls(qualified, by_name)
 
     def resolve(self, name: str) -> dict:
-        """Resolve a target/resolves_to value (qualified or bare) to its UML element.
+        """Resolve a qualified or bare name to its UML element; raises UnknownClassError if not found.
 
-        Raises UnknownClassError if not found. Warns (via the stdlib
-        `warnings` module) and returns the first candidate if the bare name
-        is ambiguous - never fails silently, but does not force callers to
-        handle ambiguity as a hard error.
+        An ambiguous bare name warns and returns the first candidate.
         """
         if "." in name:
             el = self.qualified.get(name)

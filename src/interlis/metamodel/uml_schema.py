@@ -1,19 +1,6 @@
-"""Combined view of the IlisMeta16 metamodel.
+"""Combined view of the IlisMeta16 metamodel: UmlIndex plus the values of the anonymous enumerations.
 
-Combines UmlIndex (classes/datatypes/associations/enumerations) with
-ilismeta16-kind-values.yml (values of the anonymous enumerations
-referenced by generic UUID - see GENERIC_ENUM_TYPE_UUID below).
-
-Four anonymous UML primitive types (raw xmi:id, no qualified_name) are used
-as an attribute's `type:` in ilismeta16-classes.yml/datatypes.yml (verified
-against the YAML + the source XMI):
-EnumerationType (279A049B...), NumericType (39FDCDA0...), TextType
-(C16095C6...), PolylineType (F466480C..., single use:
-INTERLIS.SurfaceEdge.Geometry - a geometry type out of scope for this
-design, see registry.py). Only EnumerationType gets special handling
-(resolved via kind-values.yml into `Literal[...]`) - the other 3 are
-resolved directly by the registry's permissive `Any` typing (see its
-docstring for the rationale).
+Only EnumerationType is resolved into `Literal[...]`; the registry types the other anonymous primitives as `Any`.
 """
 
 from pathlib import Path

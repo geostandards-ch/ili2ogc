@@ -1,8 +1,6 @@
 """ili2db's dataset/basket and metadata tables (`T_ILI2DB_*`), as ili2pg/ili2gpkg 5.x define them.
 
-Same table and column definitions, so a schema produced here is managed per
-dataset and basket the way ili2db's own are. `meta_rows` fills the
-mapping tables from the converted tables and models.
+`meta_rows` fills the mapping tables from the converted tables and models.
 """
 
 from __future__ import annotations

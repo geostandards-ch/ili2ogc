@@ -1,24 +1,7 @@
-"""Constraint checks of an XTF transfer (eCH-0031 section 3.12).
+"""Constraint checks of an XTF transfer: MANDATORY, plausibility, UNIQUE, EXISTENCE and role cardinalities.
 
-Evaluated: `MANDATORY CONSTRAINT` on each object (references are followed
-to the target object), plausibility constraints (`CONSTRAINT >= 95% ...`)
-over all objects of the class, and `UNIQUE` - over the whole transfer,
-per basket with `(BASKET)`, per object with `(LOCAL)`, optionally
-restricted by `WHERE`. Constraints of a base class apply to the objects of
-its extensions.
-
-A constraint that cannot be computed because a value is undefined counts
-as satisfied (manual, section 3.12); an object with an undefined `UNIQUE`
-key takes no part in the check. `EXISTENCE` constraints are checked against
-the objects of the transfer and of the given catalogues (when none of the
-required class is present, the constraint is reported once per class as a warning, not evaluated).
-`SET` constraints, and any expression outside the evaluator's subset, are
-reported once per class as `info` issues rather than skipped silently.
-
-Uniqueness is checked against the objects present in the transfer only: the
-manual notes that such constraints are conceptually global and not always
-fully checkable. A `UNIQUE (LOCAL)` declared on a STRUCTURE is not checked
-(structure elements are not objects of the transfer).
+A base class constraint applies to its extensions; one whose value is undefined counts as satisfied.
+SET constraints and expressions the evaluator cannot handle are reported once per class as `info`.
 """
 
 from collections.abc import Iterable
@@ -55,8 +38,7 @@ _ATTRIBUTE_KINDS = ("ReferenceAttr", "Attribute")
 class _ObjectScope(dict):
     """One object's attributes as the expression evaluator reads them, resolved on demand.
 
-    A reference attribute yields the target object's own scope (so a path
-    can navigate `->`), and the scope compares `==` to its OID.
+    A reference yields the target's scope, so paths can navigate `->`; it compares equal to its OID.
     """
 
     def __init__(self, obj: XtfObject, by_tid: dict[str, XtfObject]) -> None:
@@ -418,10 +400,9 @@ def _association_links(
     population: _Population,
     by_tid: dict[str, XtfObject],
 ) -> tuple[list[tuple[str, str]], list[int]] | None:
-    """The `(tid at role 0, tid at role 1)` links of an association present in the population.
+    """The `(tid at role 0, tid at role 1)` links of an association, plus the roles whose cardinality the data shows.
 
-    The second value lists the roles whose cardinality the data can show: for an embedded association, only the
-    role whose target class carries the reference (the embedded role's own cardinality is an attribute check).
+    For an embedded association only the role whose target class holds the reference is checkable.
     """
     links: list[tuple[str, str]] = []
     embedding = association_embedding(assoc)
@@ -637,11 +618,10 @@ def check_stream_constraints(
     symbol_table: SymbolTable,
     repository: ModelRepository | None = None,
 ) -> list[ValidationIssue]:
-    """The constraints `check_transfer_constraints` can check holding one object at a time, in one pass.
+    """The constraints `check_transfer_constraints` can check one object at a time, in one pass.
 
-    Evaluated: MANDATORY and plausibility constraints that read the object's own attributes, `UNIQUE` (memory grows
-    with the distinct keys, not the objects) and `UNIQUE (LOCAL)`. Reported as not evaluated, once per class: any
-    constraint following a reference, EXISTENCE, SET, and the role cardinalities, which need other objects.
+    Evaluated: those reading only the object's own attributes, and UNIQUE. Reported once per class as not
+    evaluated: constraints following a reference, EXISTENCE, SET and role cardinalities.
     """
     by_tid = _StreamIndex()
     report = _Report()

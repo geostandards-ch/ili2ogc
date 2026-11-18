@@ -105,18 +105,9 @@ def _parse_stream(stream):
 
 
 def parse_file(path: Path):
-    """Parse an .ili file, return (interlis2def tree, syntax error list).
+    """Parse an .ili file, return (interlis2def tree, syntax error list); does not build.
 
-    Does NOT call the ModelBuilder - keeps reading and building separate.
-
-    Falls back to ISO-8859-1 if the file isn't valid UTF-8 - some older
-    files in the wild (e.g. "obsolete/*_o0.ili" variants) are ISO-8859
-    text, not UTF-8. The reference manual (eCH-0031 V2.1.0 §3.5.1, CHARSET
-    clause) only fixes the character set allowed in transferred VALUES,
-    never the on-disk encoding of the .ili source file itself, so falling
-    back to latin-1 breaks no rule. latin-1 can never raise
-    UnicodeDecodeError (a 1 byte <-> 1 character mapping over all 256
-    values), so no further fallback is needed.
+    Falls back to ISO-8859-1 when the file is not valid UTF-8; latin-1 never fails to decode.
     """
     return _parse_stream(InputStream(read_ili_text(path)))
 
@@ -130,20 +121,14 @@ def read_ili_text(path: Path) -> str:
 
 
 def parse_text(text: str):
-    """Do the same as `parse_file`, but from in-memory source text.
-
-    Used for the predefined INTERLIS model (see ModelRepository), which
-    exists as an .ili file nowhere on disk.
-    """
+    """Do the same as `parse_file`, but from in-memory source text (e.g. the predefined INTERLIS model)."""
     return _parse_stream(InputStream(text))
 
 
 def unquote_interlis_string(value: str) -> str:
-    r"""Strip an INTERLIS `STRING` token's quoting/escapes, if present (eCH-0117 SS4.1, same rule as the lexer STRING).
+    r"""Strip an INTERLIS `STRING` token's quoting and resolve its `\"`/`\\`/`\uXXXX` escapes.
 
-    A bare (unquoted) value is returned as-is; a `"..."` value has its
-    `\"`/`\\`/`\uXXXX` escapes resolved - shared by meta-attribute values
-    here and by `Expression` string literals (`convert/constraint_eval.py`).
+    A bare (unquoted) value is returned as-is.
     """
     if len(value) < 2 or value[0] != '"' or value[-1] != '"':
         return value
@@ -155,24 +140,10 @@ def unquote_interlis_string(value: str) -> str:
 
 
 def meta_attribute_comments(text: str) -> list[tuple[int, str, str]]:
-    r"""Return every eCH-0117 `!!@Name=Value` meta-attribute comment in `text`.
+    """Return every eCH-0117 `!!@Name=Value` meta-attribute comment as `(line, name, value)`, in source order.
 
-    eCH-0117 ("Meta-attributs pour modeles INTERLIS") formalizes `!!@...`
-    as an INTERLIS line comment (`SingleLineComment : '!!' ~[\r\n]* ->
-    channel(HIDDEN);`, vendor/interlis-antlr4/InterlisLexer.g4) whose 3rd
-    character is `@` - the grammar itself never sees these (they're on
-    ANTLR's hidden channel, invisible to the 121 mapped parser rules), but
-    the lexer does NOT discard them (`channel(HIDDEN)`, not `-> skip`), so
-    a second, independent lex-only pass over the same source recovers them
-    fully, with exact line numbers - no grammar/parser change needed.
-
-    Returns `(line, name, value)` triples in source order (one per
-    `Name=Value` pair - a single comment can carry several, separated by
-    `;`: `!!@a=1;b=2`). An ordinary `!!` comment (no `@`) is not a
-    meta-attribute per eCH-0117 SS3/SS4 and is excluded. Positioning
-    (which built instance a given triple actually belongs to - "the first
-    following language construct", eCH-0117 SS3) is NOT decided here -
-    see InterlisModelBuilder._attach_pending_meta_attributes.
+    These sit on the lexer's hidden channel, so a lex-only pass recovers them; one comment may carry several
+    `;`-separated pairs. Which instance a triple belongs to is decided by the builder, not here.
     """
     stream = InputStream(text)
     lexer = InterlisLexer(stream)

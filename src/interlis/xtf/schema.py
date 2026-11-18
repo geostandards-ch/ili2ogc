@@ -1,15 +1,7 @@
-"""SEMANTIC layer: cross-references structural XTF objects with the schema.
+"""Link transfer objects to the schema built by InterlisModelBuilder.
 
-Cross-references structural XTF objects (parse.py) with the schema already
-built by InterlisModelBuilder (Class/AttrOrParam/Type), so validate.py can
-interpret each attribute by its DECLARED type rather than its raw XML
-shape alone.
-
-Reuses the SymbolTable/ModelRepository already built by the ModelBuilder
-directly (see builder/forward_refs.py, builder/repository.py) - a Class
-instance is already registered under its full qualified name
-(Model.Topic.ClassName, via InterlisModelBuilder._qualify_name), which
-matches XtfObject.qualified_class exactly (same naming convention).
+Classes are looked up by full qualified name (the same as `XtfObject.qualified_class`), so `validate.py` can
+interpret each attribute by its declared type.
 """
 
 import functools
@@ -24,13 +16,9 @@ from interlis.metamodel.instance import MetaInstance
 def resolve_class(
     qualified_class: str, *, symbol_table: SymbolTable, repository: ModelRepository | None
 ) -> MetaInstance | None:
-    """Find the IlisMeta16.ModelData.Class instance for a qualified_class.
+    """Find the Class instance for a qualified name ("Model.Topic.ClassName").
 
-    Looks up an XtfObject.qualified_class ("Model.Topic.ClassName"). Checks
-    the root model's table first (local class, or already resolved via
-    import), then - if absent and a repository is given - the model named
-    by the qualified name's FIRST segment (same mechanism as the
-    ModelBuilder's own cross-reference resolution, ForwardRefResolver).
+    Checks the root model's table first, then the model named by the first segment in `repository`.
     """
     found = symbol_table.resolve(qualified_class, kind_hint=["Class"])
     if isinstance(found, MetaInstance):
@@ -46,11 +34,9 @@ def resolve_class(
 def home_symbol_table(
     qualified_class: str, *, symbol_table: SymbolTable, repository: ModelRepository | None
 ) -> SymbolTable:
-    """Return the symbol table that declares `qualified_class`, so `embedded_roles_of` sees its associations.
+    """Return the symbol table that declares `qualified_class`.
 
-    The root table if it holds the class, else its model's table from `repository` (an extending topic's
-    objects can be qualified under the base model). It also enumerates the models declaring the class's
-    ancestors, whose associations embed roles on it too.
+    That is the root table if it holds the class, else the table of its model from `repository`.
     """
     table = symbol_table
     if not isinstance(symbol_table.resolve(qualified_class, kind_hint=["Class"]), MetaInstance):
@@ -80,10 +66,9 @@ def _ancestor_tables(qualified_class: str, table: SymbolTable, repository: Model
 
 
 class _WithAncestorTables:
-    """A class's home table that also enumerates its ancestors' models.
+    """A class's home table that also lists the models of its ancestors.
 
-    An association declared in a base model embeds roles on the subclasses an extending topic declares
-    (`Facility_SPM EXTENDS Facility`): `embedded_roles_of` must scan the base model's associations too.
+    Needed because an association declared in a base model embeds roles on subclasses in an extending topic.
     """
 
     def __init__(self, home: SymbolTable, others: tuple[SymbolTable, ...]):
@@ -98,13 +83,7 @@ class _WithAncestorTables:
 
 
 def _own_attributes_of(class_instance: MetaInstance) -> dict[str, MetaInstance]:
-    """Map attribute name -> AttrOrParam instance, own attributes only.
-
-    Attributes declared on THIS class only (ClassAttr association,
-    ClassAttribute role - see spec/grammar/mapping/04_attributes.yml,
-    attributeDef.parent) - does NOT include attributes inherited via
-    EXTENDS, see attributes_of.
-    """
+    """Map attribute name -> AttrOrParam instance, own attributes only (inherited ones: see `attributes_of`)."""
     return {
         a.Name: a
         for a in (getattr(class_instance, "ClassAttribute", None) or [])
@@ -113,14 +92,9 @@ def _own_attributes_of(class_instance: MetaInstance) -> dict[str, MetaInstance]:
 
 
 def single_own_attribute(class_instance: MetaInstance) -> MetaInstance | None:
-    """Return `class_instance`'s single own attribute, if it has EXACTLY ONE.
+    """Return the class's only own attribute if it has exactly one, else `None`.
 
-    A recurring structural pattern: a wrapper STRUCTURE with exactly 1
-    attribute. `None` otherwise (0 or several). Reused by
-    `reference_external_status` (the `MandatoryCatalogueReference`
-    pattern) AND by `restriction_candidates`/the XTF validator (3rd
-    encoding form, `CLASS RESTRICTION(A; B; C)` over 1-attribute
-    STRUCTUREs).
+    This detects wrapper STRUCTUREs such as catalogue references.
     """
     own = _own_attributes_of(class_instance)
     if len(own) == 1:
@@ -129,31 +103,9 @@ def single_own_attribute(class_instance: MetaInstance) -> MetaInstance | None:
 
 
 def attributes_of(class_instance: MetaInstance) -> dict[str, MetaInstance]:
-    """Map attribute name -> AttrOrParam instance, own then inherited.
+    """Map attribute name to its AttrOrParam, own attributes first, then inherited ones.
 
-    Own attributes first, then attributes inherited via the `EXTENDS`
-    chain (walks the `Inheritance` association/`Super` role, fed by
-    classDef()/structureDef(), spec/grammar/mapping/03_classes_and_structures.yml
-    - previously never built at all, not just unwalked). An own attribute
-    wins over an inherited one of the same name (redeclaration/restriction
-    in the subclass) - not confirmed on a real example so far, but
-    consistent with the language's general EXTENDS semantics rather than
-    assuming no collision can happen.
-
-    Stops gracefully (no crash on already-known limits):
-    - `Super` absent (root of the chain, or a terminal abstract class):
-      the loop simply ends.
-    - `Super` still a `ForwardRef`/`UnresolvedNamedReference` (parent class
-      in a model not loaded via `--repo`, e.g.
-      `CatalogueObjects_V1.Catalogues.Item`, confirmed real on
-      RoadTrafficCensus_V1_1): the inheritance chain is truncated there,
-      no error - attributes inherited beyond that point simply stay
-      invisible, the same category of limit already known for any partial
-      cross-model resolution.
-    - anti-cycle guard (`seen`, by identity): no real cycle is known in
-      the corpus (a circular EXTENDS would be a model error anyway), but
-      cheap protection against an infinite loop if one is ever
-      encountered.
+    An own attribute wins over an inherited one. The walk stops at a missing or unresolved parent and at cycles.
     """
     merged: dict[str, MetaInstance] = {}
     for level in reversed(inheritance_chain(class_instance)):
@@ -174,12 +126,7 @@ def inheritance_chain(class_instance: MetaInstance) -> list[MetaInstance]:
 
 
 def _class_related_base_class(instance: MetaInstance) -> MetaInstance | None:
-    """Return `instance`'s `.BaseClass` (association BaseClass, role CRT<->BaseClass).
-
-    Works for any `ClassRelatedType` instance - `Role` (roleDef.BaseClass)
-    AND `ReferenceType` (referenceAttr.BaseClass, same generic
-    association, reused by `reference_target_class` below).
-    """
+    """Return `instance`'s `.BaseClass`, for a `Role` or a `ReferenceType` (same generic association)."""
     base = getattr(instance, "BaseClass", None)
     if isinstance(base, list):
         base = base[0] if base else None
@@ -187,13 +134,7 @@ def _class_related_base_class(instance: MetaInstance) -> MetaInstance | None:
 
 
 def _all_class_related_base_classes(instance: MetaInstance) -> list[MetaInstance]:
-    """Return the LIST version (not just the 1st) of `_class_related_base_class`.
-
-    Needed for `restriction_candidates`: `CLASS RESTRICTION(A; B; C)` now
-    attaches ALL its candidates onto `BaseClass` (see
-    `InterlisModelBuilder._build_domain_class_restriction`), not just the
-    first one as before that change.
-    """
+    """Return the list of `.BaseClass` (not just the first), as `CLASS RESTRICTION(A; B; C)` attaches all candidates."""
     base = getattr(instance, "BaseClass", None)
     if base is None:
         return []
@@ -210,11 +151,9 @@ def _role_is_required(role: MetaInstance) -> bool:
 
 
 def _role_is_multi(role: MetaInstance) -> bool:
-    """Check whether the role's maximum cardinality is > 1.
+    """Check whether the role's maximum cardinality is greater than 1.
 
-    Min/Max are TEXT strings (`Max` may be `'*'` or `'same_as_Min'`). With no
-    cardinality clause a role is `{0..*}`, except a composition role
-    (`-<#>`), which is `{0..1}` (eCH-0031 V2.1.0 §3.7.3).
+    Without a cardinality clause a role is `{0..*}`, except a composition role, which is `{0..1}`.
     """
     mult = getattr(role, "Multiplicity", None)
     if not isinstance(mult, MetaInstance):
@@ -232,11 +171,9 @@ def line_allows_arcs(line_type: MetaInstance | None) -> bool:
 
 
 def multi_geometry_element(structure: MetaInstance | None) -> "ResolvedAttribute | None":
-    """The single geometry attribute of a multi-geometry wrapper STRUCTURE, else `None`.
+    """Return the single geometry attribute of a multi-geometry wrapper STRUCTURE, else `None`.
 
-    The CHBase pattern (`MultiSurface`, `MultiLine`, `MultiPoint`, ...): a
-    STRUCTURE whose only attribute is a `BAG`/`LIST OF` a STRUCTURE holding
-    exactly one coordinate or line attribute - one multi-geometry value.
+    The wrapper's only attribute is a BAG/LIST OF a STRUCTURE holding one coordinate or line attribute.
     """
     if not isinstance(structure, MetaInstance) or getattr(structure, "Kind", None) != "Structure":
         return None
@@ -267,58 +204,19 @@ def association_roles(association: MetaInstance) -> list[MetaInstance]:
 
 
 def association_is_embedded(association: MetaInstance) -> bool:
-    """Whether an association travels as a role pseudo-attribute of a class rather than as its own object.
+    """Whether an association is carried as a role attribute of a class rather than as its own object.
 
-    Exactly 2 roles, not both with a max cardinality > 1 (eCH-0031 §4.3.9) -
-    the same rule `embedded_roles_of` applies.
+    True for exactly 2 roles where not both have a maximum cardinality above 1.
     """
     roles = association_roles(association)
     return len(roles) == 2 and not (_role_is_multi(roles[0]) and _role_is_multi(roles[1]))
 
 
 def embedded_roles_of(class_instance: MetaInstance, symbol_table: SymbolTable) -> dict[str, MetaInstance]:
-    """Map role name -> Role instance, for EMBEDDED association roles.
+    """Map role name to Role for the embedded association roles of this class.
 
-    Embedded association roles are transferred as pseudo-attributes of
-    THIS class in the XTF (e.g. `rMeasurementLocation` on `Indicator`) -
-    not regular ClassAttr attributes (see attributes_of).
-
-    Algorithm confirmed against the Reference Manual eCH-0031 V2.1.0
-    §4.3.9 "Codierung von Beziehungen":
-    - An association with EXACTLY 2 roles is ALWAYS embedded, except cases
-      currently out of scope (>2 roles, an explicit OID on the
-      association, some inter-topic relations - not handled here, the
-      association is then simply skipped rather than misclassified).
-    - If ONLY ONE of the 2 roles has a max cardinality > 1: embedded on
-      that role's TARGET class; the embedded pseudo-attribute's NAME is
-      the OTHER role's (§4.3.9.1: "for RoleName, the name of the role
-      pointing to the OPPOSITE object must be given").
-    - If both roles have max cardinality <= 1: embedded on the SECOND
-      declared role's target class (.ili file order); pseudo-attribute
-      named after the FIRST role.
-    - If both roles have max cardinality > 1: NOT embedded (transferred as
-      a separate class instance, §4.3.9.2) - absent from the result.
-
-    Known limitation (out of scope): the manual's "same Topic as the
-    association" nuance (which can force an association to NOT embed if
-    the target classes are in a different topic) isn't checked - every
-    resolved association is treated as if it shared its target classes'
-    topic (by far the most common case in the real corpus). Only searches
-    within the `symbol_table` given by the caller -
-    `schema_members_of`/`_validate_object` now passes the table of the
-    model that ACTUALLY declares the class (via `home_symbol_table`
-    above), not systematically the root model's: covers an association
-    defined in a model IMPORTED by the root model (e.g. a class embedded
-    via `TOPIC EXTENDS`, or more generally any class resolved via
-    `ModelRepository`).
-
-    Compares target classes via `is_class_compatible(class_instance,
-    embed_on)` (defined further below in this module, the same
-    compatibility relation already used for a resolved reference's real
-    target) rather than strict identity: true if `class_instance` IS
-    `embed_on`, OR a subclass (direct or indirect) via the `Super` chain -
-    otherwise a role embedded on an ABSTRACT base class would never be
-    recognized for its concrete transferred subclasses.
+    An embedded role is a pseudo-attribute of the class owning it: the target of the only role with maximum above 1,
+    else the second role's target. Only `symbol_table` is searched; abstract bases match concrete subclasses.
     """
     result: dict[str, MetaInstance] = {}
     for candidate in symbol_table.all_registered():
@@ -334,9 +232,9 @@ def embedded_roles_of(class_instance: MetaInstance, symbol_table: SymbolTable) -
 
 
 def association_embedding(association: MetaInstance) -> tuple[MetaInstance, MetaInstance] | None:
-    """Return `(class it embeds on, embedded role)` for an association that travels embedded, else `None`.
+    """Return `(class it embeds on, embedded role)` for an embedded association, else `None`.
 
-    Applies the eCH-0031 §4.3.9 rule described on `embedded_roles_of` to ONE association (own roles only).
+    Applies the rule of `embedded_roles_of` to one association.
     """
     if getattr(association, "Kind", None) != "Association":
         return None
@@ -356,17 +254,11 @@ def association_embedding(association: MetaInstance) -> tuple[MetaInstance, Meta
 
 
 def schema_members_of(class_instance: MetaInstance, symbol_table: SymbolTable) -> dict[str, MetaInstance]:
-    """Return the union of attributes_of and embedded_roles_of.
-
-    The full view of pseudo-attributes an XTF object of this class can
-    carry: own/inherited ClassAttr attributes plus embedded association
-    roles - and, for an association itself, its own roles.
-    """
+    """Return the union of `attributes_of` and `embedded_roles_of`, plus an association's own roles."""
     members = dict(attributes_of(class_instance))
     members.update(embedded_roles_of(class_instance, symbol_table))
     if getattr(class_instance, "Kind", None) == "Association":
-        # A non-embedded association is transferred as its own object whose
-        # elements are its roles, each a REF (eCH-0031 §4.3.9.2).
+        # A non-embedded association is transferred as its own object; its roles are reference elements.
         for role in association_roles(class_instance):
             if getattr(role, "Name", None):
                 members.setdefault(role.Name, role)
@@ -375,15 +267,10 @@ def schema_members_of(class_instance: MetaInstance, symbol_table: SymbolTable) -
 
 @dataclass
 class ResolvedAttribute:
-    """A schema attribute ready to be interpreted/validated.
+    """A schema attribute ready to be interpreted.
 
-    Holds its AttrOrParam OR Role instance (embedded association roles are
-    handled uniformly, via BaseClass instead of Type), its resolved
-    Type/target class (can be None if unresolved - an external reference
-    out of scope, see the README's Known limitations), and the short name
-    of the Type's concrete metamodel
-    class (e.g. "TextType", "NumType", "EnumType", "ReferenceType",
-    "Class" - never the abstract "DomainType").
+    Holds its AttrOrParam or Role, its resolved Type or target class (None if unresolved), and the short name of
+    the Type's concrete metamodel class.
     """
 
     attr: MetaInstance
@@ -394,13 +281,8 @@ class ResolvedAttribute:
 
 def resolve_attribute(attr: MetaInstance) -> ResolvedAttribute:
     if attr._qualified_class.rsplit(".", 1)[-1] == "Role":
-        # Role EXTENDS ReferenceType EXTENDS ClassRelatedType EXTENDS
-        # DomainType (ilismeta16-classes.yml): its inherited `Mandatory` is
-        # always true (the reference exists), so requiredness comes from the
-        # cardinality instead - unlike AttrOrParam,
-        # there's no separate Type field, the target class comes from
-        # BaseClass (attached via the BaseClass association, same
-        # mechanism as any other ClassRelatedType - like ReferenceType).
+        # Role EXTENDS ReferenceType: its inherited `Mandatory` is always true, so requiredness comes
+        # from the cardinality; the target class comes from BaseClass rather than a Type field.
         target = _class_related_base_class(attr)
         return ResolvedAttribute(
             attr=attr,
@@ -420,18 +302,10 @@ def resolve_attribute(attr: MetaInstance) -> ResolvedAttribute:
 
 
 def reference_target_class(resolved: ResolvedAttribute) -> MetaInstance | None:
-    """Return the Class DECLARED as a reference/role's target.
+    """Return the Class declared as the target of a reference or role.
 
-    Used to check class compatibility between a resolved reference and its
-    declared target. For `type_kind == "Class"` (an embedded association
-    role, OR `restrictedClassOrAssRef`/`restrictedStructureRef` resolving
-    DIRECTLY to a Class): `resolved.type_instance` IS ALREADY that class
-    (see `resolve_attribute`, both forms share `type_kind="Class"`). For
-    `type_kind == "ReferenceType"` (a plain `REFERENCE TO X`):
-    `resolved.type_instance` is the `ReferenceType` WRAPPER itself, not
-    the target class - that lives in its `.BaseClass` (the same generic
-    `BaseClass` association as `Role`, confirmed on `referenceAttr()` -
-    spec/grammar/mapping/04_attributes.yml).
+    For an embedded role or a restricted class reference the type already is that class; for a plain
+    `REFERENCE TO X` it is a wrapper whose `.BaseClass` is the class.
     """
     if resolved.type_instance is None:
         return None
@@ -457,17 +331,9 @@ def reference_target_classes(resolved: ResolvedAttribute) -> list[MetaInstance]:
 
 
 def is_class_compatible(actual: MetaInstance, declared: MetaInstance) -> bool:
-    """Check whether `actual` is `declared`, or one of its subclasses.
+    """Check whether `actual` is `declared` or one of its subclasses.
 
-    True if `actual` IS `declared`, or a SUBCLASS (direct or indirect, via
-    the `Inheritance`/`Super` chain) of `declared` - standard INTERLIS
-    polymorphism for a reference: a reference declared toward a class
-    (often abstract) must accept any concrete subclass as its real target,
-    not just `declared` itself. Compares by Python IDENTITY (`is`), not by
-    qualified name - valid as long as `actual`/`declared` come from the
-    same `symbol_table`/`ModelRepository` (always true within a single
-    `validate_transfer`, which reuses the SAME SymbolTable/ModelRepository
-    throughout - the same guarantee already relied on by `attributes_of`).
+    Classes are compared by identity, which works because one validation run shares a single symbol table.
     """
     seen: set[int] = set()
     current: MetaInstance | None = actual
@@ -482,24 +348,9 @@ def is_class_compatible(actual: MetaInstance, declared: MetaInstance) -> bool:
 def concrete_structure_subclasses(
     abstract_class: MetaInstance, *symbol_tables: SymbolTable | None
 ) -> list[MetaInstance]:
-    """Every concrete (non-abstract) STRUCTURE subclass of an ABSTRACT one, across every given symbol table.
+    """Return every concrete STRUCTURE subclass of an abstract one, sorted by name.
 
-    `Inheritance`/`Super` is a forward-only pointer (child -> parent), so
-    there is no reverse "subclasses of" link - finding them means scanning
-    every registered Class and keeping the ones for which
-    `is_class_compatible` holds (an identity walk up `Super`). Abstract
-    intermediates are excluded: eCH-0031 SS3.6.4 - only a concrete structure
-    is ever a valid transferred structure element.
-
-    Several symbol tables are accepted so the scan can reach a subclass that
-    lives in a different model than its abstract base (e.g.
-    `AdministrativeUnits_V1.CountryName EXTENDS Dictionaries_V1...Entry`).
-    The match is still by identity, so it only succeeds when both come from
-    ONE build (the JSON Schema pipeline, or a same-model `convert-sql`);
-    `convert-sql` building each model with its own builder can leave the
-    root's `Super` chain and a folded-in abstract as different instances -
-    a real limitation, not closed here. Deduplicated by identity, sorted by
-    name.
+    Subclasses are found by scanning all classes in the given tables, since `Super` only points to the parent.
     """
     seen: set[int] = set()
     result: list[MetaInstance] = []
@@ -523,13 +374,7 @@ def concrete_structure_subclasses(
 def restriction_candidates(resolved: ResolvedAttribute) -> list[MetaInstance]:
     """Return every candidate class of a `CLASS RESTRICTION(A; B; C)`.
 
-    XTF's 3rd encoding form.
-    Length > 1 ONLY for this construct (e.g. `Owner = CLASS
-    RESTRICTION(sCHOwnerCode; sCHCantonCode; sCHMunicipalityCode)`,
-    RoadTrafficCensus_V1_1.ili); length 0 or 1 for a plain `REFERENCE
-    TO`/role (already covered by `reference_target_class`, still the
-    function to use for the simple case - this one is SPECIFICALLY for
-    the multi-candidate case).
+    A plain `REFERENCE TO` or role gives 0 or 1 (see `reference_target_class`).
     """
     if resolved.type_kind != "ReferenceType" or resolved.type_instance is None:
         return []
@@ -537,17 +382,9 @@ def restriction_candidates(resolved: ResolvedAttribute) -> list[MetaInstance]:
 
 
 def coord_axes(coord_type: MetaInstance | None) -> list[MetaInstance]:
-    """Return the ORDERED list of a `CoordType`'s `NumType` instances.
+    """Return the ordered `NumType` axes of a `CoordType`, each possibly with Min/Max/Unit.
 
-    Association `AxisSpec`, role `Axis`, `{1..3} NumType ORDERED`
-    (confirmed in ilismeta16-associations.yml/coordinateType binding,
-    spec/grammar/mapping/06_types.yml) - each potentially carries
-    Min/Max/Unit (own TEXT, absent for a bare `NUMERIC` axis with no
-    range). Returns an EMPTY list (not an error) if `coord_type` is
-    `None`, or if `Axis` wasn't resolved (e.g. an external domain not
-    loaded via `--repo`) - the XTF validator must then fall back to a
-    numeric PARSEABILITY check only, never a range check, on the affected
-    components (see validate.py).
+    Empty if `coord_type` is `None` or its axes are unresolved; callers then only check that values parse.
     """
     if coord_type is None:
         return []
@@ -558,28 +395,9 @@ def coord_axes(coord_type: MetaInstance | None) -> list[MetaInstance]:
 
 
 def line_coord_type(line_type: MetaInstance | None) -> MetaInstance | None:
-    """Return the `CoordType` linked to a `LineType` via `LineCoord`.
+    """Return the `CoordType` given by a `LineType`'s `VERTEX` clause, else `None`.
 
-    `LineType <-> CoordType, 0..1`, role `CoordType`, fed by the
-    `lineType.CoordType`/`controlPoints()` binding ('VERTEX Name', see
-    InterlisModelBuilder._build_control_points_ref). `None` if `line_type`
-    is `None`, or if no `LineType` in the `Super` chain (`Inheritance`
-    association, own THEN inherited via `EXTENDS`, same principle as
-    `attributes_of` for classes) carries a VERTEX clause of its own.
-
-    Walks the EXTENDS chain: `DirectedLine EXTENDS Line = DIRECTED
-    POLYLINE;` (real, from CHBase) has NO VERTEX clause of its own - its
-    CoordType lives on `Line`, the base domain. This required
-    `domainDef()` to actually attach `Super` for every EXTENDS clause
-    first (`InterlisModelBuilder._attach_domain_extends`, previously a
-    total gap - NO domainDef() EXTENDS clause was attached before that
-    change, regardless of domain type).
-
-    Graceful stop (same category of limit as `attributes_of`): `Super`
-    absent, or still an `UnresolvedNamedReference` (base domain in a model
-    not loaded via `--repo`) - the chain is simply truncated at that
-    point, no error. Anti-cycle guard (`seen`, by identity) - same
-    precaution as `attributes_of`/`is_class_compatible`.
+    The `Super` chain is followed because a derived line type has no VERTEX clause of its own.
     """
     seen: set[int] = set()
     current: MetaInstance | None = line_type
@@ -593,33 +411,18 @@ def line_coord_type(line_type: MetaInstance | None) -> MetaInstance | None:
 
 
 def reference_external_status(resolved: ResolvedAttribute) -> bool | None:
-    """Return the status of the optional `REFERENCE TO (EXTERNAL) X` clause.
+    """Return whether a reference is marked `(EXTERNAL)`: True, False, or `None` if it cannot be determined.
 
-    Tri-state (`True`/`False`/`None`, not bool): `None` means "this
-    validator can't confidently identify a REFERENCE TO here" - distinct
-    from `False` ("confirmed NOT-EXTERNAL"). Used to distinguish, when an
-    extracted REF resolves to no object in the transfer, a legitimate
-    EXTERNAL reference (separate catalogue/basket) from a more likely sign
-    of bad data.
-
-    3 confirmed forms (True/False, never None): a direct `ReferenceType`
-    attribute; a 1-attribute Structure wrapping a `ReferenceType`
-    (the `MandatoryCatalogueReference` pattern); and an embedded
-    association role's own `(EXTERNAL)` clause on `roleDef()`. `None` for
-    everything else (a genuinely undetermined status, not "assumed
-    False").
+    `None` lets the caller tell a legitimate external reference from bad data. Handles direct reference
+    attributes, 1-attribute wrapper STRUCTUREs and embedded roles.
     """
     if resolved.type_kind == "ReferenceType" and resolved.type_instance is not None:
         return bool(getattr(resolved.type_instance, "External", False))
     if resolved.attr._qualified_class.rsplit(".", 1)[-1] == "Role":
         return bool(getattr(resolved.attr, "External", None))
     if resolved.type_kind == "Class" and resolved.type_instance is not None:
-        # `_own_attributes_of` (NOT `attributes_of`): this checks a
-        # structural pattern on the STRUCTURE ITSELF (a wrapper with a
-        # single OWN attribute) - an attribute inherited via EXTENDS would
-        # wrongly add a 2nd entry and break detection of the
-        # MandatoryCatalogueReference pattern, unrelated to what's being
-        # checked here.
+        # `_own_attributes_of`, not `attributes_of`: an inherited attribute would add a 2nd entry
+        # and break wrapper detection.
         wrapped = _own_attributes_of(resolved.type_instance)
         if len(wrapped) == 1:
             inner = resolve_attribute(next(iter(wrapped.values())))
@@ -629,23 +432,9 @@ def reference_external_status(resolved: ResolvedAttribute) -> bool | None:
 
 
 def enum_values(enum_type: MetaInstance) -> set[str]:
-    """Return every valid DOTTED PATH for this EnumType.
+    """Return every valid dotted path for this EnumType.
 
-    Reference Manual eCH-0031 V2.1.0 §4.3.11.3: "EnumValue =
-    (EnumElement-Name {'.' EnumElement-Name}) | 'OTHERS'." - a
-    HIERARCHICAL enum (an EnumNode with children) transfers as the FULL
-    PATH from the root, not just the leaf node's name - e.g. for
-    KGS_PBC_V2_2.KGS_Kategorie: "A (A, verstaerkter_Schutz), B", the
-    transferred value for node "A" nested under the same-named root node
-    "A" is "A.A", not just "A". "For encoding ... the syntax is applied
-    REGARDLESS of whether the value domain covers only leaves or also
-    nodes" - so EVERY node contributes its own path, not just leaves.
-    EnumType.TopNode is a SYNTHETIC root node (Name="TOP", never a real
-    value - confirmed by `models/IlisMeta16.ili`'s comment on EnumNode:
-    "MetaElement.Name := 'TOP' for topnode", and built as such, see
-    InterlisModelBuilder._build_enumeration_tree) - excluded from the
-    returned paths, only ITS children (the real top-level values) start a
-    path. Recurses through EnumNode.Node (association SubNode, role Node).
+    A hierarchical enum transfers the full path (`A.A`), and every node counts, not only leaves.
     """
     values: set[str] = set()
 
@@ -694,25 +483,14 @@ def meta_value(instance: MetaInstance | None, name: str) -> str | None:
 
 
 def is_integer_range(min_raw: str | None, max_raw: str | None) -> bool:
-    """True if both bounds are present and neither has a decimal point.
-
-    Same shape heuristic already used (read-only, not duplicated) by
-    xtf/validate.py's `_decimal_places` for range-tolerance rounding.
-    """
+    """True if both bounds are present and neither has a decimal point."""
     return min_raw is not None and max_raw is not None and "." not in min_raw and "." not in max_raw
 
 
 def is_structure(type_instance: MetaInstance | None) -> bool:
-    """True if a `type_kind == "Class"` resolution is genuine STRUCTURE nesting.
+    """True if a `type_kind == "Class"` resolution is a genuine STRUCTURE nesting.
 
-    `resolve_attribute` resolves BOTH a `Class(Kind=Structure)` attribute
-    AND an embedded association role
-    (`xtf.schema.embedded_roles_of` - always `Kind == "Class"`, a role
-    points at a real class instance, never a structure) to the SAME
-    `type_kind == "Class"`. `Kind` is the only signal that tells them
-    apart - confirmed by `xtf/validate.py`'s own `_validate_resolved_attr`
-    dispatch (`Kind == "Structure"` recurses into inline content;
-    anything else expects a `REF`/OID, same as a plain `REFERENCE TO`).
+    An embedded association role also resolves to "Class", so `Kind` tells them apart.
     """
     return type_instance is not None and getattr(type_instance, "Kind", None) == "Structure"
 
@@ -720,10 +498,8 @@ def is_structure(type_instance: MetaInstance | None) -> bool:
 def nested_class(resolved: ResolvedAttribute) -> MetaInstance | None:
     """Return the Class a structure/BAG/LIST-of-structure attribute points to, else None.
 
-    Only genuine STRUCTURE nesting counts as "reachable" for `$defs`
-    discovery (`is_structure`) - an embedded association role's target
-    is a REFERENCE, not containment, same as a plain `REFERENCE TO`
-    target (also never added to `$defs` by this discovery).
+    Only genuine STRUCTURE nesting counts (`is_structure`); an embedded role's target is a reference, not containment.
+
     """
     if resolved.type_kind == "Class" and is_structure(resolved.type_instance):
         return resolved.type_instance

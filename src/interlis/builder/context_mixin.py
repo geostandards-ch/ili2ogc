@@ -1,12 +1,7 @@
 """`CONTEXT <Name> = (domainRef EQ domainRef (OR domainRef)* SEMI)+` construction.
 
-Builds the `GenericDef`/`ConcreteForGeneric` link objects a `contextDef`
-represents (see spec/grammar/mapping/06_types.yml,
-`contextDef.generic_concrete_pairs` for the reified-association design
-this follows) - not expressible via a declarative `attribute_bindings`
-entry because `ctx.domainRef()` returns every occurrence flattened into
-one list, with no grouping of its own; grouping is recovered positionally
-from `ctx.children`, splitting on `;`.
+Builds the `GenericDef`/`ConcreteForGeneric` link objects; done in code because `ctx.domainRef()` returns all
+occurrences flattened, so the groups are recovered positionally from `ctx.children`, split on `;`.
 """
 
 from __future__ import annotations
@@ -31,11 +26,7 @@ else:
 
 class _ContextMixin(_Base):
     def _build_context_domain_pairs(self, context: MetaInstance, ctx: ParserRuleContext) -> None:
-        """Build one `GenericDef` (+ its `ConcreteForGeneric` links) per `generic = concrete (OR concrete)*` pair-group.
-
-        Plain bookkeeping lists (no reverse role in ilismeta16-associations.yml) so
-        convert/jsonfg.py can walk Context -> GenericDef -> ConcreteForGeneric with no dedicated index.
-        """
+        """Build one `GenericDef` (+ its `ConcreteForGeneric` links) per `generic = concrete (OR concrete)*` group."""
         name_token = ca.call(ctx, "Name")
         if name_token is None:
             return

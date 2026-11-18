@@ -1,8 +1,5 @@
-"""View formation semantics shared by the SQL and JSON-FG converters.
-
-Both targets must agree on which `AGGREGATION OF` columns are computable
-and on how an `INSPECTION OF` path decomposes; classifying them here keeps
-the two translations from drifting apart.
+"""View formation semantics shared by the SQL and JSON-FG converters: which `AGGREGATION OF` columns are computable
+and how an `INSPECTION OF` path decomposes.
 """
 
 from __future__ import annotations
@@ -47,10 +44,8 @@ def is_standard_count_call(factor: MetaInstance) -> bool:
 def aggregation_column_problem(attr: MetaInstance) -> str | None:
     """Return why an `AGGREGATION OF` view attribute cannot be computed, or `None` when it can.
 
-    Computable: a path or constant (a group attribute), or a standard
-    count of `AGGREGATES`. A user `FUNCTION` is declared without a body in
-    INTERLIS (it is implemented by the application), so no converter can
-    evaluate it.
+    Computable: a path or constant (group attribute), or a standard count of `AGGREGATES`. A user `FUNCTION` has no
+    body in INTERLIS, so no converter can evaluate it.
     """
     name = getattr(attr, "Name", None)
     for factor in getattr(attr, "Derivates", None) or []:
@@ -91,15 +86,9 @@ class GeometryInspection:
 def geometry_inspection(
     view: MetaInstance, base_view: MetaInstance, symbol_table: SymbolTable | None
 ) -> GeometryInspection | None:
-    """Classify `view`'s inspection path as a geometry decomposition, or `None` for a structure path.
+    """Classify an inspection path as a geometry decomposition, or `None` for a structure path.
 
-    eCH-0031 SS3.15: the inspection of a surface attribute yields
-    `SurfaceBoundary` elements, of the `Lines` attribute `SurfaceEdge`
-    elements; `AREA INSPECTION` yields each boundary line of the area
-    partition once; the inspection of a line attribute yields
-    `LineGeometry` elements, of `Segments` `LineSegment` elements.
-    `problem` is set when the path is a geometry one but outside what
-    the converters translate (a MULTI form, an unknown trailing name).
+    `problem` is set for a geometry path the converters cannot translate.
     """
     path = [str(n) for n in (getattr(view, "_inspection_path", None) or [])]
     if not path:
@@ -156,15 +145,9 @@ def _path_refs(factor: MetaInstance) -> tuple[list[str | None], list[str | None]
 def inspection_reading(
     factor: MetaInstance | None, insp: GeometryInspection, base_alias: str
 ) -> tuple[InspectionReading | None, str | None]:
-    """Classify the expression of one geometry-inspection view attribute: `(reading, None)` or `(None, why not)`.
+    """Classify the expression of one geometry-inspection attribute: `(reading, None)` or `(None, reason)`.
 
-    The element is addressed through the base alias (`Alias -> Geometry`).
-    Readable members: the inspected attribute (or `Lines`) of a
-    `SurfaceBoundary`, `Geometry` of a `SurfaceEdge`, the inspected line
-    attribute of a `LineGeometry`, `SegmentEndPoint`/`ArcPoint` of a
-    `LineSegment`; `PARENT -> field` on the surface/line boundary level
-    reads the owning object, `THISAREA`/`THATAREA -> field` the one or two
-    area objects bordering an `AREA INSPECTION` edge.
+    Readable members are the geometry of the boundary, edge, line or segment, and `PARENT -> field`.
     """
     if factor is None or not _is_kind(factor, "PathOrInspFactor") or getattr(factor, "Inspection", None):
         return None, "is not a plain element path"

@@ -1,9 +1,4 @@
-"""Dialect-neutral SQL schema/view intermediate representation.
-
-`build_tables` produces `Table`/`Column`/...; `build_views` produces
-`SqlView`/`UniqueViewTrigger`. Every renderer consumes these same
-objects. Pure leaf module.
-"""
+"""Dialect-neutral SQL schema/view intermediate representation produced by `build_tables`/`build_views`."""
 
 from __future__ import annotations
 
@@ -51,12 +46,8 @@ class ForeignKey:
     columns: list[str]
     ref_table: str
     ref_columns: list[str]
-    # Identity of the target Class, when the FK points at another class's
-    # table rather than its own parent's. `ref_table` is first filled from
-    # the target's bare Name, which two classes of the same name (an LV03
-    # and an LV95 variant of one base model, say) share - `build_tables`
-    # rewrites it from this id once it knows which of them got the
-    # suffixed table name.
+    # Identity of the target Class when the FK points at another class's table. `ref_table` starts from the bare
+    # Name, which same-named classes share; `build_tables` rewrites it from this id once suffixes are known.
     ref_class_id: int | None = None
     ref_alternative_ids: tuple[int, ...] = ()
     """Every declared target of a role `-- A OR B` (ids), `ref_class_id` being the first."""
@@ -123,11 +114,9 @@ class SqlView:
 
 @dataclass
 class UniqueViewTrigger:
-    """A VIEW-level `UniqueConstraint` translated into a `BEFORE INSERT`/`BEFORE UPDATE` trigger on its base table.
+    """A VIEW-level `UniqueConstraint` as a `BEFORE INSERT`/`UPDATE` trigger on its base table.
 
-    Dialect-neutral (`where`/`columns` name only the base table's own
-    alias/columns) - each renderer wraps the same predicate in its own
-    `CREATE TRIGGER` form.
+    Dialect-neutral: each renderer wraps the same predicate in its own `CREATE TRIGGER` form.
     """
 
     view_name: str

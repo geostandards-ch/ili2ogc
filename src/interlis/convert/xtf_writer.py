@@ -1,33 +1,6 @@
-"""XtfObject/XtfBasket -> .xtf (XTF 2.3 wire text) writer - the reverse of `xtf/parse.py`.
+"""Write an `XtfTransfer` as XTF 2.3 text, the reverse of `xtf/parse.py`.
 
-Two layers, deliberately separated:
-
-- `render_xtf` (generic): serializes an already-assembled `XtfTransfer`
-  (HEADERSECTION/MODELS + DATASECTION/baskets/objects) to XTF 2.3 wire
-  text. Knows nothing about VIEW TOPIC - a basket's objects are written
-  exactly as their `XtfObject`/`RawNode` already hold them, whether they
-  came straight off `xtf.parse.parse_xtf` (a plain class instance,
-  round-tripped as-is) or were built by `write_view_basket` below. Proven
-  independently of any VIEW by a structural ROUND-TRIP test
-  (`tests/test_xtf_writer_roundtrip.py`): parse a real .xtf, render it
-  back, re-parse the result, compare - isolates this layer's correctness
-  from VIEW-evaluation correctness (`convert/jsonfg.evaluate_view_objects`).
-- `write_view_basket` (VIEW-specific): evaluates one VIEW TOPIC's `View`
-  instances against a source transfer (`convert/jsonfg.evaluate_view_objects`)
-  and assembles the one new `XtfBasket` its instances belong in, honoring
-  refman eCH-0031 V2.1.0 SS4.3.8's "Codierung von Sichten" (`tid`, no
-  `operation`, only `ATTRIBUTE`/`ALL OF`-declared attributes) and SS4.3.7's
-  attribute ORDER rule (a compiled schema's XSD `xsd:sequence` enforces
-  the VIEW's own `ClassAttribute` declaration order exactly - a raw
-  object's own wire order, inherited from whichever base object(s) it was
-  projected/merged from, cannot be trusted to already match that).
-
-Refman SS4182/SS4728 gate VIEW transfer on `VIEW TOPIC` specifically (a VIEW inside a plain
-`TOPIC` compiles with `ili2c` but is silently absent from the generated
-XSD and from any transfer) - `write_view_basket` doesn't enforce this
-itself (the caller already resolved `view` off a built model, where
-`ViewUnit` on the containing topic already reflects it), it only
-assembles the wire content once a VIEW TOPIC's basket is what's wanted.
+`render_xtf` serializes a transfer as is; `write_view_basket` evaluates a VIEW TOPIC's views into one new basket.
 """
 
 from xml.etree import ElementTree as ET
@@ -44,17 +17,8 @@ _XTF23_NAMESPACE = "http://www.interlis.ch/INTERLIS2.3"
 def _raw_node_to_element(node: RawNode, *, tag: str) -> ET.Element:
     """`RawNode` -> its element, with `tag` overriding `node.tag` at THIS level only.
 
-    For a plain object read straight off a real .xtf, `tag` always equals
-    `node.tag` already (`xtf/parse.py`'s `parse_xtf` derives both from the
-    SAME source element) - passing it explicitly is a no-op there. It is
-    NOT a no-op for a VIEW-renamed attribute: `_project_object_under_view_names`
-    (`convert/jsonfg.py`) re-keys `XtfObject.attributes` under the VIEW's
-    own `Name` (e.g. `RoadNumber` -> `roadnumber`), but the `RawNode`
-    VALUE it re-keys is copied unchanged - it still carries the SOURCE
-    attribute's own `.tag` inside it (JSON-FG never notices: `object_to_
-    feature` reads properties by dict key alone, never `RawNode.tag`).
-    Nested children keep their OWN tags always (fixed COORD/Reference/
-    STRUCTURE-element vocabulary, never an attribute name).
+    Needed for VIEW-renamed attributes: the re-keyed `RawNode` still carries the source attribute's tag.
+    Nested children keep their own tags.
     """
     elem = ET.Element(tag, dict(node.attrib))
     if node.text is not None:
@@ -67,14 +31,7 @@ def _raw_node_to_element(node: RawNode, *, tag: str) -> ET.Element:
 def _object_element(obj: XtfObject, attr_order: list[str] | None) -> ET.Element:
     """One `XtfObject` -> its `<Model.Topic.Class TID="...">` element.
 
-    `attr_order`, when given, overrides `obj.attributes`' own dict
-    iteration order with this explicit attribute-name sequence (see
-    module docstring - the XSD-sequence order requirement). `None` keeps
-    the dict's own order (correct for a plain round-tripped object: it
-    already satisfied its schema's sequence once to be valid in the first
-    place). An attribute absent from `obj.attributes` (an optional VIEW
-    attribute with no value for this row) is simply skipped, same as any
-    OPTIONAL attribute already is in a real transfer.
+    `attr_order` overrides the dict order (the XSD sequence for VIEW classes); attributes with no value are skipped.
     """
     attrib = {"TID": obj.tid} if obj.tid is not None else {}
     elem = ET.Element(obj.qualified_class, attrib)
@@ -98,14 +55,9 @@ def _basket_element(basket: XtfBasket, attr_order_by_class: dict[str, list[str]]
 
 
 def render_xtf(transfer: XtfTransfer, *, attr_order_by_class: dict[str, list[str]] | None = None) -> str:
-    """Serialize `transfer` to XTF 2.3 wire text - the convention `xtf/parse.py` reads.
+    """Serialize `transfer` to XTF 2.3 wire text - the bare, UPPERCASE-attribute convention `xtf/parse.py` reads.
 
-    See `tests/fixtures/xtf/sample.xtf`: bare, UPPERCASE envelope
-    attributes, no `ili:` namespace prefix. Generic over what
-    `transfer.baskets` contains - see module docstring.
-    `attr_order_by_class`, keyed by `XtfObject.qualified_class`, overrides
-    per-class attribute order for classes needing it (VIEW-derived ones);
-    every other class keeps its objects' own `.attributes` dict order.
+    `attr_order_by_class` (keyed by `XtfObject.qualified_class`) overrides attribute order for VIEW-derived classes.
     """
     root = ET.Element("TRANSFER", {"xmlns": _XTF23_NAMESPACE})
     header = ET.SubElement(root, "HEADERSECTION", {"VERSION": "2.3"})
@@ -141,41 +93,8 @@ def write_view_basket(
 ) -> XtfBasket:
     """Evaluate `view` against `transfer` and assemble its VIEW TOPIC `XtfBasket`.
 
-    `kind` defaults to `None` (omitted on the wire) - refman SS4.3.6:
-    "%TransferKind%...Falls das Attribut fehlt, wird FULL angenommen"
-    (if the attribute is missing, FULL is assumed), and SS4182/SS4728:
-    VIEW objects have no stable identity across transfers, so a VIEW
-    TOPIC basket is only ever meaningfully transferred `FULL` - omitting
-    `KIND` is both
-    spec-faithful (never redundant) and matches a real ili2c-compiled
-    schema for a simple transfer (confirmed empirically: `ili2c -oXSD`
-    does not declare a `KIND` attribute at all when the model has no
-    incremental-transfer setup, rejecting ANY explicit value, correct or
-    not - `xmllint --schema` against `Waldabstandslinien_V1_2_d`).
-    `INITIAL`/`UPDATE` would need an identity-stability guarantee this
-    runtime cannot make - pass one of `"FULL"`/`"INITIAL"`/`"UPDATE"`
-    (refman's own enum, uppercase) explicitly if a caller ever needs to.
-    `bid` is the caller's choice (a `VIEW TOPIC`'s own basket id, not
-    derived from `transfer` - the source transfer's basket id belongs to
-    a DIFFERENT topic).
-
-    Every `FormationKind` is supported (`evaluate_view_objects` - only an
-    `INSPECTION` of a SURFACE/AREA/POLYLINE geometry raises `ValueError`
-    there, its derived geometry values have no XTF-transferable shape).
-
-    Object/basket tags: `evaluate_view_objects`' returned `XtfObject`s keep
-    whichever `qualified_class` their SOURCE object(s) happened to carry
-    (a Projection/Aggregation/Union row keeps its base object's own tag; a
-    Join/Inspection row gets the VIEW's bare short `Name` - see
-    `_merge_join_combo`/`_project_object_under_view_names`/
-    `_inspection_elements` in `convert/jsonfg.py`, where that field is
-    vestigial, never read by `object_to_feature`) - wrong either way for a
-    wire tag here, which must be the VIEW's own fully qualified
-    `Model.Topic.ViewName` (refman SS4.3.7's `Object` rule) regardless of
-    FormationKind. Resolved via `symbol_table.qualified_name_of(view)`
-    (the same dotted path the builder registered the VIEW under) rather
-    than reconstructed by name-guessing; the basket's own tag is that path
-    one level up (`Model.Topic`, refman SS4.3.6's `Basket` rule).
+    `kind=None` omits `KIND` (FULL is assumed; an ili2c-compiled XSD may not declare it at all). `bid` is the caller's
+    choice. Objects are retagged with the VIEW's qualified `Model.Topic.ViewName`, as the wire format requires.
     """
     objects = evaluate_view_objects(view, transfer, symbol_table=symbol_table, repository=repository)
     qualified_view = symbol_table.qualified_name_of(view)
@@ -188,33 +107,14 @@ def write_view_basket(
 
 
 def _unquote(value: str | None) -> str | None:
-    """Strip one matching pair of surrounding `"` - `Model.Version`/`Model.At` keep their source quoting.
-
-    `spec/grammar/mapping/02_packages.yml`'s `modelDef.At`/`Version`
-    capture the raw `STRING` token text verbatim (`field: STRING`, no
-    unquoting transform - true of every `field: STRING` capture in this
-    spec, not special-cased here) - `MODEL Foo AT "http://x" VERSION
-    "2020-01-01"` yields `At == '"http://x"'`, quotes included. Harmless
-    for every EXISTING consumer (documentation text, comments - never
-    displayed/compared raw), but wrong verbatim on an XML attribute value
-    here (`&quot;http://x&quot;` in the rendered .xtf). Narrow, local
-    fix - not a general STRING-unquoting change to the builder.
-    """
+    """Strip one matching pair of surrounding `"` - `Model.Version`/`Model.At` keep their source quoting."""
     if value is not None and len(value) >= 2 and value[0] == value[-1] == '"':
         return value[1:-1]
     return value
 
 
 def _model_ref_for(qualified_name: str, symbol_table: SymbolTable) -> XtfModelRef:
-    """`XtfModelRef` for the MODEL owning `qualified_name` (its leading path segment).
-
-    `Version`/`At` (grammar keywords `VERSION`/`AT` on `MODEL ... = ...;`)
-    are read straight off the built `Model` instance when resolvable;
-    both stay `None` otherwise (unregistered model, or genuinely absent
-    from the source `.ili` - both OPTIONAL on the wire: refman SS4.3.4's
-    XTF 2.4 `Model` rule carries no version/uri at all, only `%ModelName%`
-    - `NAME` is the one part every convention agrees is required).
-    """
+    """`XtfModelRef` for the MODEL owning `qualified_name`; `version`/`uri` stay `None` when unresolvable or absent."""
     model_name = qualified_name.split(".", 1)[0]
     model_instance = symbol_table.resolve(model_name)
     version = _unquote(getattr(model_instance, "Version", None)) if model_instance is not None else None
@@ -232,31 +132,10 @@ def write_xtf(
     sender: str | None = None,
     merge_with_source: bool = False,
 ) -> str:
-    """Compose one VIEW TOPIC's materialized data into a complete .xtf document - the `write-xtf` CLI's core.
+    """Compose one VIEW TOPIC's materialized data into a complete .xtf document.
 
-    `merge_with_source=False` (the CLI default): a STANDALONE transfer
-    holding ONLY the new VIEW basket, with ONLY the VIEW's own model in
-    `MODELS` (its base model's short-name-qualified object tags never
-    appear in this transfer at all - only VIEW instances do, refman
-    SS4.3.4's "Hauptmodelle...zu welchen Objekte im Transfer vorkommen
-    können"). This is the direct wire-form counterpart of "the result of
-    evaluating this VIEW" - hand-verified against `ili2c`/`xmllint`.
-
-    `merge_with_source=True`: refman SS4.3.5's `DataSection = { Basket }`
-    - a transfer holding arbitrarily many baskets, even across models, is
-    explicitly normal (SS4.3.6: "Behälter sind Instanzen eines konkreten
-    TOPIC bzw. VIEW TOPIC", no singular-transfer restriction) - this mode
-    APPENDS the VIEW basket to a COPY of `transfer`'s own baskets/models,
-    so one file self-describes both the raw base data and its
-    pre-computed VIEW result together, closer to the original
-    SQL-identifier-naming-friction motivation for a `.xtf` writer at all
-    than handing out a VIEW-only
-    fragment. Not the default only because it widens
-    what a single call has to get right at once (the untouched source
-    baskets survive byte-for-byte ALONGSIDE the new one) - not because it
-    is spec-questionable or overkill; it is the more natural reading of
-    "a VIEW TOPIC's basket sits in a DataSection exactly like any other
-    Topic's" and is a cheap follow-up once the standalone path is proven.
+    By default a standalone transfer holds only the VIEW basket and its own model; `merge_with_source=True` appends
+    it to a copy of the source transfer's baskets/models instead.
     """
     basket = write_view_basket(view, transfer, bid=bid, symbol_table=symbol_table, repository=repository)
     qualified_view = symbol_table.qualified_name_of(view)

@@ -1,14 +1,7 @@
-"""Validation of a JSON-FG document against its INTERLIS model, in three layers.
+"""Validate a JSON-FG document against its INTERLIS model in three layers.
 
-1. `[properties]`: each feature's `properties` against the JSON Schema `interlis convert-jsonschema` writes for
-   its class, geometry left out (it travels in `place`).
-2. `[geometry]`: the geometry against the model - presence, JSON-FG type, dimension, `coordRefSys` and
-   coordinate domain - read from the built model, not from the schema.
-3. `[constraints]` / `[references]`: what a JSON Schema cannot say - the model's constraints, evaluated by the
-   XTF validator's checks on objects rebuilt from the features, and the targets of reference attributes.
-
-A JSON-FG document carries neither baskets nor qualified class names: each topic's features form one synthetic
-basket, and a `featureType` shared by several classes is accepted when the feature conforms to any of them.
+Properties against the generated JSON Schema, geometry against the model, then constraints and references.
+Each topic's features form one synthetic basket; a shared `featureType` accepts a feature fitting any class.
 """
 
 from dataclasses import dataclass, field, replace
@@ -74,10 +67,7 @@ class _Checked:
 
 
 def _is_tolerated(error: Any) -> bool:
-    """A schema violation that `interlis validate-xtf` does not raise on the XTF: reported as a warning only.
-
-    A decimal value in an integer domain, and an empty list where the model wants at least one element.
-    """
+    """A schema violation `interlis validate-xtf` would not raise on XTF, reported as a warning only."""
     if error.validator == "type" and error.validator_value == "integer":
         return isinstance(error.instance, float)
     return error.validator == "minItems" and error.instance == []

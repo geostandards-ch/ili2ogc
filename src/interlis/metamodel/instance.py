@@ -14,42 +14,29 @@ _next_id = itertools.count(1)
 class MetaInstance(BaseModel):
     """Common base class for all metamodel instances.
 
-    `extra="allow"`: fields fed via an association (not declared in the
-    class's own/inherited) are set dynamically by AttachmentResolver at
-    build time, without needing to be pre-declared here (see
-    interlis.metamodel.registry).
+    `extra="allow"`: association-fed fields are set dynamically at build time without being pre-declared.
     """
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True, validate_assignment=False)
 
     if TYPE_CHECKING:
-        # Every IlisMeta16 attribute/association end reaches an instance
-        # dynamically (extra="allow", set by AttachmentResolver from the
-        # YAML metamodel - see interlis.metamodel.registry). There is no
-        # static field list to give mypy; treat any attribute as Any
-        # rather than scatter per-access ignores. Type-check-only, no
-        # runtime effect (pydantic's own __getattr__ serves extras).
+        # IlisMeta16 attributes are set dynamically (extra="allow"), so there is no static field list: type-check
+        # only, treat any attribute as Any.
         def __getattr__(self, name: str) -> Any: ...
 
     _qualified_class: str = PrivateAttr(default="")
     _source_ctx: Any | None = PrivateAttr(default=None)
     _id: int = PrivateAttr(default_factory=lambda: next(_next_id))
-    # topicDef case only: the twin SubModel and DataUnit built for the same
-    # TOPIC (not a formal IlisMeta16 association - see
-    # interlis.builder.model_builder).
+    # topicDef only: the twin SubModel/DataUnit built for the same TOPIC (not an IlisMeta16 association).
     _twin: "MetaInstance | None" = PrivateAttr(default=None)
-    # classDef case only: True once its own `OID AS .../NO OID` clause has
-    # been scanned (even if unresolved) - tells the enclosing topicDef's
-    # class-default OID propagation not to override this class's own
-    # decision (see InterlisModelBuilder._attach_class_oid).
+    # classDef only: True once its own `OID AS .../NO OID` clause was scanned, so the topic's default OID does
+    # not override it.
     _own_oid_clause: bool = PrivateAttr(default=False)
-    # existenceConstraint case only: for each `ExistsIn` class, in order, the
-    # attribute path of the REQUIRED IN clause (None when it is not a plain
-    # `Name->Name` path) - IlisMeta16 itself carries the required classes but
-    # not this path.
-    # MetaAttribute case only: source lines between the `!!@Name=Value` comment and the construct it was attached to
+    # MetaAttribute only: source lines between the `!!@Name=Value` comment and the construct it was attached to
     # (1 = directly above it).
     _line_gap: int | None = PrivateAttr(default=None)
+    # existenceConstraint only: per `ExistsIn` class, the attribute path of the REQUIRED IN clause (None if not a
+    # plain `Name->Name` path), which IlisMeta16 itself does not carry.
     _required_attribute_paths: "list[list[str] | None]" = PrivateAttr(default_factory=list)
 
     def __repr__(self) -> str:

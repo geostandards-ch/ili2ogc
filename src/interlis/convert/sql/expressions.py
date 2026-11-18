@@ -1,9 +1,4 @@
-"""CONSTRAINT/WHERE `Expression` tree -> SQL boolean text.
-
-Shared by `tables.py`'s `CHECK` translation and `views.py`'s VIEW `WHERE`
-translation, so both use the same path-resolution/literal helpers. Leaf
-module.
-"""
+"""CONSTRAINT/WHERE `Expression` tree -> SQL boolean text, shared by CHECK and VIEW WHERE translation. Leaf module."""
 
 from __future__ import annotations
 
@@ -17,9 +12,7 @@ _MAX_STRUCT_FLATTEN_DEPTH = 2
 
 
 class _UnsupportedCheckExpression(Exception):
-    """Raised when an `Expression` node needs context a single-row SQL `CHECK` cannot express - caught by the caller,
-    never propagated (RULE #5: a `-- NOTE`, not a crash).
-    """
+    """Raised when an expression needs more than a single row, so no SQL `CHECK` is possible; the caller adds a note."""
 
 
 _SQL_RELATIONAL_OPERATORS = {
@@ -33,12 +26,10 @@ _SQL_RELATIONAL_OPERATORS = {
 
 
 def _path_to_column(path_els: list[MetaInstance]) -> str:
-    """Resolve a `CONSTRAINT` path (`PathOrInspFactor.PathEls`) to the flattened SQL column name it maps to.
+    """Resolve a `CONSTRAINT` path to the flattened SQL column name it maps to.
 
-    A `CONSTRAINT` navigates only nested `STRUCTURE` hops in the same
-    object (never a `REFERENCE TO`/role) - 1-3 hops flatten to the same
-    `<attr>_<subattr>[_<subsubattr>]` name `_columns_for_class` builds.
-    The caller checks the result against the real column set.
+    Only nested STRUCTURE hops occur (1-3), flattening to the `<attr>_<subattr>[_...]` name `_columns_for_class`
+    builds; the caller checks the result against the real column set.
     """
     if len(path_els) not in (1, 2, 3):
         raise _UnsupportedCheckExpression(
@@ -67,19 +58,16 @@ def _text_sql_literal(quoted_value: str) -> str:
 def _numeric_sql_literal(raw: str) -> str:
     """Strip a leading `+` from a `Constant.Value` numeric token.
 
-    `+` is not standard SQL numeric-literal syntax, unlike `-`.
+    `+` is not valid SQL numeric-literal syntax.
     """
     return raw[1:] if raw.startswith("+") else raw
 
 
 def _expression_to_sql(expr: MetaInstance, column_names: set[str], renamed: dict[str, str]) -> str:
-    """Serialize `expr` (an already-built `Expression` node) into a SQL boolean expression for `CHECK (...)`.
+    """Serialize `expr` into a SQL boolean expression for `CHECK (...)`.
 
-    Same supported subset as `constraint_eval.py`'s `evaluate_expression`
-    (relational/logical operators, `DEFINED(...)`, plain paths, scalar
-    constants) - `THIS`/`PARENT`/aggregate/`FunctionCall`/arithmetic raise
-    `_UnsupportedCheckExpression`. `renamed` is `_avoid_identity_collision`'s
-    rename map, for a path whose sole hop is literally named `id`.
+    Supports relational/logical operators, `DEFINED(...)`, plain paths and scalar constants; anything else raises
+    `_UnsupportedCheckExpression`. `renamed` maps paths whose sole hop is literally named `id`.
     """
     qualified = expr._qualified_class
     if qualified.endswith("CompoundExpr"):

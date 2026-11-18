@@ -1,11 +1,7 @@
-"""Dynamically generate the Pydantic classes for the IlisMeta16 metamodel.
+"""Dynamically generate the Pydantic classes for the IlisMeta16 metamodel from mappings/ilismeta16-*.yml.
 
-Built from mappings/ilismeta16-*.yml at every startup (never written to
-disk or committed separately) - the YAML stays the single source of
-truth. Fields are typed `Any` and generation needs no forward-ref
-resolution because the metamodel changes with the spec, not with the
-code - a hand-maintained class hierarchy would drift from
-`mappings/ilismeta16-*.yml` the moment either one changed alone.
+Generated at every startup with fields typed `Any`, so the YAML stays the single source of truth and no
+hand-maintained hierarchy can drift from it.
 """
 
 from typing import Any
@@ -26,10 +22,7 @@ class MetamodelRegistry:
         classes: dict[str, type[MetaInstance]] = {}
         for qn, element in schema.instantiable_classes().items():
             classes[qn] = cls._build_class(qn, element, schema)
-        # Some associations are themselves constructed as "link objects" by
-        # the spec (e.g. ObjectOID: Class<->Oid, see topicDef) - one field
-        # per end role, no own/inherited attributes (associations have none
-        # in ilismeta16-associations.yml).
+        # Some associations are built as "link objects" (e.g. ObjectOID): one field per end role.
         for qn, element in schema.associations().items():
             classes[qn] = cls._build_association_class(qn, element)
         return cls(schema, classes)
