@@ -38,6 +38,7 @@ from interlis.convert.view_formation import (
     inspection_reading,
     is_standard_count_call,
 )
+from interlis.convert.wgs84 import fallback_geometry
 from interlis.diagnostic_ids import REGISTRY
 from interlis.metamodel.instance import MetaInstance
 from interlis.runtime.parse import unquote_interlis_string
@@ -995,7 +996,7 @@ def _object_to_feature(
     feature["featureType"] = feature_type
     if standalone and schema_url is not None:
         feature["featureSchema"] = _feature_schema_ref(schema_url, feature_type)
-    feature["geometry"] = None
+    feature["geometry"] = fallback_geometry(place, crs_uri)
     if place is not None:
         feature["place"] = place
         feature["coordRefSys"] = crs_uri

@@ -406,6 +406,8 @@ def test_polyline_pure_arc_becomes_bare_circular_string():
         "coordinates": [[2600000.0, 1200000.0], [2600050.0, 1200050.0], [2600100.0, 1200100.0]],
     }
     assert CONF_CIRCULAR_ARCS in feature["conformsTo"]
+    assert feature["geometry"]["type"] == "LineString"  # the WGS 84 fallback, stroked
+    assert len(feature["geometry"]["coordinates"]) >= 2  # these three points are collinear: a straight line
 
 
 def test_polyline_straight_then_arc_then_straight_becomes_compound_curve():
