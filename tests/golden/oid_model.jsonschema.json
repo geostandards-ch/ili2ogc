@@ -8,6 +8,7 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "title": "Plain",
       "x-crud": [
         "GET",
@@ -24,6 +25,7 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "title": "NoOwnOid",
       "x-crud": [
         "GET",
@@ -40,6 +42,7 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "title": "Inherits",
       "x-crud": [
         "GET",
@@ -56,6 +59,7 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "title": "OwnDomain",
       "x-crud": [
         "GET",
@@ -72,6 +76,7 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "title": "Opted",
       "x-crud": [
         "GET",
@@ -88,6 +93,7 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "title": "Combined",
       "x-crud": [
         "GET",

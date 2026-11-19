@@ -29,7 +29,7 @@ from interlis.builder.view_mixin import _ViewBuildingMixin
 from interlis.metamodel.instance import MetaInstance
 from interlis.metamodel.registry import MetamodelRegistry
 from interlis.metamodel.uml_schema import MetamodelSchema
-from interlis.runtime.parse import unquote_interlis_string
+from interlis.runtime.parse import DOC_COMMENT_NAME, unquote_interlis_string
 from interlis.spec.models import Parent, SpecEntry
 from interlis.spec.spec_index import load_spec
 
@@ -241,6 +241,10 @@ class InterlisModelBuilder(
             comment_line, name, value = self._pending_meta_attributes[self._meta_attribute_index]
             if comment_line > line:
                 break
+            if name == DOC_COMMENT_NAME:
+                instance.Documentation = [*(getattr(instance, "Documentation", None) or []), value]
+                self._meta_attribute_index += 1
+                continue
             meta = self.registry.new_instance("IlisMeta16.ModelData.MetaAttribute")
             meta.Name = name
             meta.Value = value

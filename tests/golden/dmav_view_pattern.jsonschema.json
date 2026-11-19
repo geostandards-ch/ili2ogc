@@ -21,6 +21,7 @@
           "maxLength": 10
         }
       },
+      "additionalProperties": false,
       "title": "GSNachfuehrung",
       "required": [
         "GueltigerEintrag",
@@ -59,6 +60,7 @@
           "x-reference-target": "GSNachfuehrung"
         }
       },
+      "additionalProperties": false,
       "title": "Grundstueck",
       "required": [
         "Entstehung",
@@ -85,6 +87,7 @@
           "x-reference-target": "Grundstueck"
         }
       },
+      "additionalProperties": false,
       "title": "Entstehung_Grundstueck",
       "required": [
         "Entstehung"
@@ -102,6 +105,7 @@
           "x-reference-target": "Grundstueck"
         }
       },
+      "additionalProperties": false,
       "title": "Untergang_Grundstueck"
     },
     "Grundstueck_Gueltig": {
@@ -120,6 +124,7 @@
           "maxLength": 14
         }
       },
+      "additionalProperties": false,
       "title": "Grundstueck_Gueltig",
       "required": [
         "NBIdent",

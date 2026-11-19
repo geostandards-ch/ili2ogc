@@ -24,6 +24,7 @@
           "x-reference-target": "Company"
         }
       },
+      "additionalProperties": false,
       "title": "Person",
       "required": [
         "Name"
@@ -43,6 +44,7 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "title": "Company",
       "required": [
         "Name"
@@ -67,6 +69,7 @@
           "x-reference-target": "Company"
         }
       },
+      "additionalProperties": false,
       "title": "WorksFor"
     }
   }

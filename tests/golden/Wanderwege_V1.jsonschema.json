@@ -21,6 +21,7 @@
           "maxLength": 20
         }
       },
+      "additionalProperties": false,
       "title": "Wegabschnitt",
       "required": [
         "Bezeichnung",
@@ -51,6 +52,7 @@
           "x-reference-target": "Wegabschnitt"
         }
       },
+      "additionalProperties": false,
       "title": "Wegweiser",
       "required": [
         "Standort",
@@ -76,6 +78,7 @@
           "x-reference-target": "Wegweiser"
         }
       },
+      "additionalProperties": false,
       "title": "Abschnitt_Wegweiser",
       "required": [
         "Wegabschnitt"
@@ -101,6 +104,7 @@
           "maxLength": 20
         }
       },
+      "additionalProperties": false,
       "title": "Wegabschnitt_MitWegweiser",
       "required": [
         "Bezeichnung",

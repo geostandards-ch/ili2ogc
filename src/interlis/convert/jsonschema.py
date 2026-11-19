@@ -63,6 +63,12 @@ def _crud_operations(class_instance: MetaInstance) -> tuple[str, ...] | None:
     return _FULL_CRUD
 
 
+def _description(instance: MetaInstance | None) -> str | None:
+    """The `/** ... */` documentation comment of a class or attribute, as a JSON Schema `description`."""
+    texts = getattr(instance, "Documentation", None) or []
+    return " ".join(str(t) for t in texts) or None
+
+
 def _unit_name(type_instance: MetaInstance) -> str | None:
     """The INTERLIS name of a numeric type's unit (the last segment of an unresolved `Model.Unit` reference)."""
     unit = getattr(type_instance, "Unit", None)
@@ -296,6 +302,9 @@ def _attribute_schema(
     meta = _meta_marker(resolved.attr)
     if meta:
         schema["x-meta"] = meta
+    description = _description(resolved.attr)
+    if description:
+        schema["description"] = description
     return schema
 
 
@@ -429,12 +438,15 @@ def class_to_json_schema(
     spatial = [name for name, prop in properties.items() if is_spatial_schema(prop)]
     if len(spatial) == 1:
         properties[spatial[0]][ROLE_KEY] = PRIMARY_GEOMETRY
-    schema: dict[str, Any] = {"type": "object", "properties": properties}
+    schema: dict[str, Any] = {"type": "object", "properties": properties, "additionalProperties": False}
     class_name = getattr(class_instance, "Name", None)
     if class_name:
         schema["title"] = class_name
     if required:
         schema["required"] = sorted(required)
+    description = _description(class_instance)
+    if description:
+        schema["description"] = description
     class_meta = _meta_marker(class_instance)
     if class_meta:
         schema["x-meta"] = class_meta
@@ -474,13 +486,18 @@ def collection_schema(schema: dict[str, Any], key: str, *, schema_id: str | None
     return result
 
 
-def property_validator(schema: dict[str, Any], key: str) -> jsonschema.Draft202012Validator:
+def property_validator(schema: dict[str, Any], key: str, *, closed: bool = False) -> jsonschema.Draft202012Validator:
     """A validator of one feature's `properties` against `$defs[key]`; its spatial properties are not required.
+
+    `closed=False` ignores `additionalProperties`: `validate-jsonfg` reports an unknown property as a warning itself.
 
     Geometry travels outside `properties` in JSON-FG (`place`), so the `format: geometry-*` properties
     are left to a geometry check.
     """
-    defs = dict(schema.get("$defs", {}))
+    defs = {
+        k: d if closed else {n: v for n, v in d.items() if n != "additionalProperties"}
+        for k, d in schema.get("$defs", {}).items()
+    }
     entry = dict(defs[key])
     spatial = {name for name, prop in entry.get("properties", {}).items() if is_spatial_schema(prop)}
     if spatial and "required" in entry:
@@ -496,7 +513,7 @@ def validate_feature_properties(properties: dict[str, Any], schema: dict[str, An
     `schema` must be the full document so the entry's `$ref`s resolve. Returns every violation message (empty list
     = valid); whether the write is allowed at all (`x-crud`) is not checked here.
     """
-    return [error.message for error in property_validator(schema, key).iter_errors(properties)]
+    return [error.message for error in property_validator(schema, key, closed=True).iter_errors(properties)]
 
 
 def inherited_topic_classes(symbol_table: SymbolTable) -> Iterator[tuple[MetaInstance, MetaInstance]]:

@@ -41,6 +41,7 @@
           "x-reference-target": "Grundstueck"
         }
       },
+      "additionalProperties": false,
       "title": "Liegenschaft",
       "required": [
         "Fiktiv",
@@ -85,6 +86,7 @@
           "x-reference-target": "Grundstueck"
         }
       },
+      "additionalProperties": false,
       "title": "SelbstaendigesDauerndesRecht",
       "required": [
         "Flaechenmass",
@@ -124,6 +126,7 @@
           "x-reference-target": "Grundstueck"
         }
       },
+      "additionalProperties": false,
       "title": "Bergwerk",
       "required": [
         "Flaechenmass",
@@ -174,6 +177,7 @@
           "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?$"
         }
       },
+      "additionalProperties": false,
       "title": "GSNachfuehrung",
       "required": [
         "Beschreibung",
@@ -265,6 +269,7 @@
           "x-reference-target": "GSNachfuehrung"
         }
       },
+      "additionalProperties": false,
       "title": "Grenzpunkt",
       "required": [
         "Entstehung",
@@ -295,6 +300,7 @@
           "x-reference-target": "Grenzpunkt"
         }
       },
+      "additionalProperties": false,
       "title": "Entstehung_Grenzpunkt",
       "required": [
         "Entstehung"
@@ -312,6 +318,7 @@
           "x-reference-target": "Grenzpunkt"
         }
       },
+      "additionalProperties": false,
       "title": "Untergang_Grenzpunkt"
     },
     "Grundstueck": {
@@ -369,6 +376,7 @@
           "x-reference-target": "GSNachfuehrung"
         }
       },
+      "additionalProperties": false,
       "title": "Grundstueck",
       "required": [
         "Entstehung",
@@ -399,6 +407,7 @@
           "x-reference-target": "Grundstueck"
         }
       },
+      "additionalProperties": false,
       "title": "Entstehung_Grundstueck",
       "required": [
         "Entstehung"
@@ -416,6 +425,7 @@
           "x-reference-target": "Grundstueck"
         }
       },
+      "additionalProperties": false,
       "title": "Untergang_Grundstueck"
     },
     "GrundstueckLiegenschaft": {
@@ -430,6 +440,7 @@
           "x-reference-target": "Liegenschaft"
         }
       },
+      "additionalProperties": false,
       "title": "GrundstueckLiegenschaft",
       "required": [
         "Grundstueck"
@@ -447,6 +458,7 @@
           "x-reference-target": "SelbstaendigesDauerndesRecht"
         }
       },
+      "additionalProperties": false,
       "title": "GrundstueckSelbstaendigesDauerndesRecht",
       "required": [
         "Grundstueck"
@@ -464,6 +476,7 @@
           "x-reference-target": "Bergwerk"
         }
       },
+      "additionalProperties": false,
       "title": "GrundstueckBergwerk",
       "required": [
         "Grundstueck"
@@ -536,6 +549,7 @@
           "x-ogc-unit": "Gon"
         }
       },
+      "additionalProperties": false,
       "title": "Grenzpunkt_Gueltig",
       "required": [
         "IstExaktDefiniert",
@@ -600,6 +614,7 @@
           "x-ogc-unit": "m2"
         }
       },
+      "additionalProperties": false,
       "title": "Grundstueck_Gueltig",
       "required": [
         "Fiktiv",
@@ -648,6 +663,7 @@
           ]
         }
       },
+      "additionalProperties": false,
       "title": "Liegenschaft_Gueltig",
       "required": [
         "Fiktiv",
@@ -687,6 +703,7 @@
           "type": "boolean"
         }
       },
+      "additionalProperties": false,
       "title": "SelbstaendigesDauerndesRecht_Gueltig",
       "required": [
         "Flaechenmass",
@@ -721,6 +738,7 @@
           "x-unsupported": "unknown"
         }
       },
+      "additionalProperties": false,
       "title": "Bergwerk_Gueltig",
       "required": [
         "Flaechenmass",
@@ -783,6 +801,7 @@
           "x-unsupported": "unknown"
         }
       },
+      "additionalProperties": false,
       "title": "Textposition"
     }
   }

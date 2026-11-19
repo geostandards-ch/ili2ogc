@@ -9,6 +9,7 @@
           "x-ogc-role": "primary-geometry"
         }
       },
+      "additionalProperties": false,
       "title": "Point",
       "x-crud": [
         "GET",
@@ -26,6 +27,7 @@
           "x-ogc-role": "primary-geometry"
         }
       },
+      "additionalProperties": false,
       "title": "MultiPoint",
       "x-crud": [
         "GET",
@@ -43,6 +45,7 @@
           "x-ogc-role": "primary-geometry"
         }
       },
+      "additionalProperties": false,
       "title": "Way",
       "x-crud": [
         "GET",
@@ -60,6 +63,7 @@
           "x-ogc-role": "primary-geometry"
         }
       },
+      "additionalProperties": false,
       "title": "DirectedWay",
       "x-crud": [
         "GET",
@@ -77,6 +81,7 @@
           "x-ogc-role": "primary-geometry"
         }
       },
+      "additionalProperties": false,
       "title": "MultiWay",
       "x-crud": [
         "GET",
@@ -94,6 +99,7 @@
           "x-ogc-role": "primary-geometry"
         }
       },
+      "additionalProperties": false,
       "title": "Zone",
       "x-crud": [
         "GET",

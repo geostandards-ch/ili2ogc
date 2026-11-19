@@ -143,3 +143,43 @@ END Foo.
     schema = class_to_json_schema(builder.symbol_table.resolve("A"))
     assert schema["properties"]["Length"]["x-ogc-unit"] == "Kilometer"
     assert "x-ogc-unit" not in schema["properties"]["Plain"]
+
+
+_POLY_MODEL = """INTERLIS 2.4;
+MODEL Foo AT "http://x" VERSION "1" =
+  TOPIC T =
+    STRUCTURE Shape (ABSTRACT) = Base : TEXT*5; END Shape;
+    STRUCTURE Circle EXTENDS Shape = Radius : 0 .. 100; END Circle;
+    /** A class holding a shape */
+    CLASS A =
+      /** The shape */
+      S : Shape;
+    END A;
+  END T;
+END Foo.
+"""
+
+
+def _node(tag, text=None, children=()):
+    return RawNode(tag=tag, text=text, attrib={}, children=list(children))
+
+
+def test_a_structure_occurrence_keeps_the_attributes_of_its_concrete_subclass():
+    from interlis.convert.jsonfg import object_to_feature
+
+    builder = build_from_text(_POLY_MODEL)
+    wire = _node("S", children=[_node("Foo.T.Circle", children=[_node("Base", "b"), _node("Radius", "7")])])
+    obj = XtfObject(tid="1", qualified_class="Foo.T.A", attributes={"S": [wire]})
+    feature = object_to_feature(obj, builder.symbol_table.resolve("A"), symbol_table=builder.symbol_table)
+    assert feature["properties"]["S"] == {"Base": "b", "Radius": 7}
+
+
+def test_schema_is_closed_and_carries_the_documentation_comments():
+    from interlis.convert.jsonschema import class_to_json_schema
+    from interlis.runtime.parse import meta_attribute_comments
+
+    builder = build_from_text(_POLY_MODEL, meta_attributes=meta_attribute_comments(_POLY_MODEL))
+    schema = class_to_json_schema(builder.symbol_table.resolve("A"))
+    assert schema["additionalProperties"] is False
+    assert schema["description"] == "A class holding a shape"
+    assert schema["properties"]["S"]["description"] == "The shape"

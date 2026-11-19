@@ -13,6 +13,17 @@ from interlis.antlr.InterlisLexer import InterlisLexer
 from interlis.antlr.InterlisParser import InterlisParser
 
 _META_ATTRIBUTE_PREFIX = "!!@"
+DOC_COMMENT_PREFIX = "/**"
+DOC_COMMENT_NAME = "\x00doc"
+"""Pseudo meta-attribute name carrying a `/** ... */` documentation comment (never a real `!!@Name`)."""
+
+
+def _doc_comment_text(comment: str) -> str:
+    """The text of a `/** ... */` comment: delimiters and each line's leading `*` removed, whitespace collapsed."""
+    lines = [line.strip().lstrip("*").strip() for line in comment[3:-2].splitlines()]
+    return " ".join(line for line in lines if line)
+
+
 # eCH-0117 SS4.2 Escape = '\' ('"' | '\' | 'u' HexDigit HexDigit HexDigit HexDigit)
 _ESCAPE_RE = re.compile(r'\\(["\\]|u[0-9a-fA-F]{4})')
 
@@ -142,6 +153,8 @@ def unquote_interlis_string(value: str) -> str:
 def meta_attribute_comments(text: str) -> list[tuple[int, str, str]]:
     """Return every eCH-0117 `!!@Name=Value` meta-attribute comment as `(line, name, value)`, in source order.
 
+    A `/** ... */` documentation comment is returned too, named `DOC_COMMENT_NAME`.
+
     These sit on the lexer's hidden channel, so a lex-only pass recovers them; one comment may carry several
     `;`-separated pairs. Which instance a triple belongs to is decided by the builder, not here.
     """
@@ -151,7 +164,12 @@ def meta_attribute_comments(text: str) -> list[tuple[int, str, str]]:
     tokens.fill()
     results: list[tuple[int, str, str]] = []
     for token in tokens.tokens:
-        if token.channel == 0 or token.text is None or not token.text.startswith(_META_ATTRIBUTE_PREFIX):
+        if token.channel == 0 or token.text is None:
+            continue
+        if token.text.startswith(DOC_COMMENT_PREFIX) and token.text.endswith("*/"):
+            results.append((token.line, DOC_COMMENT_NAME, _doc_comment_text(token.text)))
+            continue
+        if not token.text.startswith(_META_ATTRIBUTE_PREFIX):
             continue
         body = token.text[len(_META_ATTRIBUTE_PREFIX) :]
         for pair in body.split(";"):

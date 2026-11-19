@@ -46,6 +46,7 @@ from interlis.xtf.parse import RawNode, XtfObject, XtfTransfer
 from interlis.xtf.schema import (
     ResolvedAttribute,
     attributes_of,
+    concrete_structure_subclasses,
     home_symbol_table,
     is_class_compatible,
     is_integer_range,
@@ -245,7 +246,19 @@ def _structure_value(
     wrapper = node if already_unwrapped else (node.children[0] if node.children else None)
     if wrapper is None or not isinstance(resolved.type_instance, MetaInstance):
         return {}
-    return members_value(resolved.type_instance, group_by_tag(wrapper.children), symbol_table=symbol_table)
+    structure = _concrete_structure(resolved.type_instance, wrapper.tag, symbol_table)
+    return members_value(structure, group_by_tag(wrapper.children), symbol_table=symbol_table)
+
+
+def _concrete_structure(declared: MetaInstance, tag: str, symbol_table: SymbolTable | None) -> MetaInstance:
+    """The structure an occurrence really is: the subclass of `declared` its wire tag names, else `declared`."""
+    name = tag.rsplit(".", 1)[-1]
+    if name == getattr(declared, "Name", None) or symbol_table is None:
+        return declared
+    for candidate in concrete_structure_subclasses(declared, symbol_table):
+        if candidate.Name == name:
+            return candidate
+    return declared
 
 
 def _multi_value(resolved: ResolvedAttribute, raw_nodes: list[RawNode], *, symbol_table: SymbolTable | None) -> Any:
