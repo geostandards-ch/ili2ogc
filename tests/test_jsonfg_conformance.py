@@ -143,7 +143,8 @@ MODEL Foo AT "http://x" VERSION "1" =
 END Foo.
 """)
     schema = class_to_json_schema(builder.symbol_table.resolve("A"))
-    assert schema["properties"]["Length"]["x-ogc-unit"] == "Kilometer"
+    assert schema["properties"]["Length"]["x-ogc-unit"] == "km"
+    assert schema["properties"]["Length"]["x-interlis"]["unit"] == "Kilometer"
     assert "x-ogc-unit" not in schema["properties"]["Plain"]
 
 
@@ -477,3 +478,42 @@ END Foo.
     assert [(c["role"], c["of"], c["min"], c["max"]) for c in cardinalities("Tag")] == [("Maybe", "Maybe", "1", "*")]
     assert [(c["role"], c["min"], c["max"]) for c in cardinalities("Q")] == [("p", "2", "3")]
     assert cardinalities("Maybe") == []  # the reference it holds is in the schema: optional, single
+
+
+def test_enumeration_order_decimals_and_units_are_kept_beside_the_standard_keywords():
+    from interlis.convert.jsonschema import class_to_json_schema
+
+    builder = build_from_text("""INTERLIS 2.4;
+MODEL Foo AT "http://x" VERSION "1" =
+  UNIT Kilometer [km] = 1000 [INTERLIS.m];
+  UNIT Furlong [fur] = 201 [INTERLIS.m];
+  DOMAIN Dir = (north, east, south, west) ORDERED;
+  DOMAIN Kind = (a (a1, a2), b);
+  TOPIC T =
+    CLASS A = D : Dir; K : Kind; L : 0.00 .. 99.50 [Kilometer]; F : 0 .. 9 [Furlong]; M : 0 .. 5; END A;
+  END T;
+END Foo.
+""")
+    props = class_to_json_schema(builder.symbol_table.resolve("A"), symbol_table=builder.symbol_table)["properties"]
+    assert props["D"]["x-interlis"] == {"ordered": True, "order": ["north", "east", "south", "west"]}
+    assert "x-interlis" not in props["K"]  # the tree is in the dotted values
+    assert props["L"]["x-ogc-unit"] == "km" and props["L"]["x-interlis"] == {"unit": "Kilometer", "decimals": 2}
+    assert "x-ogc-unit" not in props["F"] and props["F"]["x-interlis"] == {"unit": "Furlong"}  # no certain UCUM code
+    assert "x-interlis" not in props["M"]
+
+
+def test_collection_schema_gives_a_uri_template_for_a_reference():
+    from interlis.convert.jsonschema import collection_schema, convertible_roots, model_to_json_schema
+
+    builder = build_from_text("""INTERLIS 2.4;
+MODEL Foo AT "http://x" VERSION "1" =
+  TOPIC T =
+    CLASS Owner = Name : TEXT*5; END Owner;
+    CLASS Item = Code : TEXT*5; Ref : REFERENCE TO Owner; END Item;
+  END T;
+END Foo.
+""")
+    full = model_to_json_schema(convertible_roots(builder.symbol_table), symbol_table=builder.symbol_table)
+    ref = collection_schema(full, "Item")["properties"]["Ref"]
+    assert ref["x-ogc-collectionId"] == "Owner"
+    assert ref["x-ogc-uriTemplate"] == "/collections/Owner/items/{featureId}"

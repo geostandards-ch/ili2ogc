@@ -45,7 +45,12 @@ END Foo.
 """)
     cls = _resolved_class(builder, "A")
     schema = class_to_json_schema(cls)
-    assert schema["properties"]["Height"] == {"type": "number", "minimum": 0.0, "maximum": 999.999}
+    assert schema["properties"]["Height"] == {
+        "type": "number",
+        "minimum": 0.0,
+        "maximum": 999.999,
+        "x-interlis": {"decimals": 3},
+    }
 
 
 def test_texttype_with_and_without_maxlength():

@@ -181,3 +181,14 @@ def test_write_xtf_catalog_option_resolves_the_missing_targets(tmp_path, capsys)
 def test_convert_cql2_says_a_view_has_no_constraints_of_its_own(capsys):
     assert main(["convert-cql2", str(FIXTURES / f"{PATHS}.ili")]) == 0
     assert "Flat: a VIEW has no constraints of its own" in capsys.readouterr().err
+
+
+def test_output_option_creates_the_parent_folder_and_version_is_printed(tmp_path, capsys):
+    out = tmp_path / "new" / "folder" / "schema.sql"
+    assert main(["convert-sql", str(FIXTURES / f"{PATHS}.ili"), "-o", str(out)]) in (0, 2)
+    assert out.is_file()
+    try:
+        main(["--version"])
+    except SystemExit as stop:
+        assert stop.code == 0
+    assert capsys.readouterr().out.startswith("ili2ogc ")

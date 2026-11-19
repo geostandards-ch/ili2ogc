@@ -91,6 +91,28 @@ def _tool_version() -> str:
         return "0"
 
 
+def _package_version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("ili2ogc")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+def _write_text(path: str | Path, text: str, encoding: str = "utf-8") -> None:
+    """Write `text` to `path`, creating its parent folder."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding=encoding)
+
+
+def _open_output(path: str | Path):
+    """Open `path` for writing text, creating its parent folder."""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    return open(path, "w", encoding="utf-8")
+
+
 def _add_diagnostic_args(subparser: argparse.ArgumentParser) -> None:
     """`--output-format` / `--report` / `--strict` - shared by convert/convert-sql/convert-jsonfg/validate."""
     subparser.add_argument(
@@ -122,7 +144,8 @@ def _finish(bag: DiagnosticBag, args: argparse.Namespace, *, extra_exit: int = 0
     report = getattr(args, "report", None)
     strict = getattr(args, "strict", False)
     if report is not None:
-        Path(report).write_text(
+        _write_text(
+            report,
             json.dumps(render_sarif(bag, tool_version=_tool_version()), indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
@@ -268,7 +291,7 @@ def cmd_convert(args: argparse.Namespace) -> int:
             return ExitCode.NOT_FOUND
     text = json.dumps(schema, indent=2, ensure_ascii=False)
     if args.output:
-        Path(args.output).write_text(text + "\n", encoding="utf-8")
+        _write_text(args.output, text + "\n", encoding="utf-8")
     else:
         print(text)
     return _finish(bag, args)
@@ -578,7 +601,7 @@ def cmd_convert_sql(args: argparse.Namespace) -> int:
             return ExitCode.NOT_FOUND
         ddl = rename_sql_ddl(ddl, translation)
     if args.output:
-        Path(args.output).write_text(ddl, encoding="utf-8")
+        _write_text(args.output, ddl, encoding="utf-8")
     else:
         print(ddl, end="")
     return _finish(bag, args)
@@ -709,7 +732,8 @@ def _report_issues(issues, args: argparse.Namespace, source: Path, header_suffix
         bag.extend(issue.to_diagnostic(file=str(source)) for issue in issues)
         report = getattr(args, "report", None)
         if report is not None:
-            Path(report).write_text(
+            _write_text(
+                report,
                 json.dumps(render_sarif(bag, tool_version=_tool_version()), indent=2, ensure_ascii=False) + "\n",
                 encoding="utf-8",
             )
@@ -857,12 +881,12 @@ def cmd_import(args: argparse.Namespace) -> int:
         "attachment": ", ".join(Path(x).name for x in args.xtf),
     }
     if args.stream:
-        with open(args.output, "w", encoding="utf-8") if args.output else contextlib.nullcontext(sys.stdout) as out:
+        with _open_output(args.output) if args.output else contextlib.nullcontext(sys.stdout) as out:
             _sql, counts, notes = transfer_inserts(transfers, schema.tables, table_of, out=out, **options)
     else:
         sql, counts, notes = transfer_inserts(transfers, schema.tables, table_of, **options)
         if args.output:
-            Path(args.output).write_text(sql, encoding="utf-8")
+            _write_text(args.output, sql, encoding="utf-8")
         else:
             sys.stdout.write(sql)
     for note in notes:
@@ -917,7 +941,7 @@ def _stream_feature_collection(
     root[_jsonfg_mod.INTERLIS_KEY] = _jsonfg_mod.transfer_header(read_skeleton(xtf_path))
     hoisted = [key for key in ("featureType", "coordRefSys") if key in root]
 
-    with open(output, "w", encoding="utf-8") if output else contextlib.nullcontext(sys.stdout) as out:
+    with _open_output(output) if output else contextlib.nullcontext(sys.stdout) as out:
         head = json.dumps(root, ensure_ascii=False, indent=2)
         out.write(head[: head.rindex("\n}")] + ',\n  "features": [')
         first = True
@@ -937,7 +961,7 @@ def _write_change_requests(
     Returns the TIDs of the `DeleteObject`s that had no collection to be addressed to.
     """
     skipped: list[str] = []
-    with open(output, "w", encoding="utf-8") if output else contextlib.nullcontext(sys.stdout) as out:
+    with _open_output(output) if output else contextlib.nullcontext(sys.stdout) as out:
         out.write('{\n  "requests": [')
         first = True
         for request in _jsonfg_mod.iter_change_requests(
@@ -1073,7 +1097,7 @@ def cmd_convert_jsonfg(args: argparse.Namespace) -> int:
         collection = rename_feature_collection(collection, translation)
     text = json.dumps(collection, indent=2, ensure_ascii=False)
     if args.output:
-        Path(args.output).write_text(text + "\n", encoding="utf-8")
+        _write_text(args.output, text + "\n", encoding="utf-8")
     else:
         print(text)
     return _finish(bag, args)
@@ -1166,7 +1190,7 @@ def cmd_write_xtf(args: argparse.Namespace) -> int:
         _warn(f"{note.rule} {note.element_path}: {note.detail}")
 
     if args.output:
-        Path(args.output).write_text(text + "\n", encoding="utf-8")
+        _write_text(args.output, text + "\n", encoding="utf-8")
     else:
         print(text)
     return ExitCode.OK
@@ -1257,11 +1281,11 @@ def cmd_convert_sld(args: argparse.Namespace) -> int:
         out_path = Path(args.output)
         if len(rendered) == 1 and not out_path.is_dir():
             (text,) = rendered.values()
-            out_path.write_text(text + "\n", encoding="utf-8")
+            _write_text(out_path, text + "\n")
         else:
             out_path.mkdir(parents=True, exist_ok=True)
             for name, text in rendered.items():
-                (out_path / f"{name}.sld").write_text(text + "\n", encoding="utf-8")
+                _write_text(out_path / f"{name}.sld", text + "\n")
     else:
         (text,) = rendered.values()
         print(text)
@@ -1323,7 +1347,7 @@ def cmd_convert_cql2(args: argparse.Namespace) -> int:
 
     text = json.dumps(result, indent=2, ensure_ascii=False)
     if args.output:
-        Path(args.output).write_text(text + "\n", encoding="utf-8")
+        _write_text(args.output, text + "\n", encoding="utf-8")
     else:
         print(text)
     return ExitCode.OK
@@ -1335,6 +1359,7 @@ _DEPRECATED_COMMANDS = {"convert": "convert-jsonschema", "import": "import-xtf",
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="interlis", description="Pure-Python INTERLIS runtime.")
+    parser.add_argument("--version", action="version", version=f"ili2ogc {_package_version()}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     build_parser = subparsers.add_parser("build", help="Parse an .ili file and print the built model.")

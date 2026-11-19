@@ -120,6 +120,16 @@ def _derivation(view: MetaInstance, symbol_table: SymbolTable | None) -> dict[st
     return derivation
 
 
+# INTERLIS unit names (short or long) whose UCUM code is certain; `x-ogc-unit` is UCUM by default in OGC API Features
+# Part 5, so any other unit stays in `x-interlis.unit` only.
+_UCUM = {
+    "m": "m", "meter": "m", "mm": "mm", "millimeter": "mm", "cm": "cm", "centimeter": "cm", "dm": "dm",
+    "km": "km", "kilometer": "km", "m2": "m2", "km2": "km2", "m3": "m3", "ha": "har", "hectare": "har",
+    "gon": "gon", "rad": "rad", "deg": "deg", "degree": "deg", "s": "s", "second": "s", "min": "min", "h": "h",
+    "kg": "kg", "g": "g", "t": "t", "%": "%",
+}  # fmt: skip
+
+
 def _unit_name(type_instance: MetaInstance) -> str | None:
     """The INTERLIS name of a numeric type's unit (the last segment of an unresolved `Model.Unit` reference)."""
     unit = getattr(type_instance, "Unit", None)
@@ -139,9 +149,17 @@ def _num_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
             schema[keyword] = cast(raw)
         except ValueError:
             pass  # non-numeric Min/Max (e.g. a predefined domain) - out of scope, same as validate.py
+    marker: dict[str, Any] = {}
     unit = _unit_name(type_instance)
     if unit:
-        schema["x-ogc-unit"] = unit
+        marker["unit"] = unit
+        if unit.lower() in _UCUM:
+            schema["x-ogc-unit"] = _UCUM[unit.lower()]
+    decimals = max((len(str(raw).partition(".")[2]) for raw in (min_raw, max_raw) if raw is not None), default=0)
+    if decimals:
+        marker["decimals"] = decimals
+    if marker:
+        schema["x-interlis"] = marker
     return schema
 
 
@@ -201,10 +219,31 @@ def _blackbox_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
     return schema
 
 
+def _declared_enum_order(enum_type: MetaInstance) -> list[str]:
+    """Every dotted path of an enumeration in declaration order, depth first (a node before its children)."""
+    order: list[str] = []
+
+    def walk(node: MetaInstance, prefix: str) -> None:
+        name = getattr(node, "Name", None)
+        if not name:
+            return
+        path = f"{prefix}.{name}" if prefix else name
+        order.append(path)
+        for child in getattr(node, "Node", None) or []:
+            walk(child, path)
+
+    for child in getattr(getattr(enum_type, "TopNode", None), "Node", None) or []:
+        walk(child, "")
+    return order
+
+
 def _enum_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
     # "OTHERS" is a transfer-time escape valid for any enum, not a declared value.
     values = enum_values(type_instance) - {"OTHERS"}
-    return {"type": "string", "enum": sorted(values)}
+    schema: dict[str, Any] = {"type": "string", "enum": sorted(values)}
+    if getattr(type_instance, "Order", None) == "Ordered":
+        schema["x-interlis"] = {"ordered": True, "order": _declared_enum_order(type_instance)}
+    return schema
 
 
 def _scalar_type_schema(kind: str | None, type_instance: MetaInstance | None) -> dict[str, Any] | None:
@@ -568,6 +607,7 @@ def collection_schema(schema: dict[str, Any], key: str, *, schema_id: str | None
         if "x-reference-target" in out and "x-ogc-role" not in out:
             out["x-ogc-role"] = "reference"
             out["x-ogc-collectionId"] = out["x-reference-target"]
+            out["x-ogc-uriTemplate"] = f"/collections/{out['x-reference-target']}/items/{{featureId}}"
         return out
 
     result: dict[str, Any] = {"$schema": schema.get("$schema", JSON_SCHEMA_DRAFT)}
