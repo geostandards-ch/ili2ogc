@@ -907,6 +907,31 @@
       ],
       "x-interlis": {
         "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Grenzpunkt_Gueltig",
+        "derivation": {
+          "formation": "projection",
+          "of": [
+            {
+              "alias": "Grenzpunkt",
+              "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Grenzpunkt"
+            }
+          ],
+          "attributes": {
+            "NBIdent": "Grenzpunkt -> NBIdent",
+            "Nummer": "Grenzpunkt -> Nummer",
+            "Geometrie": "Grenzpunkt -> Geometrie",
+            "Hoehengeometrie": "Grenzpunkt -> Hoehengeometrie",
+            "Lagegenauigkeit": "Grenzpunkt -> Lagegenauigkeit",
+            "IstLagezuverlaessig": "Grenzpunkt -> IstLagezuverlaessig",
+            "Hoehengenauigkeit": "Grenzpunkt -> Hoehengenauigkeit",
+            "IstHoehenzuverlaessig": "Grenzpunkt -> IstHoehenzuverlaessig",
+            "Punktzeichen": "Grenzpunkt -> Punktzeichen",
+            "IstHoheitsgrenzpunkt": "Grenzpunkt -> IstHoheitsgrenzpunkt",
+            "IstHoheitsgrenzsteinAlt": "Grenzpunkt -> IstHoheitsgrenzsteinAlt",
+            "IstExaktDefiniert": "Grenzpunkt -> IstExaktDefiniert",
+            "SymbolOri": "Grenzpunkt -> SymbolOri"
+          },
+          "where": "DEFINED(Grenzpunkt->Entstehung) AND DEFINED(Grenzpunkt->Entstehung->Grundbucheintrag) AND NOT (DEFINED(Grenzpunkt->Untergang)) OR NOT (DEFINED(Grenzpunkt->Untergang->Grundbucheintrag))"
+        },
         "constraints": [
           {
             "name": "CH040601",
@@ -987,6 +1012,27 @@
       ],
       "x-interlis": {
         "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Grundstueck_Gueltig",
+        "derivation": {
+          "formation": "projection",
+          "of": [
+            {
+              "alias": "Grundstueck",
+              "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Grundstueck"
+            }
+          ],
+          "attributes": {
+            "NBIdent": "Grundstueck -> NBIdent",
+            "Nummer": "Grundstueck -> Nummer",
+            "EGRID": "Grundstueck -> EGRID",
+            "IstStreitig": "Grundstueck -> IstStreitig",
+            "IstVollstaendig": "Grundstueck -> IstVollstaendig",
+            "Grundstuecksart": "Grundstueck -> Grundstuecksart",
+            "Textposition": "Grundstueck -> Textposition",
+            "Fiktiv": "Grundstueck -> Fiktiv",
+            "Gesamtflaechenmass": "Grundstueck -> Gesamtflaechenmass"
+          },
+          "where": "DEFINED(Grundstueck->Entstehung) AND DEFINED(Grundstueck->Entstehung->Grundbucheintrag) AND NOT (DEFINED(Grundstueck->Untergang)) OR NOT (DEFINED(Grundstueck->Untergang->Grundbucheintrag))"
+        },
         "constraints": [
           {
             "name": "CH041101",
@@ -1060,6 +1106,24 @@
       ],
       "x-interlis": {
         "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Liegenschaft_Gueltig",
+        "derivation": {
+          "formation": "projection",
+          "of": [
+            {
+              "alias": "Liegenschaft",
+              "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Liegenschaft"
+            }
+          ],
+          "attributes": {
+            "NummerTeilgrundstueck": "Liegenschaft -> NummerTeilgrundstueck",
+            "Geometrie": "Liegenschaft -> Geometrie",
+            "Fiktiv": "Liegenschaft -> Fiktiv",
+            "Flaechenmass": "Liegenschaft -> Flaechenmass",
+            "Streitig": "Liegenschaft -> Streitig",
+            "Qualitaetsstandard": "Liegenschaft -> Qualitaetsstandard"
+          },
+          "where": "DEFINED(Liegenschaft->Grundstueck->Entstehung) AND DEFINED(Liegenschaft->Grundstueck->Entstehung->Grundbucheintrag) AND NOT (DEFINED(Liegenschaft->Grundstueck->Untergang)) OR NOT (DEFINED(Liegenschaft->Grundstueck->Untergang->Grundbucheintrag))"
+        },
         "constraints": [
           {
             "name": "CH041501",
@@ -1108,7 +1172,24 @@
         "Geometrie"
       ],
       "x-interlis": {
-        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.SelbstaendigesDauerndesRecht_Gueltig"
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.SelbstaendigesDauerndesRecht_Gueltig",
+        "derivation": {
+          "formation": "projection",
+          "of": [
+            {
+              "alias": "SelbstaendigesDauerndesRecht",
+              "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.SelbstaendigesDauerndesRecht"
+            }
+          ],
+          "attributes": {
+            "NummerTeilgrundstueck": "SelbstaendigesDauerndesRecht -> NummerTeilgrundstueck",
+            "Geometrie": "SelbstaendigesDauerndesRecht -> Geometrie",
+            "Flaechenmass": "SelbstaendigesDauerndesRecht -> Flaechenmass",
+            "Streitig": "SelbstaendigesDauerndesRecht -> Streitig",
+            "IstBaurecht": "SelbstaendigesDauerndesRecht -> IstBaurecht"
+          },
+          "where": "DEFINED(SelbstaendigesDauerndesRecht->Grundstueck->Entstehung) AND DEFINED(SelbstaendigesDauerndesRecht->Grundstueck->Entstehung->Grundbucheintrag) AND NOT (DEFINED(SelbstaendigesDauerndesRecht->Grundstueck->Untergang)) OR NOT (DEFINED(SelbstaendigesDauerndesRecht->Grundstueck->Untergang->Grundbucheintrag))"
+        }
       },
       "x-crud": [
         "GET",
@@ -1146,7 +1227,23 @@
         "Geometrie"
       ],
       "x-interlis": {
-        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Bergwerk_Gueltig"
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Bergwerk_Gueltig",
+        "derivation": {
+          "formation": "projection",
+          "of": [
+            {
+              "alias": "Bergwerk",
+              "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Bergwerk"
+            }
+          ],
+          "attributes": {
+            "NummerTeilgrundstueck": "Bergwerk -> NummerTeilgrundstueck",
+            "Geometrie": "Bergwerk -> Geometrie",
+            "Flaechenmass": "Bergwerk -> Flaechenmass",
+            "Streitig": "Bergwerk -> Streitig"
+          },
+          "where": "DEFINED(Bergwerk->Grundstueck->Entstehung) AND DEFINED(Bergwerk->Grundstueck->Entstehung->Grundbucheintrag) AND NOT (DEFINED(Bergwerk->Grundstueck->Untergang)) OR NOT (DEFINED(Bergwerk->Grundstueck->Untergang->Grundbucheintrag))"
+        }
       },
       "x-crud": [
         "GET",

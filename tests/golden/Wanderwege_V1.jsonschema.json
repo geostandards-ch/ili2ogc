@@ -120,7 +120,22 @@
         "Kategorie"
       ],
       "x-interlis": {
-        "class": "Wanderwege_V1.Netz.Wegabschnitt_MitWegweiser"
+        "class": "Wanderwege_V1.Netz.Wegabschnitt_MitWegweiser",
+        "derivation": {
+          "formation": "projection",
+          "of": [
+            {
+              "alias": "Wegabschnitt",
+              "class": "Wanderwege_V1.Netz.Wegabschnitt"
+            }
+          ],
+          "attributes": {
+            "Bezeichnung": "Wegabschnitt -> Bezeichnung",
+            "Kategorie": "Wegabschnitt -> Kategorie",
+            "Belagsart": "Wegabschnitt -> Belagsart"
+          },
+          "where": "DEFINED(Wegabschnitt->wegweiser_von)"
+        }
       },
       "x-crud": [
         "GET",

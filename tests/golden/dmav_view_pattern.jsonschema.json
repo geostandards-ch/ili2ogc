@@ -157,6 +157,21 @@
       ],
       "x-interlis": {
         "class": "DMAV_ViewPattern_V1.Grundstuecke.Grundstueck_Gueltig",
+        "derivation": {
+          "formation": "projection",
+          "of": [
+            {
+              "alias": "Grundstueck",
+              "class": "DMAV_ViewPattern_V1.Grundstuecke.Grundstueck"
+            }
+          ],
+          "attributes": {
+            "NBIdent": "Grundstueck -> NBIdent",
+            "Nummer": "Grundstueck -> Nummer",
+            "EGRID": "Grundstueck -> EGRID"
+          },
+          "where": "DEFINED(Grundstueck->Entstehung) AND DEFINED(Grundstueck->Entstehung->Grundbucheintrag) AND NOT (DEFINED(Grundstueck->Untergang)) OR NOT (DEFINED(Grundstueck->Untergang->Grundbucheintrag))"
+        },
         "constraints": [
           {
             "name": "CH041101",

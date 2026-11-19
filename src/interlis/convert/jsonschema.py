@@ -11,6 +11,7 @@ import jsonschema
 
 from interlis.builder.forward_refs import SymbolTable
 from interlis.convert.constraint_catalogue import class_constraints
+from interlis.convert.constraint_eval import describe_expression
 from interlis.convert.geometry_kinds import GEOMETRY_KINDS, geometry_format
 from interlis.convert.temporal import temporal_roles
 from interlis.convert.view_formation import (
@@ -87,6 +88,36 @@ def _interlis_marker(cls: MetaInstance, symbol_table: SymbolTable | None) -> dic
     if getattr(cls, "Abstract", False):
         marker["abstract"] = True
     return marker
+
+
+def _derivation(view: MetaInstance, symbol_table: SymbolTable | None) -> dict[str, Any]:
+    """How a VIEW derives its feature type: formation, base classes with their alias, each attribute's path, filter."""
+    kind = getattr(view, "FormationKind", None)
+    if kind is None:
+        return {}
+    bases = []
+    for base in getattr(view, "RenamedBaseView", None) or []:
+        target = getattr(base, "BaseView", None)
+        if isinstance(target, MetaInstance):
+            qualified = symbol_table.qualified_name_of(target) if symbol_table is not None else None
+            alias = getattr(base, "Name", None) or getattr(target, "Name", None)
+            bases.append({"alias": alias, "class": qualified or getattr(target, "Name", None)})
+    paths: dict[str, str] = {}
+    for attr in getattr(view, "ClassAttribute", None) or []:
+        derivates = getattr(attr, "Derivates", None) or []
+        elements = getattr(derivates[0], "PathEls", None) if derivates else None
+        if elements and getattr(attr, "Name", None):
+            paths[attr.Name] = " -> ".join(str(getattr(el, "Ref", None)) for el in elements)
+    derivation: dict[str, Any] = {"formation": str(kind).lower(), "of": bases}
+    if paths:
+        derivation["attributes"] = paths
+    where = getattr(view, "Where", None)
+    if isinstance(where, MetaInstance):
+        try:
+            derivation["where"] = describe_expression(where)
+        except (AttributeError, IndexError, TypeError):
+            pass
+    return derivation
 
 
 def _unit_name(type_instance: MetaInstance) -> str | None:
@@ -496,6 +527,9 @@ def class_to_json_schema(
     if description:
         schema["description"] = description
     interlis = _interlis_marker(class_instance, symbol_table)
+    derivation = _derivation(class_instance, symbol_table)
+    if derivation:
+        interlis["derivation"] = derivation
     outside = frozenset(name for name, prop in properties.items() if is_spatial_schema(prop))
     fragments, catalogue = class_constraints(class_instance, outside)
     if fragments:

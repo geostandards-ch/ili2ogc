@@ -434,3 +434,15 @@ END Foo.
 """)
     assert "x-crud" not in class_to_json_schema(builder.symbol_table.resolve("Base"), symbol_table=builder.symbol_table)
     assert "x-crud" in class_to_json_schema(builder.symbol_table.resolve("Leaf"), symbol_table=builder.symbol_table)
+
+
+def test_a_view_schema_records_how_the_view_is_derived():
+    from interlis.convert.jsonschema import convertible_roots, model_to_json_schema
+
+    builder = build_from_text(_JOIN_SAME_NAME)
+    schema = model_to_json_schema(convertible_roots(builder.symbol_table), symbol_table=builder.symbol_table)
+    derivation = schema["$defs"]["VJ"]["x-interlis"]["derivation"]
+    assert derivation["formation"] == "join"
+    assert [b["alias"] for b in derivation["of"]] == ["B", "C"]
+    assert derivation["of"][0]["class"] == "Test.Base.B"
+    assert derivation["attributes"] == {"FromB": "B -> Label", "FromC": "C -> Label"}
