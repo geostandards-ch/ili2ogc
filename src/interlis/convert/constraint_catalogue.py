@@ -18,7 +18,12 @@ from interlis.convert.constraint_jsonschema import (
 )
 from interlis.convert.cql2 import constraint_to_cql2, cql2_unsupported_reason
 from interlis.metamodel.instance import MetaInstance
-from interlis.xtf.schema import inheritance_chain
+from interlis.xtf.schema import (
+    _class_related_base_class,
+    association_embedding,
+    inheritance_chain,
+    is_class_compatible,
+)
 
 _KINDS = {
     "UniqueConstraint": "unique",
@@ -29,12 +34,12 @@ _PLAUSIBILITY = {"HighPercC": ">=", "LowPercC": "<="}
 
 
 def class_constraints(
-    cls: MetaInstance, outside: frozenset[str] = frozenset()
+    cls: MetaInstance, outside: frozenset[str] = frozenset(), symbol_table: Any = None
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """`(allOf fragments, catalogue)` of a class: one catalogue entry per constraint, own and inherited.
 
     `outside` names the attributes a Feature holds outside `properties` (its geometries): a constraint reading one has
-    no schema fragment.
+    no schema fragment. With a `symbol_table`, the role cardinalities a payload cannot carry are added as declarations.
     """
     fragments: list[dict[str, Any]] = []
     catalogue: list[dict[str, Any]] = []
@@ -51,7 +56,56 @@ def class_constraints(
                 entry["reason"] = reason
                 entry.update(_alternative(constraint))
             catalogue.append(entry)
+    if symbol_table is not None:
+        catalogue.extend(_cardinalities(cls, symbol_table))
     return fragments, catalogue
+
+
+def _bounds(role: MetaInstance) -> tuple[str, str]:
+    """`(min, max)` of a role; no clause means `{0..*}` (`{0..1}` for a composition)."""
+    mult = getattr(role, "Multiplicity", None)
+    if not isinstance(mult, MetaInstance):
+        return ("0", "1") if getattr(role, "Strongness", None) == "Comp" else ("0", "*")
+    lower = str(getattr(mult, "Min", None) or "0")
+    upper = getattr(mult, "Max", None)
+    return lower, lower if upper == "same_as_Min" else str(upper or "*")
+
+
+def _cardinalities(cls: MetaInstance, symbol_table: Any) -> list[dict[str, Any]]:
+    """Role cardinalities that count the objects related to an instance of `cls`: a population check.
+
+    The end the reference points to is already in the schema (`required`, single value); the count of related objects
+    on the other end is not, and no JSON Schema keyword says it.
+    """
+    entries: list[dict[str, Any]] = []
+    for assoc in symbol_table.all_registered():
+        if not isinstance(assoc, MetaInstance) or getattr(assoc, "Kind", None) != "Association":
+            continue
+        roles = [r for r in (getattr(assoc, "Role", None) or []) if isinstance(r, MetaInstance)]
+        if len(roles) != 2:
+            continue
+        embedding = association_embedding(assoc)
+        embedded = embedding[1] if embedding else None
+        for here, other in (roles, roles[::-1]):
+            target = _class_related_base_class(here)
+            if target is None or other is embedded or not is_class_compatible(cls, target):
+                continue
+            lower, upper = _bounds(other)
+            if (lower, upper) == ("0", "*"):
+                continue
+            entries.append(
+                {
+                    "name": f"{getattr(assoc, 'Name', None)}.{getattr(other, 'Name', None)}",
+                    "kind": "cardinality",
+                    "reason": "counts the objects related to one object: a population-level check",
+                    "enforcement": "declared",
+                    "role": getattr(other, "Name", None),
+                    "of": getattr(_class_related_base_class(other), "Name", None),
+                    "min": lower,
+                    "max": upper,
+                }
+            )
+    return entries
 
 
 def _kind(constraint: MetaInstance) -> str:

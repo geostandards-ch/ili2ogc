@@ -446,3 +446,34 @@ def test_a_view_schema_records_how_the_view_is_derived():
     assert [b["alias"] for b in derivation["of"]] == ["B", "C"]
     assert derivation["of"][0]["class"] == "Test.Base.B"
     assert derivation["attributes"] == {"FromB": "B -> Label", "FromC": "C -> Label"}
+
+
+def test_role_cardinalities_a_payload_cannot_carry_are_declared():
+    from interlis.convert.jsonschema import convertible_roots, model_to_json_schema
+
+    builder = build_from_text("""INTERLIS 2.4;
+MODEL Foo AT "http://x" VERSION "1" =
+  TOPIC T =
+    CLASS Tag = Label : TEXT*5; END Tag;
+    CLASS Maybe = Label : TEXT*5; END Maybe;
+    ASSOCIATION TagMaybe =
+      Tag -- {0..1} Tag;
+      Maybe -- {1..*} Maybe;
+    END TagMaybe;
+    CLASS P = X : TEXT*3; END P;
+    CLASS Q = Y : TEXT*3; END Q;
+    ASSOCIATION PQ =
+      p -- {2..3} P;
+      q -- {0..*} Q;
+    END PQ;
+  END T;
+END Foo.
+""")
+    defs = model_to_json_schema(convertible_roots(builder.symbol_table), symbol_table=builder.symbol_table)["$defs"]
+
+    def cardinalities(name):
+        return [c for c in defs[name]["x-interlis"].get("constraints", []) if c["kind"] == "cardinality"]
+
+    assert [(c["role"], c["of"], c["min"], c["max"]) for c in cardinalities("Tag")] == [("Maybe", "Maybe", "1", "*")]
+    assert [(c["role"], c["min"], c["max"]) for c in cardinalities("Q")] == [("p", "2", "3")]
+    assert cardinalities("Maybe") == []  # the reference it holds is in the schema: optional, single

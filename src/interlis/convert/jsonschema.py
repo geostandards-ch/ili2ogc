@@ -531,7 +531,7 @@ def class_to_json_schema(
     if derivation:
         interlis["derivation"] = derivation
     outside = frozenset(name for name, prop in properties.items() if is_spatial_schema(prop))
-    fragments, catalogue = class_constraints(class_instance, outside)
+    fragments, catalogue = class_constraints(class_instance, outside, symbol_table)
     if fragments:
         schema["allOf"] = fragments
     if catalogue:
