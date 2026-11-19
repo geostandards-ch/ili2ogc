@@ -54,11 +54,12 @@ _READ_ONLY = ("GET",)
 def _crud_operations(class_instance: MetaInstance) -> tuple[str, ...] | None:
     """Return the HTTP operations an OGC API Features publication of `class_instance` could support, or `None`.
 
-    `None` for Structure/Association (never their own collection). A View is GET-only unless it is a plain
-    `PROJECTION OF` (1:1 with its base, so writes map back, like an updatable SQL view); a Class gets full CRUD.
+    `None` for Structure/Association and an abstract Class (never their own collection). A View is GET-only unless it
+    is a plain `PROJECTION OF` (1:1 with its base, so writes map back, like an updatable SQL view); a Class gets full
+    CRUD.
     """
     kind = getattr(class_instance, "Kind", None)
-    if kind not in ("Class", "View"):
+    if kind not in ("Class", "View") or getattr(class_instance, "Abstract", False):
         return None
     if kind == "View" and getattr(class_instance, "FormationKind", None) != "Projection":
         return _READ_ONLY

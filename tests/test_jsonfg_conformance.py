@@ -419,3 +419,18 @@ def test_part4_request_addresses_the_collection_named_like_the_feature_type():
     requests = list(iter_change_requests([_doc("1", "A"), _doc("2", "B")], symbol_table=builder.symbol_table))
     assert [r["href"] for r in requests] == ["/collections/Doc/items", "/collections/Doc_2/items"]
     assert [r["body"]["featureType"] for r in requests] == ["Doc", "Doc_2"]
+
+
+def test_an_abstract_class_has_no_write_operations():
+    from interlis.convert.jsonschema import class_to_json_schema
+
+    builder = build_from_text("""INTERLIS 2.4;
+MODEL Foo AT "http://x" VERSION "1" =
+  TOPIC T =
+    CLASS Base (ABSTRACT) = Code : TEXT*5; END Base;
+    CLASS Leaf EXTENDS Base = END Leaf;
+  END T;
+END Foo.
+""")
+    assert "x-crud" not in class_to_json_schema(builder.symbol_table.resolve("Base"), symbol_table=builder.symbol_table)
+    assert "x-crud" in class_to_json_schema(builder.symbol_table.resolve("Leaf"), symbol_table=builder.symbol_table)
