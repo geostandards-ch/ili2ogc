@@ -1,10 +1,14 @@
-"""WGS 84 fallback `geometry` for a JSON-FG `place` GeoJSON cannot draw: circular arcs are stroked, then reprojected."""
+"""WGS 84 fallback `geometry` for a JSON-FG `place` GeoJSON cannot draw: circular arcs are stroked, then reprojected.
+
+From LV95 the swisstopo grid shipped in `data/` is used (centimetres); any other CRS goes through PROJ's default path.
+"""
 
 from __future__ import annotations
 
 import math
 import re
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from pyproj import Transformer
@@ -29,9 +33,21 @@ def fallback_geometry(place: dict[str, Any] | None, crs_uri: str | None) -> dict
     return _reproject(_stroke(place), transformer)
 
 
+_LV95_GRID = Path(__file__).parent / "data" / "ch_swisstopo_CHENyx06_ETRS.tif"
+# LV95 (oblique Mercator on the Bessel ellipsoid), then swisstopo's CHENyx06 distortion grid to ETRS89, which GeoJSON
+# readers take for WGS 84. The Helmert step PROJ otherwise uses is off by up to about a metre.
+_LV95_PIPELINE = (
+    "+proj=pipeline +step +inv +proj=somerc +lat_0=46.9524055555556 +lon_0=7.43958333333333 +k_0=1 "
+    "+x_0=2600000 +y_0=1200000 +ellps=bessel +step +proj=hgridshift +grids={grid} "
+    "+step +proj=unitconvert +xy_in=rad +xy_out=deg"
+)
+
+
 @lru_cache(maxsize=16)
 def _transformer(epsg: int) -> Transformer | None:
     try:
+        if epsg == 2056 and _LV95_GRID.is_file():
+            return Transformer.from_pipeline(_LV95_PIPELINE.format(grid=_LV95_GRID))
         return Transformer.from_crs(f"EPSG:{epsg}", "EPSG:4326", always_xy=True)
     except ProjError:
         return None

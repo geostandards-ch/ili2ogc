@@ -29,3 +29,14 @@ def test_nothing_to_draw_without_arcs_or_without_a_known_crs():
     assert fallback_geometry({"type": "Point", "coordinates": [1, 2]}, LV95) is None
     assert fallback_geometry(ARC, None) is None
     assert fallback_geometry(ARC, "http://www.opengis.net/def/crs/EPSG/0/999999") is None
+
+
+def test_lv95_uses_the_swisstopo_grid_not_the_helmert_fallback():
+    from pyproj import Transformer
+
+    from interlis.convert.wgs84 import _transformer
+
+    helmert = Transformer.from_crs("EPSG:2056", "EPSG:4326", always_xy=True).transform(2683000, 1248000)
+    grid = _transformer(2056).transform(2683000, 1248000)
+    metres = abs(grid[0] - helmert[0]) * 111320 * 0.68
+    assert 0.3 < metres < 2  # the two differ by the Helmert's residual, about a metre here
