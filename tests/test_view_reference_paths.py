@@ -154,3 +154,30 @@ def test_evaluate_view_without_catalogs_leaves_the_value_out_instead_of_failing(
         if f["properties"]["FeatureName"] == "three"
     )
     assert "KindLabel" not in three["properties"] and "CategoryCode" not in three["properties"]
+
+
+def test_write_xtf_catalog_option_resolves_the_missing_targets(tmp_path, capsys):
+    out = tmp_path / "out.xtf"
+    model = tmp_path / "model.ili"
+    model.write_text((FIXTURES / f"{PATHS}.ili").read_text().replace("  TOPIC Views =", "  VIEW TOPIC Views ="))
+    base = [
+        "write-xtf",
+        str(model),
+        str(FIXTURES / "xtf" / f"{PATHS}.xtf"),
+        "--view",
+        "Flat",
+        "-o",
+        str(out),
+    ]
+    assert main(base) == 0
+    assert "JSONFG-VIEW-PATH-UNRESOLVED" in capsys.readouterr().err
+    assert out.read_text().count("<CategoryCode>") < 3
+    catalog = str(FIXTURES / "xtf" / f"{PATHS}_catalog.xtf")
+    assert main([*base, "--catalog", catalog]) == 0
+    assert "JSONFG-VIEW-PATH-UNRESOLVED" not in capsys.readouterr().err
+    assert out.read_text().count("<CategoryCode>") == 3
+
+
+def test_convert_cql2_says_a_view_has_no_constraints_of_its_own(capsys):
+    assert main(["convert-cql2", str(FIXTURES / f"{PATHS}.ili")]) == 0
+    assert "Flat: a VIEW has no constraints of its own" in capsys.readouterr().err

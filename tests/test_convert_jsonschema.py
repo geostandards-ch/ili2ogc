@@ -6,6 +6,8 @@ spec/conversion/jsonschema-mapping.yml for the field contract this module
 implements.
 """
 
+import re
+
 from conftest import build_from_text as _build
 
 from interlis.convert.jsonschema import class_to_json_schema, model_to_json_schema, validate_feature_properties
@@ -179,8 +181,13 @@ END Foo.
     cls = _resolved_class(builder, "A")
     schema = class_to_json_schema(cls)
     assert schema["properties"]["D"] == {"type": "string", "format": "date"}
-    assert schema["properties"]["Tm"] == {"type": "string", "format": "time"}
-    assert schema["properties"]["Dt"] == {"type": "string", "format": "date-time"}
+    # No time zone in INTERLIS, so no RFC 3339 `format` for a time or a date-time.
+    assert "format" not in schema["properties"]["Tm"]
+    assert "format" not in schema["properties"]["Dt"]
+    pattern = re.compile(schema["properties"]["Dt"]["pattern"])
+    assert pattern.match("2017-12-08T00:00:00") and pattern.match("2006-05-08T00:00:00.000")
+    assert not pattern.match("2017-12-08")
+    assert re.match(schema["properties"]["Tm"]["pattern"], "10:30:00.000")
 
 
 def test_blackboxtype_attribute_surfaces_kind_marker():

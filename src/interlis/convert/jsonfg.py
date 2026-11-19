@@ -25,6 +25,7 @@ from interlis.convert.geometry_kinds import (
     is_pointcloud3d,
     is_solid3d,
 )
+from interlis.convert.jsonschema import class_schema_keys, convertible_roots
 from interlis.convert.view_formation import (
     LINE_GEOMETRY,
     LINE_SEGMENT,
@@ -76,6 +77,8 @@ _SCALAR_KINDS = {"NumType", "TextType", "EnumType", "BooleanType", "FormattedTyp
 # Geometry types that require CONF_CIRCULAR_ARCS in "conformsTo".
 CIRCULAR_ARC_TYPES = frozenset({"CircularString", "CompoundCurve", "CurvePolygon", "MultiCurve", "MultiSurface"})
 POLYHEDRA_TYPES = frozenset({"Polyhedron", "MultiPolyhedron"})
+# The only geometry types the JSON-FG schema allows inside a `GeometryCollection`.
+COLLECTION_MEMBER_TYPES = frozenset({"Point", "MultiPoint", "LineString", "MultiLineString", "Polygon", "MultiPolygon"})
 # `Geometry3D_V2.Solid3D` is matched by Name plus its `OuterShell` attribute (`is_solid3d`), not by qualified
 # model path: `SymbolTable.qualified_name_of` cannot resolve an imported model.
 
@@ -829,6 +832,21 @@ def geometry_coord_type(resolved: ResolvedAttribute) -> MetaInstance | None:
     return None
 
 
+_TYPE_KEYS: tuple[SymbolTable, dict[int, str]] | None = None
+
+
+def feature_type_keys(symbol_table: SymbolTable) -> dict[int, str]:
+    """The `featureType` (by instance id) of every class and VIEW: its `$defs` key in the JSON Schema.
+
+    The key is the short class name; two classes of the same name in different topics get `Name_2`, `Name_3`, as in
+    the schema and in the SQL tables.
+    """
+    global _TYPE_KEYS
+    if _TYPE_KEYS is None or _TYPE_KEYS[0] is not symbol_table:
+        _TYPE_KEYS = (symbol_table, class_schema_keys(convertible_roots(symbol_table), symbol_table))
+    return _TYPE_KEYS[1]
+
+
 def _feature_schema_ref(schema_url: str, feature_type: str) -> str:
     """A `$defs` entry of a `model_to_json_schema` document, addressed by URI fragment.
 
@@ -846,11 +864,12 @@ def object_to_feature(
     repository: ModelRepository | None = None,
     schema_url: str | None = None,
     omit_multivalue: bool = False,
+    feature_type: str | None = None,
 ) -> dict[str, Any]:
     """Convert one XtfObject (of the resolved class `cls`) into a JSON-FG Feature.
 
-    Geometry attributes become "place" (several become a `GeometryCollection`); others stay in "properties".
-    `standalone=False` omits "conformsTo", which only a root object carries.
+    Geometry attributes become "place" (a `GeometryCollection` when several fit in one), the rest "properties".
+    `standalone=False` omits "conformsTo"; `feature_type` overrides the class's short name (`feature_type_keys`).
     """
     with _feature_scope(getattr(cls, "Name", None) or obj.qualified_class, obj.tid):
         return _object_to_feature(
@@ -861,6 +880,7 @@ def object_to_feature(
             repository=repository,
             schema_url=schema_url,
             omit_multivalue=omit_multivalue,
+            feature_type=feature_type,
         )
 
 
@@ -873,6 +893,7 @@ def _object_to_feature(
     repository: ModelRepository | None = None,
     schema_url: str | None = None,
     omit_multivalue: bool = False,
+    feature_type: str | None = None,
 ) -> dict[str, Any]:
     """Body of `object_to_feature`, within its feature scope."""
     schema_attrs = schema_members_of(cls, symbol_table) if symbol_table is not None else attributes_of(cls)
@@ -921,12 +942,23 @@ def _object_to_feature(
         placed_names.add(geom_name)
     elif len(resolved_geometries) >= 2:
         crs_values = {crs for _, _, crs in resolved_geometries}
-        if len(crs_values) == 1:
+        simple = all(g.get("type") in COLLECTION_MEMBER_TYPES for _, g, _ in resolved_geometries)
+        if len(crs_values) == 1 and simple:
             place = {"type": "GeometryCollection", "geometries": [g for _, g, _ in resolved_geometries]}
             crs_uri = crs_values.pop()
             for geom_name, _, _ in resolved_geometries:
                 properties.pop(geom_name, None)
                 placed_names.add(geom_name)
+        elif len(crs_values) == 1:
+            # A GeometryCollection may only hold the six GeoJSON types: the first geometry is the `place`, the
+            # others stay in `properties`.
+            geom_name, place, crs_uri = resolved_geometries[0]
+            properties.pop(geom_name, None)
+            placed_names.add(geom_name)
+
+    for geom_name, geometry, _ in resolved_geometries:
+        if geom_name not in placed_names and geom_name not in geometry_names_set:
+            properties[geom_name] = geometry
 
     # A top-level geometry attribute that did not become `place` keeps its GeoJSON value in `properties`;
     # only an unreadable one (`None`) is left out.
@@ -946,7 +978,7 @@ def _object_to_feature(
         feature["conformsTo"] = conforms_to
     if obj.tid is not None:
         feature["id"] = obj.tid
-    feature_type = getattr(cls, "Name", None) or obj.qualified_class
+    feature_type = feature_type or getattr(cls, "Name", None) or obj.qualified_class
     feature["featureType"] = feature_type
     if standalone and schema_url is not None:
         feature["featureSchema"] = _feature_schema_ref(schema_url, feature_type)
@@ -1178,11 +1210,17 @@ def _project_object_under_view_names(
                 remapped[out_name] = nodes
             continue
         source = refs[-1] if len(refs) == 2 and refs[-1] else (refs[0] if len(refs) == 1 else None)
-        if source is None or source == out_name:
+        if source is None:
+            continue
+        # In a JOIN the merged object lets one base shadow another's attribute of the same name: read the alias's own.
+        owner = obj
+        if roots is not None and len(refs) == 2 and refs[0] and refs[0].lower() in roots:
+            owner = roots[refs[0].lower()]
+        if source == out_name and owner is obj:
             continue
         remapped.pop(out_name, None)
-        if source in obj.attributes:
-            remapped[out_name] = obj.attributes[source]
+        if owner is not None and source in owner.attributes:
+            remapped[out_name] = owner.attributes[source]
     return XtfObject(tid=obj.tid, qualified_class=obj.qualified_class, attributes=remapped)
 
 
@@ -1479,11 +1517,27 @@ def evaluate_view_objects(
     symbol_table: SymbolTable,
     repository: ModelRepository | None = None,
     catalogs: Sequence[XtfTransfer] = (),
+    unmapped: list[UnmappedValue] | None = None,
 ) -> list[XtfObject]:
     """Evaluate `view` into `XtfObject`s keyed by the view's own attribute names.
 
-    Raises `ValueError` if the view is unsupported or is an INSPECTION of a geometry attribute.
+    Raises `ValueError` if the view is unsupported or is an INSPECTION of a geometry attribute. `unmapped` collects
+    the VIEW paths that could not be followed.
     """
+    with _recording(unmapped):
+        return _evaluate_view_objects(
+            view, transfer, symbol_table=symbol_table, repository=repository, catalogs=catalogs
+        )
+
+
+def _evaluate_view_objects(
+    view: MetaInstance,
+    transfer: XtfTransfer,
+    *,
+    symbol_table: SymbolTable,
+    repository: ModelRepository | None = None,
+    catalogs: Sequence[XtfTransfer] = (),
+) -> list[XtfObject]:
     reason = unsupported_view_reason(view)
     if reason is not None:
         raise ValueError(f"cannot evaluate view {getattr(view, 'Name', None)!r}: {reason}")
@@ -1512,26 +1566,41 @@ def evaluate_view_objects(
             return elements
         n_bases = len(bases)
         by_tid = _reference_index(resolved_objects, catalogs)
-        return [
-            _union_projected_object(view, base_index, n_bases, obj, by_tid)
+        unresolved: dict[str, tuple[str, int]] = {}
+        union = [
+            _union_projected_object(view, base_index, n_bases, obj, by_tid, unresolved)
             for base_index, objs in enumerate(objects_by_base)
             for obj in objs
         ]
+        _record_unresolved_paths(view, unresolved)
+        return union
 
     bases, combos, by_tid = _view_combos(
         view, transfer, symbol_table=symbol_table, repository=repository, catalogs=catalogs
     )
     if kind == "Aggregation":
         return _aggregation_objects(view, bases, combos, by_tid)
+    unresolved = {}
     if kind == "Join":
         aliases = [_view_alias(b) for b in bases]
-        return [
+        joined = [
             _project_object_under_view_names(
-                view, _merge_join_combo(combo, view_name), by_tid, roots=_join_roots(aliases, combo)
+                view,
+                _merge_join_combo(combo, view_name),
+                by_tid,
+                roots=_join_roots(aliases, combo),
+                unresolved=unresolved,
             )
             for combo in combos
         ]
-    return [_project_object_under_view_names(view, combo[0], by_tid) for combo in combos if combo[0] is not None]
+    else:
+        joined = [
+            _project_object_under_view_names(view, combo[0], by_tid, unresolved=unresolved)
+            for combo in combos
+            if combo[0] is not None
+        ]
+    _record_unresolved_paths(view, unresolved)
+    return joined
 
 
 def evaluate_view(
@@ -1917,7 +1986,9 @@ def _evaluate_inspection(
             symbol_table=symbol_table,
             repository=repository,
         )
-        feature["featureType"] = getattr(view, "Name", None) or feature["featureType"]
+        feature["featureType"] = (
+            feature_type_keys(symbol_table).get(id(view)) or getattr(view, "Name", None) or feature["featureType"]
+        )
         for out_name, field in parent_readings:
             resolved, nodes = parent_members.get(field), parent.get(field)
             if resolved is not None and nodes:
@@ -1994,9 +2065,9 @@ def transfer_to_feature_collection(
 ) -> dict[str, Any]:
     """Convert every resolvable object of `transfer` into one JSON-FG FeatureCollection.
 
-    Objects whose class does not resolve are skipped. A "featureType" or "coordRefSys" shared by all Features is
-    moved onto the collection. `unmapped` collects values left untyped or dropped; `catalogs` are further transfers
-    a VIEW path may follow references into.
+    Objects whose class does not resolve are skipped; a "featureType" or "coordRefSys" shared by all Features moves
+    onto the collection. `unmapped` collects values left untyped or dropped, `catalogs` the transfers a VIEW path
+    may follow references into.
     """
     with _recording(unmapped):
         return _transfer_to_feature_collection(
@@ -2018,6 +2089,7 @@ def _object_features(
     include_child_rows: bool,
 ) -> Iterator[dict[str, Any]]:
     """One Feature per resolvable object (plus its child rows), lazily - the loop both entry points share."""
+    type_keys = feature_type_keys(symbol_table)
     for obj in objects:
         cls = resolve_class(obj.qualified_class, symbol_table=symbol_table, repository=repository)
         if cls is None:
@@ -2031,6 +2103,7 @@ def _object_features(
             symbol_table=cls_table,
             repository=repository,
             omit_multivalue=include_child_rows,
+            feature_type=type_keys.get(id(cls)),
         )
         if include_child_rows:
             with _feature_scope(getattr(cls, "Name", None) or obj.qualified_class, obj.tid):

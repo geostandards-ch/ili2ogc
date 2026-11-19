@@ -83,10 +83,13 @@ FormattedType:
   json_schema:
     type:
       value: string
-      note: "conservative mapping - no pattern derived from Format's predefined-format name"
+      note: "conservative mapping - no pattern derived from any Format name but the two time formats below"
     format:
       source: {field: Format}
-      note: "only for the 3 well-known bare names XMLDate/XMLTime/XMLDateTime -> date/time/date-time (eCH-0118 SS6.15.5) - omitted for any other Format value"
+      note: "only XMLDate -> date (eCH-0118 SS6.15.5) - omitted for any other Format value"
+    pattern:
+      source: {field: Format}
+      note: "XMLTime and XMLDateTime get the exact INTERLIS pattern instead of format time/date-time: they carry no time zone, which RFC 3339 requires"
   not_mapped:
     Min: "example/template string bound (shares NumType's Min/Max slot, not a numeric bound here) - irrelevant to a plain string schema"
     Max: "see Min"

@@ -23,7 +23,8 @@
         "Flaechenmass": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 999999999
+          "maximum": 999999999,
+          "x-ogc-unit": "m2"
         },
         "Streitig": {
           "x-unsupported": "unknown"
@@ -70,7 +71,8 @@
         "Flaechenmass": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 999999999
+          "maximum": 999999999,
+          "x-ogc-unit": "m2"
         },
         "Streitig": {
           "x-unsupported": "unknown"
@@ -111,7 +113,8 @@
         "Flaechenmass": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 999999999
+          "maximum": 999999999,
+          "x-ogc-unit": "m2"
         },
         "Streitig": {
           "x-unsupported": "unknown"
@@ -164,11 +167,11 @@
         },
         "GueltigerEintrag": {
           "type": "string",
-          "format": "date-time"
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?$"
         },
         "Grundbucheintrag": {
           "type": "string",
-          "format": "date-time"
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?$"
         }
       },
       "title": "GSNachfuehrung",
@@ -204,12 +207,14 @@
         "Hoehengeometrie": {
           "type": "number",
           "minimum": -200.0,
-          "maximum": 5000.0
+          "maximum": 5000.0,
+          "x-ogc-unit": "m"
         },
         "Lagegenauigkeit": {
           "type": "number",
           "minimum": 0.001,
-          "maximum": 7.0
+          "maximum": 7.0,
+          "x-ogc-unit": "m"
         },
         "IstLagezuverlaessig": {
           "type": "boolean"
@@ -217,7 +222,8 @@
         "Hoehengenauigkeit": {
           "type": "number",
           "minimum": 0.001,
-          "maximum": 7.0
+          "maximum": 7.0,
+          "x-ogc-unit": "m"
         },
         "IstHoehenzuverlaessig": {
           "type": "boolean"
@@ -247,7 +253,8 @@
         "SymbolOri": {
           "type": "number",
           "minimum": 0.0,
-          "maximum": 399.9
+          "maximum": 399.9,
+          "x-ogc-unit": "Gon"
         },
         "Entstehung": {
           "type": "string",
@@ -350,7 +357,8 @@
         "Gesamtflaechenmass": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 999999999
+          "maximum": 999999999,
+          "x-ogc-unit": "m2"
         },
         "Entstehung": {
           "type": "string",
@@ -478,12 +486,14 @@
         "Hoehengeometrie": {
           "type": "number",
           "minimum": -200.0,
-          "maximum": 5000.0
+          "maximum": 5000.0,
+          "x-ogc-unit": "m"
         },
         "Lagegenauigkeit": {
           "type": "number",
           "minimum": 0.001,
-          "maximum": 7.0
+          "maximum": 7.0,
+          "x-ogc-unit": "m"
         },
         "IstLagezuverlaessig": {
           "type": "boolean"
@@ -491,7 +501,8 @@
         "Hoehengenauigkeit": {
           "type": "number",
           "minimum": 0.001,
-          "maximum": 7.0
+          "maximum": 7.0,
+          "x-ogc-unit": "m"
         },
         "IstHoehenzuverlaessig": {
           "type": "boolean"
@@ -521,7 +532,8 @@
         "SymbolOri": {
           "type": "number",
           "minimum": 0.0,
-          "maximum": 399.9
+          "maximum": 399.9,
+          "x-ogc-unit": "Gon"
         }
       },
       "title": "Grenzpunkt_Gueltig",
@@ -584,7 +596,8 @@
         "Gesamtflaechenmass": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 999999999
+          "maximum": 999999999,
+          "x-ogc-unit": "m2"
         }
       },
       "title": "Grundstueck_Gueltig",
@@ -621,7 +634,8 @@
         "Flaechenmass": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 999999999
+          "maximum": 999999999,
+          "x-ogc-unit": "m2"
         },
         "Streitig": {
           "x-unsupported": "unknown"
@@ -663,7 +677,8 @@
         "Flaechenmass": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 999999999
+          "maximum": 999999999,
+          "x-ogc-unit": "m2"
         },
         "Streitig": {
           "x-unsupported": "unknown"
@@ -699,7 +714,8 @@
         "Flaechenmass": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 999999999
+          "maximum": 999999999,
+          "x-ogc-unit": "m2"
         },
         "Streitig": {
           "x-unsupported": "unknown"
@@ -727,7 +743,8 @@
         "Orientierung": {
           "type": "number",
           "minimum": 0.0,
-          "maximum": 399.9
+          "maximum": 399.9,
+          "x-ogc-unit": "Gon"
         },
         "DarstellungIn": {
           "type": "string",

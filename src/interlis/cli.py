@@ -1145,6 +1145,7 @@ def cmd_write_xtf(args: argparse.Namespace) -> int:
 
     transfer = parse_xtf(xtf_path)
     bid = args.bid or view_name or "view"
+    unmapped: list[_jsonfg_mod.UnmappedValue] = []
     try:
         text = _xtf_writer_mod.write_xtf(
             view,
@@ -1154,10 +1155,14 @@ def cmd_write_xtf(args: argparse.Namespace) -> int:
             repository=repository,
             sender=args.sender,
             merge_with_source=args.merge_with_source,
+            catalogs=[parse_xtf(Path(c)) for c in args.catalog],
+            unmapped=unmapped,
         )
     except ValueError as exc:
         _error(str(exc))
         return ExitCode.INVALID
+    for note in unmapped:
+        _warn(f"{note.rule} {note.element_path}: {note.detail}")
 
     if args.output:
         Path(args.output).write_text(text + "\n", encoding="utf-8")
@@ -1295,6 +1300,9 @@ def cmd_convert_cql2(args: argparse.Namespace) -> int:
     result: dict[str, list[dict[str, Any]]] = {}
     for root in roots:
         entries: list[dict[str, Any]] = []
+        is_view = root._qualified_class.rsplit(".", 1)[-1] == "View"
+        if is_view and not args.quiet and not getattr(root, "Constraint", None):
+            _warn(f"{getattr(root, 'Name', '?')}: a VIEW has no constraints of its own - convert the base model")
         for constraint in getattr(root, "Constraint", None) or []:
             label = f"{getattr(root, 'Name', '?')}.{getattr(constraint, 'Name', None) or '?'}"
             reason = _cql2_mod.cql2_unsupported_reason(constraint)
@@ -1701,6 +1709,14 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         metavar="DIR",
         help="Directory of .ili models to resolve the VIEW model's IMPORTS (its base model - repeatable).",
+    )
+    write_xtf_parser.add_argument(
+        "--catalog",
+        action="append",
+        default=[],
+        metavar="FILE.xtf",
+        help="Additional catalogue .xtf file (repeatable) - its objects also count for reference resolution "
+        "(a VIEW attribute that follows a reference into a catalogue not included in the source transfer).",
     )
     write_xtf_parser.add_argument(
         "--bid",

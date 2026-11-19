@@ -1359,12 +1359,9 @@ _SOLID3D_WITH_ANCHOR_MODEL = _SOLID3D_MODEL.replace(
 )
 
 
-def test_transfer_to_feature_collection_hoists_polyhedra_conforms_to_from_a_geometry_collection():
-    """A Polyhedron wrapped inside a `GeometryCollection` `place` must still hoist `conf/polyhedra`.
-
-    Regression: the FeatureCollection-level check used to read
-    `place["type"]` directly, so it only ever matched a bare `Polyhedron`
-    `place` - never one nested a level down inside `GeometryCollection`.
+def test_geometry_collection_never_holds_a_polyhedron():
+    """The JSON-FG schema limits a `GeometryCollection` to the six GeoJSON types: with a Polyhedron among the geometry
+    attributes, the first one is the `place` and the other stays in `properties`.
     """
     builder = _build(_SOLID3D_WITH_ANCHOR_MODEL, capture_meta=True)
     basket = XtfBasket(
@@ -1385,8 +1382,9 @@ def test_transfer_to_feature_collection_hoists_polyhedra_conforms_to_from_a_geom
     )
     transfer = XtfTransfer(sender=None, ili_version=None, models=[], baskets=[basket])
     collection = transfer_to_feature_collection(transfer, symbol_table=builder.symbol_table)
-    assert collection["features"][0]["place"]["type"] == "GeometryCollection"
-    assert CONF_POLYHEDRA in collection["conformsTo"]
+    feature = collection["features"][0]
+    assert feature["place"]["type"] == "Point"
+    assert feature["properties"]["Volume"]["type"] == "Polyhedron"
 
 
 _SOLID3D_BEFORE_ANCHOR_MODEL = _SOLID3D_MODEL.replace(
@@ -1395,12 +1393,9 @@ _SOLID3D_BEFORE_ANCHOR_MODEL = _SOLID3D_MODEL.replace(
 )
 
 
-def test_geometry_collection_preserves_schema_declaration_order():
-    """A `GeometryCollection`'s member order must follow schema declaration order, not shape-category grouping.
-
-    Regression: geometries used to be collected shape-category by
-    shape-category (all `CoordType`/`LineType` first, then `Solid3D`,
-    ...) rather than in one pass over the class's actual attribute order.
+def test_place_geometry_follows_schema_declaration_order():
+    """The geometry that becomes the `place` is the first one in schema declaration order, not the first shape
+    category.
     """
     builder = _build(_SOLID3D_BEFORE_ANCHOR_MODEL, capture_meta=True)
     cls = _resolved_class(builder, "ASolid")
@@ -1413,7 +1408,9 @@ def test_geometry_collection_preserves_schema_declaration_order():
         },
     )
     feature = object_to_feature(obj, cls)
-    assert [g["type"] for g in feature["place"]["geometries"]] == ["Polyhedron", "Point"]
+    assert feature["place"]["type"] == "Polyhedron"
+    assert feature["properties"]["Anchor"]["type"] == "Point"
+    assert CONF_POLYHEDRA in feature["conformsTo"]
 
 
 # --- PolylineStraight3D/CompositeCurve3D -> LineString (RULE #7 exception,

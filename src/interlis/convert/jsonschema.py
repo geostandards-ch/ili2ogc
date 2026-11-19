@@ -63,6 +63,13 @@ def _crud_operations(class_instance: MetaInstance) -> tuple[str, ...] | None:
     return _FULL_CRUD
 
 
+def _unit_name(type_instance: MetaInstance) -> str | None:
+    """The INTERLIS name of a numeric type's unit (the last segment of an unresolved `Model.Unit` reference)."""
+    unit = getattr(type_instance, "Unit", None)
+    name = getattr(unit, "Name", None) or getattr(unit, "name", None)
+    return str(name).rsplit(".", 1)[-1] if name else None
+
+
 def _num_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
     min_raw = getattr(type_instance, "Min", None)
     max_raw = getattr(type_instance, "Max", None)
@@ -75,6 +82,9 @@ def _num_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
             schema[keyword] = cast(raw)
         except ValueError:
             pass  # non-numeric Min/Max (e.g. a predefined domain) - out of scope, same as validate.py
+    unit = _unit_name(type_instance)
+    if unit:
+        schema["x-ogc-unit"] = unit
     return schema
 
 
@@ -103,17 +113,23 @@ def _text_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
     return schema
 
 
-# The three predefined date/time formats with a JSON Schema `format` equivalent; `FormattedType.Format` holds
-# the bare name (no "INTERLIS." qualifier). Any other format stays a plain string.
-_KNOWN_FORMAT_TO_JSON_FORMAT = {"XMLDate": "date", "XMLTime": "time", "XMLDateTime": "date-time"}
+# The three predefined date/time formats. `date` has a JSON Schema `format`; a time and a date-time carry no time
+# zone in INTERLIS, which `format: time`/`date-time` (RFC 3339) require, so they get the exact `pattern` instead.
+# `FormattedType.Format` holds the bare name (no "INTERLIS." qualifier). Any other format stays a plain string.
+_XML_DATE_TIME_PATTERNS = {
+    "XMLTime": r"^\d{2}:\d{2}:\d{2}(\.\d+)?$",
+    "XMLDateTime": r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$",
+}
 
 
 def _formatted_type_schema(type_instance: MetaInstance) -> dict[str, Any]:
-    """FormattedType -> `type: string`, plus a JSON Schema `format` hint for the three known date/time formats."""
+    """FormattedType -> `type: string`, plus `format: date` or the `pattern` of the two time formats."""
     schema: dict[str, Any] = {"type": "string"}
-    json_format = _KNOWN_FORMAT_TO_JSON_FORMAT.get(getattr(type_instance, "Format", None))
-    if json_format is not None:
-        schema["format"] = json_format
+    name = getattr(type_instance, "Format", None)
+    if name == "XMLDate":
+        schema["format"] = "date"
+    elif name in _XML_DATE_TIME_PATTERNS:
+        schema["pattern"] = _XML_DATE_TIME_PATTERNS[name]
     return schema
 
 

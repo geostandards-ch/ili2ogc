@@ -39,16 +39,15 @@ concepts:
     note: >
       NumType subclass (own: Format, TEXT, mandatory - names a
       predefined/custom format e.g. `INTERLIS.XMLDate`, or a STRUCT-based
-      template) -> `{"type": "string"}`, plus a JSON Schema `format` hint
-      ("date"/"time"/"date-time") for the 3 well-known format names
-      `XMLDate`/`XMLTime`/`XMLDateTime` (stored bare, without the
-      `INTERLIS.` qualifier - confirmed empirically), matching eCH-0118
-      SS6.15.5's own treatment of exactly these 3 names (see
-      docs/ech-0118-gml-mapping-analysis.md). No `pattern` is derived
-      from any OTHER format name (would need a lookup table of INTERLIS
-      format names to regexes - not attempted here; plain `string`
-      already covers every legal value without risking a wrong/overly
-      strict pattern).
+      template) -> `{"type": "string"}`, plus `format: date` for `XMLDate`
+      and the exact INTERLIS `pattern` for `XMLTime`/`XMLDateTime` (names
+      stored bare, without the `INTERLIS.` qualifier - confirmed
+      empirically). Those two carry no time zone, which a `time`/`date-time`
+      `format` (RFC 3339) requires, so a strict validator would reject
+      real data. No `pattern` is derived from any OTHER format name (would
+      need a lookup table of INTERLIS format names to regexes; plain
+      `string` already covers every legal value without risking a wrong or
+      overly strict pattern).
 
   BlackboxType:
     qualified_name: IlisMeta16.ModelData.BlackboxType

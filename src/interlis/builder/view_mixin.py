@@ -112,8 +112,10 @@ class _ViewBuildingMixin(_Base):
     def _apply_pending_view_all_of(self) -> None:
         """Expand every recorded `ALL OF` once references are resolved.
 
-        Only the base's own attributes are used. Each `ALL` is paired with the name after its `OF`, by position.
+        The base's own and inherited attributes are used. Each `ALL` is paired with the name after its `OF`.
         """
+        from interlis.xtf.schema import attributes_of  # lazy: xtf.schema imports this package
+
         pending = self._pending_view_all_of
         self._pending_view_all_of = []
         for view, ctx in pending:
@@ -122,7 +124,7 @@ class _ViewBuildingMixin(_Base):
                 base = self._find_renamed_base_view(view, all_of_name)
                 if base is None or not isinstance(base.BaseView, MetaInstance):
                     continue
-                for attr in getattr(base.BaseView, "ClassAttribute", None) or []:
+                for attr in attributes_of(base.BaseView).values():
                     copy = self.registry.new_instance("IlisMeta16.ModelData.AttrOrParam")
                     copy.Name = attr.Name
                     self.attachment.attach(

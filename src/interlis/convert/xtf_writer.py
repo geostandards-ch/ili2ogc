@@ -3,11 +3,12 @@
 `render_xtf` serializes a transfer as is; `write_view_basket` evaluates a VIEW TOPIC's views into one new basket.
 """
 
+from collections.abc import Sequence
 from xml.etree import ElementTree as ET
 
 from interlis.builder.forward_refs import SymbolTable
 from interlis.builder.repository import ModelRepository
-from interlis.convert.jsonfg import evaluate_view_objects
+from interlis.convert.jsonfg import UnmappedValue, evaluate_view_objects
 from interlis.metamodel.instance import MetaInstance
 from interlis.xtf.parse import RawNode, XtfBasket, XtfModelRef, XtfObject, XtfTransfer
 
@@ -90,13 +91,17 @@ def write_view_basket(
     symbol_table: SymbolTable,
     repository: ModelRepository | None = None,
     kind: str | None = None,
+    catalogs: Sequence[XtfTransfer] = (),
+    unmapped: list[UnmappedValue] | None = None,
 ) -> XtfBasket:
     """Evaluate `view` against `transfer` and assemble its VIEW TOPIC `XtfBasket`.
 
     `kind=None` omits `KIND` (FULL is assumed; an ili2c-compiled XSD may not declare it at all). `bid` is the caller's
     choice. Objects are retagged with the VIEW's qualified `Model.Topic.ViewName`, as the wire format requires.
     """
-    objects = evaluate_view_objects(view, transfer, symbol_table=symbol_table, repository=repository)
+    objects = evaluate_view_objects(
+        view, transfer, symbol_table=symbol_table, repository=repository, catalogs=catalogs, unmapped=unmapped
+    )
     qualified_view = symbol_table.qualified_name_of(view)
     if qualified_view is None or "." not in qualified_view:
         view_name = getattr(view, "Name", None)
@@ -131,13 +136,23 @@ def write_xtf(
     repository: ModelRepository | None = None,
     sender: str | None = None,
     merge_with_source: bool = False,
+    catalogs: Sequence[XtfTransfer] = (),
+    unmapped: list[UnmappedValue] | None = None,
 ) -> str:
     """Compose one VIEW TOPIC's materialized data into a complete .xtf document.
 
     By default a standalone transfer holds only the VIEW basket and its own model; `merge_with_source=True` appends
     it to a copy of the source transfer's baskets/models instead.
     """
-    basket = write_view_basket(view, transfer, bid=bid, symbol_table=symbol_table, repository=repository)
+    basket = write_view_basket(
+        view,
+        transfer,
+        bid=bid,
+        symbol_table=symbol_table,
+        repository=repository,
+        catalogs=catalogs,
+        unmapped=unmapped,
+    )
     qualified_view = symbol_table.qualified_name_of(view)
     assert qualified_view is not None  # write_view_basket already raised ValueError otherwise
     view_model = _model_ref_for(qualified_view, symbol_table)
