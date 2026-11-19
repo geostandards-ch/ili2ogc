@@ -517,3 +517,12 @@ END Foo.
     ref = collection_schema(full, "Item")["properties"]["Ref"]
     assert ref["x-ogc-collectionId"] == "Owner"
     assert ref["x-ogc-uriTemplate"] == "/collections/Owner/items/{featureId}"
+
+
+def test_a_date_time_with_any_fraction_is_converted_whatever_the_python_version():
+    from interlis.convert.temporal import _bound
+
+    assert _bound("2020-06-30T14:30:00.5") == "2020-06-30T12:30:00.5Z"
+    assert _bound("2020-12-30T14:30:00.123") == "2020-12-30T13:30:00.123Z"  # CET is UTC+1
+    assert _bound("2020-06-30T00:00:00.000") == "2020-06-30"
+    assert _bound("not a date-time") == "not a date-time"

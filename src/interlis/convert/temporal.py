@@ -7,6 +7,7 @@ attribute gets that one as its primary instant, as OGC API Features Part 5 does 
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
@@ -18,6 +19,7 @@ PRIMARY_INSTANT = "primary-instant"
 PRIMARY_INTERVAL_START = "primary-interval-start"
 PRIMARY_INTERVAL_END = "primary-interval-end"
 _TEMPORAL_FORMATS = ("XMLDate", "XMLDateTime")
+_DATE_TIME = re.compile(r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?$")
 _ZONE = ZoneInfo("Europe/Zurich")  # INTERLIS date-times carry no time zone; JSON-FG timestamps must be UTC
 
 
@@ -72,9 +74,13 @@ def _bound(value: Any) -> str:
     text = str(value)
     if "T" not in text:
         return text
-    moment = datetime.fromisoformat(text)
+    match = _DATE_TIME.match(text)
+    if match is None:
+        return text
+    year, month, day, hour, minute, second, fraction = match.groups()
+    microsecond = int((fraction or "0").ljust(6, "0")[:6])
+    moment = datetime(int(year), int(month), int(day), int(hour), int(minute), int(second), microsecond)
     if moment.hour == moment.minute == moment.second == moment.microsecond == 0:
         return text[:10]
-    return (
-        moment.replace(tzinfo=_ZONE).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ").replace(".000000Z", "Z")
-    )
+    utc = moment.replace(tzinfo=_ZONE).astimezone(timezone.utc)
+    return utc.strftime("%Y-%m-%dT%H:%M:%S") + (f".{utc.microsecond:06d}".rstrip("0") if utc.microsecond else "") + "Z"
