@@ -1,6 +1,7 @@
 """Convert parsed XTF data into JSON-FG Features and FeatureCollections.
 
-Geometry goes to "place" ("geometry" stays `null`, no reprojection); references become OID strings.
+Geometry goes to "place" ("geometry" is `null`, or the WGS 84 fallback when `place` holds arcs); references become OID
+strings.
 """
 
 import contextlib
@@ -2322,7 +2323,7 @@ def iter_change_requests(
             if operation == "DELETE" and not obj.qualified_class and skipped is not None:
                 skipped.append(obj.tid or "")
             continue
-        collection = getattr(cls, "Name", None) or obj.qualified_class
+        collection = feature_type_keys(symbol_table).get(id(cls)) or getattr(cls, "Name", None) or obj.qualified_class
         items = f"/collections/{collection}/items"
         if operation == "DELETE":
             yield {"method": "DELETE", "href": f"{items}/{obj.tid}"}

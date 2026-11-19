@@ -410,3 +410,12 @@ def test_lang_renames_the_attributes_of_constraint_fragments_and_catalogue(tmp_p
     catalogue = entry["x-interlis"]["constraints"]
     assert catalogue[0]["cql2"]["args"] == [{"property": "Longueur"}, {"property": "Largeur"}]
     assert catalogue[2]["attributes"] == ["Designation"]
+
+
+def test_part4_request_addresses_the_collection_named_like_the_feature_type():
+    from interlis.convert.jsonfg import iter_change_requests
+
+    builder = build_from_text(_TWO_TOPICS)
+    requests = list(iter_change_requests([_doc("1", "A"), _doc("2", "B")], symbol_table=builder.symbol_table))
+    assert [r["href"] for r in requests] == ["/collections/Doc/items", "/collections/Doc_2/items"]
+    assert [r["body"]["featureType"] for r in requests] == ["Doc", "Doc_2"]
