@@ -10,7 +10,7 @@ from typing import Any
 import jsonschema
 
 from interlis.builder.forward_refs import SymbolTable
-from interlis.convert.constraint_jsonschema import class_constraint_schemas
+from interlis.convert.constraint_catalogue import class_constraints
 from interlis.convert.geometry_kinds import GEOMETRY_KINDS, geometry_format
 from interlis.convert.temporal import temporal_roles
 from interlis.convert.view_formation import (
@@ -496,11 +496,11 @@ def class_to_json_schema(
         schema["description"] = description
     interlis = _interlis_marker(class_instance, symbol_table)
     outside = frozenset(name for name, prop in properties.items() if is_spatial_schema(prop))
-    fragments, untranslated = class_constraint_schemas(class_instance, outside=outside)
+    fragments, catalogue = class_constraints(class_instance, outside)
     if fragments:
         schema["allOf"] = fragments
-    if untranslated:
-        interlis["untranslatedConstraints"] = [{"constraint": label, "reason": why} for label, why in untranslated]
+    if catalogue:
+        interlis["constraints"] = catalogue
     if interlis:
         schema["x-interlis"] = interlis
     class_meta = _meta_marker(class_instance)

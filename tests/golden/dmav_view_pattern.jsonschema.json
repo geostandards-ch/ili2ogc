@@ -30,10 +30,17 @@
       ],
       "x-interlis": {
         "class": "DMAV_ViewPattern_V1.Grundstuecke.GSNachfuehrung",
-        "untranslatedConstraints": [
+        "constraints": [
           {
-            "constraint": "CH040101",
-            "reason": "UniqueConstraint is a population-level check, not expressible on one object"
+            "name": "CH040101",
+            "kind": "unique",
+            "reason": "UniqueConstraint is a population-level check, not expressible on one object",
+            "enforcement": "declared",
+            "attributes": [
+              "NBIdent",
+              "Identifikator"
+            ],
+            "scope": "global"
           }
         ]
       },
@@ -150,14 +157,27 @@
       ],
       "x-interlis": {
         "class": "DMAV_ViewPattern_V1.Grundstuecke.Grundstueck_Gueltig",
-        "untranslatedConstraints": [
+        "constraints": [
           {
-            "constraint": "CH041101",
-            "reason": "UniqueConstraint is a population-level check, not expressible on one object"
+            "name": "CH041101",
+            "kind": "unique",
+            "reason": "UniqueConstraint is a population-level check, not expressible on one object",
+            "enforcement": "declared",
+            "attributes": [
+              "NBIdent",
+              "Nummer"
+            ],
+            "scope": "global"
           },
           {
-            "constraint": "CH041102",
-            "reason": "UniqueConstraint is a population-level check, not expressible on one object"
+            "name": "CH041102",
+            "kind": "unique",
+            "reason": "UniqueConstraint is a population-level check, not expressible on one object",
+            "enforcement": "declared",
+            "attributes": [
+              "EGRID"
+            ],
+            "scope": "global"
           }
         ]
       },

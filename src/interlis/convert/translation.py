@@ -89,6 +89,10 @@ def _rename_schema_node(node: Any, tr: Translation, owner: str | None) -> Any:
     for key in ("items", "additionalProperties"):
         if isinstance(node.get(key), dict):
             node[key] = _rename_schema_node(node[key], tr, owner)
+    interlis = node.get("x-interlis")
+    if isinstance(interlis, dict) and isinstance(interlis.get("constraints"), list):
+        for entry in interlis["constraints"]:
+            _rename_constraint_entry(entry, tr, owner)
     for key in ("if", "then", "else", "not"):
         if isinstance(node.get(key), dict):
             node[key] = _rename_schema_node(node[key], tr, owner)
@@ -96,6 +100,32 @@ def _rename_schema_node(node: Any, tr: Translation, owner: str | None) -> Any:
         if isinstance(node.get(key), list):
             node[key] = [_rename_schema_node(x, tr, owner) for x in node[key]]
     return node
+
+
+def _rename_constraint_entry(entry: dict[str, Any], tr: Translation, owner: str | None) -> None:
+    """Rename the attribute names a catalogue entry carries (a CQL2 `property`, the paths of a declaration).
+
+    The `expression` and `where` texts quote the INTERLIS source and keep the base language's names.
+    """
+
+    def path(text: str) -> str:
+        return re.sub(r"\w+", lambda m: tr.attribute(owner, m.group(0)), text)
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            if isinstance(node.get("property"), str):
+                node["property"] = path(node["property"])
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(entry.get("cql2"))
+    if isinstance(entry.get("attribute"), str):
+        entry["attribute"] = path(entry["attribute"])
+    if isinstance(entry.get("attributes"), list):
+        entry["attributes"] = [path(a) for a in entry["attributes"]]
 
 
 def _rename_refs(node: Any, tr: Translation) -> None:

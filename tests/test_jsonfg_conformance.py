@@ -1,5 +1,7 @@
 """JSON-FG documents stay valid against the official schemas where the model allows it."""
 
+from pathlib import Path
+
 from conftest import build_from_text
 
 from interlis.convert.jsonfg import transfer_to_feature_collection
@@ -305,7 +307,9 @@ def test_per_object_constraints_become_schema_fragments_and_the_rest_is_listed()
     schema = model_to_json_schema(convertible_roots(builder.symbol_table), symbol_table=builder.symbol_table)
     entry = schema["$defs"]["A"]
     assert len(entry["allOf"]) == 1 and "WidthIfB" in entry["allOf"][0]["description"]
-    assert [u["constraint"] for u in entry["x-interlis"]["untranslatedConstraints"]] == ["Cmp"]
+    by_name = {c["name"]: c for c in entry["x-interlis"]["constraints"]}
+    assert by_name["Cmp"]["enforcement"] == "cql2"
+    assert [c["enforcement"] for c in entry["x-interlis"]["constraints"]] == ["schema", "cql2"]
     assert validate_feature_properties({"Kind": "b", "Width": 50}, schema, "A") == []
     assert validate_feature_properties({"Kind": "b", "Width": 5}, schema, "A")
     assert validate_feature_properties({"Kind": "a", "Width": 5}, schema, "A") == []
@@ -330,4 +334,79 @@ END Foo.
 """)
     schema = class_to_json_schema(builder.symbol_table.resolve("A"), symbol_table=builder.symbol_table)
     assert "allOf" not in schema  # `Pos` is in `place`: the fragment would call it undefined
-    assert "geometry attribute" in schema["x-interlis"]["untranslatedConstraints"][0]["reason"]
+    assert "geometry attribute" in schema["x-interlis"]["constraints"][0]["reason"]
+
+
+def test_every_kind_of_constraint_is_carried_in_the_catalogue():
+    from interlis.convert.jsonschema import class_to_json_schema
+
+    builder = build_from_text("""INTERLIS 2.4;
+MODEL Foo AT "http://x" VERSION "1" =
+  TOPIC T =
+    CLASS B = Code : TEXT*5; END B;
+    CLASS A =
+      Code : TEXT*5; N : 0 .. 100; M : 0 .. 100;
+      MANDATORY CONSTRAINT N < M;
+      UNIQUE Code;
+      UNIQUE (LOCAL) Code;
+      SET CONSTRAINT WHERE N > 5 : INTERLIS.objectCount(ALL) < 10;
+      CONSTRAINT >= 90 % N > 50;
+    END A;
+  END T;
+END Foo.
+""")
+    schema = class_to_json_schema(builder.symbol_table.resolve("A"), symbol_table=builder.symbol_table)
+    entries = schema["x-interlis"]["constraints"]
+    assert [(e["kind"], e["enforcement"]) for e in entries] == [
+        ("mandatory", "cql2"),
+        ("unique", "declared"),
+        ("unique", "declared"),
+        ("set", "declared"),
+        ("plausibility", "declared"),
+    ]
+    assert entries[0]["cql2"]["args"] == [{"property": "N"}, {"property": "M"}]
+    assert (entries[1]["attributes"], entries[1]["scope"], entries[2]["scope"]) == (["Code"], "global", "local")
+    assert entries[3]["where"] == "N > 5" and "expression" not in entries[3]
+    assert entries[4]["percentage"] == {"operator": ">=", "value": "90"}
+    assert all(e["reason"] for e in entries)
+
+
+def test_lang_renames_the_attributes_of_constraint_fragments_and_catalogue(tmp_path):
+    import json
+    import shutil
+
+    from interlis.cli import main
+
+    fixtures = Path(__file__).parent / "fixtures" / "translation"
+    for name in ("Wanderwege_V1.ili", "CheminsPedestres_V1.ili"):
+        shutil.copy(fixtures / name, tmp_path / name)
+    base = (
+        (tmp_path / "Wanderwege_V1.ili")
+        .read_text()
+        .replace(
+            "      Belagsart : TEXT*20;\n    END Wegabschnitt;",
+            "      Belagsart : TEXT*20;\n      Laenge : 0 .. 99;\n      Breite : 0 .. 99;\n"
+            "      MANDATORY CONSTRAINT Laenge > Breite;\n      MANDATORY CONSTRAINT Breite > 1;\n"
+            "      UNIQUE Bezeichnung;\n    END Wegabschnitt;",
+        )
+    )
+    (tmp_path / "Wanderwege_V1.ili").write_text(base)
+    fr = (
+        (tmp_path / "CheminsPedestres_V1.ili")
+        .read_text()
+        .replace(
+            "      TypeRevetement : TEXT*20;\n    END TronconChemin;",
+            "      TypeRevetement : TEXT*20;\n      Longueur : 0 .. 99;\n      Largeur : 0 .. 99;\n"
+            "      MANDATORY CONSTRAINT Longueur > Largeur;\n      MANDATORY CONSTRAINT Largeur > 1;\n"
+            "      UNIQUE Designation;\n    END TronconChemin;",
+        )
+    )
+    (tmp_path / "CheminsPedestres_V1.ili").write_text(fr)
+    out = tmp_path / "fr.json"
+    argv = ["convert-jsonschema", str(tmp_path / "Wanderwege_V1.ili"), "--repo", str(tmp_path), "--lang", "fr"]
+    assert main([*argv, "-o", str(out)]) == 0
+    entry = json.loads(out.read_text())["$defs"]["TronconChemin"]
+    assert list(entry["allOf"][0]["properties"]) == ["Largeur"]  # the description keeps the INTERLIS source text
+    catalogue = entry["x-interlis"]["constraints"]
+    assert catalogue[0]["cql2"]["args"] == [{"property": "Longueur"}, {"property": "Largeur"}]
+    assert catalogue[2]["attributes"] == ["Designation"]

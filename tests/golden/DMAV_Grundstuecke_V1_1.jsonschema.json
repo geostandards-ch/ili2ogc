@@ -52,10 +52,12 @@
       ],
       "x-interlis": {
         "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Liegenschaft",
-        "untranslatedConstraints": [
+        "constraints": [
           {
-            "constraint": "CH041201",
-            "reason": "expression node IlisMeta16.ModelData.FunctionCall needs THIS/PARENT/aggregate/function context"
+            "name": "CH041201",
+            "kind": "mandatory",
+            "reason": "expression node IlisMeta16.ModelData.FunctionCall needs THIS/PARENT/aggregate/function context",
+            "enforcement": "declared"
           }
         ]
       },
@@ -104,10 +106,12 @@
       ],
       "x-interlis": {
         "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.SelbstaendigesDauerndesRecht",
-        "untranslatedConstraints": [
+        "constraints": [
           {
-            "constraint": "CH041601",
-            "reason": "expression node IlisMeta16.ModelData.FunctionCall needs THIS/PARENT/aggregate/function context"
+            "name": "CH041601",
+            "kind": "mandatory",
+            "reason": "expression node IlisMeta16.ModelData.FunctionCall needs THIS/PARENT/aggregate/function context",
+            "enforcement": "declared"
           }
         ]
       },
@@ -153,10 +157,12 @@
       ],
       "x-interlis": {
         "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Bergwerk",
-        "untranslatedConstraints": [
+        "constraints": [
           {
-            "constraint": "CH042001",
-            "reason": "expression node IlisMeta16.ModelData.FunctionCall needs THIS/PARENT/aggregate/function context"
+            "name": "CH042001",
+            "kind": "mandatory",
+            "reason": "expression node IlisMeta16.ModelData.FunctionCall needs THIS/PARENT/aggregate/function context",
+            "enforcement": "declared"
           }
         ]
       },
@@ -215,10 +221,17 @@
       ],
       "x-interlis": {
         "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.GSNachfuehrung",
-        "untranslatedConstraints": [
+        "constraints": [
           {
-            "constraint": "CH040101",
-            "reason": "UniqueConstraint is a population-level check, not expressible on one object"
+            "name": "CH040101",
+            "kind": "unique",
+            "reason": "UniqueConstraint is a population-level check, not expressible on one object",
+            "enforcement": "declared",
+            "attributes": [
+              "NBIdent",
+              "Identifikator"
+            ],
+            "scope": "global"
           }
         ]
       },
@@ -341,14 +354,85 @@
       ],
       "x-interlis": {
         "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Grenzpunkt",
-        "untranslatedConstraints": [
+        "constraints": [
           {
-            "constraint": "CH040201",
-            "reason": "operand UnaryExpr is arithmetic or needs context beyond one object's properties"
+            "name": "CH040201",
+            "kind": "mandatory",
+            "reason": "operand UnaryExpr is arithmetic or needs context beyond one object's properties",
+            "enforcement": "cql2",
+            "cql2": {
+              "op": "=",
+              "args": [
+                {
+                  "op": "not",
+                  "args": [
+                    {
+                      "op": "isNull",
+                      "args": [
+                        {
+                          "property": "Hoehengeometrie"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "op": "not",
+                  "args": [
+                    {
+                      "op": "isNull",
+                      "args": [
+                        {
+                          "property": "Hoehengenauigkeit"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
           },
           {
-            "constraint": "CH040202",
-            "reason": "operand UnaryExpr is arithmetic or needs context beyond one object's properties"
+            "name": "CH040202",
+            "kind": "mandatory",
+            "reason": "operand UnaryExpr is arithmetic or needs context beyond one object's properties",
+            "enforcement": "cql2",
+            "cql2": {
+              "op": "=",
+              "args": [
+                {
+                  "op": "not",
+                  "args": [
+                    {
+                      "op": "isNull",
+                      "args": [
+                        {
+                          "property": "Hoehengeometrie"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "op": "not",
+                  "args": [
+                    {
+                      "op": "isNull",
+                      "args": [
+                        {
+                          "property": "IstHoehenzuverlaessig"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "CH040203",
+            "kind": "mandatory",
+            "enforcement": "schema"
           }
         ]
       },
@@ -467,10 +551,38 @@
       ],
       "x-interlis": {
         "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Grundstueck",
-        "untranslatedConstraints": [
+        "constraints": [
           {
-            "constraint": "CH040701",
-            "reason": "operand UnaryExpr is arithmetic or needs context beyond one object's properties"
+            "name": "CH040701",
+            "kind": "mandatory",
+            "reason": "operand UnaryExpr is arithmetic or needs context beyond one object's properties",
+            "enforcement": "cql2",
+            "cql2": {
+              "op": "=",
+              "args": [
+                {
+                  "property": "IstVollstaendig"
+                },
+                {
+                  "op": "not",
+                  "args": [
+                    {
+                      "op": "not",
+                      "args": [
+                        {
+                          "op": "isNull",
+                          "args": [
+                            {
+                              "property": "Gesamtflaechenmass"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
           }
         ]
       },
@@ -554,10 +666,28 @@
       ],
       "x-interlis": {
         "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.GrundstueckLiegenschaft",
-        "untranslatedConstraints": [
+        "constraints": [
           {
-            "constraint": "CH041302",
-            "reason": "comparison of two attributes (or of two constants) cannot be expressed in JSON Schema"
+            "name": "CH041301",
+            "kind": "mandatory",
+            "enforcement": "schema"
+          },
+          {
+            "name": "CH041302",
+            "kind": "mandatory",
+            "reason": "comparison of two attributes (or of two constants) cannot be expressed in JSON Schema",
+            "enforcement": "cql2",
+            "cql2": {
+              "op": "=",
+              "args": [
+                {
+                  "property": "Liegenschaft.Fiktiv"
+                },
+                {
+                  "property": "Grundstueck.Fiktiv"
+                }
+              ]
+            }
           }
         ]
       }
@@ -615,7 +745,19 @@
         }
       ],
       "x-interlis": {
-        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.GrundstueckSelbstaendigesDauerndesRecht"
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.GrundstueckSelbstaendigesDauerndesRecht",
+        "constraints": [
+          {
+            "name": "CH041701",
+            "kind": "mandatory",
+            "enforcement": "schema"
+          },
+          {
+            "name": "CH041702",
+            "kind": "mandatory",
+            "enforcement": "schema"
+          }
+        ]
       }
     },
     "GrundstueckBergwerk": {
@@ -671,7 +813,19 @@
         }
       ],
       "x-interlis": {
-        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.GrundstueckBergwerk"
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.GrundstueckBergwerk",
+        "constraints": [
+          {
+            "name": "CH042101",
+            "kind": "mandatory",
+            "enforcement": "schema"
+          },
+          {
+            "name": "CH042102",
+            "kind": "mandatory",
+            "enforcement": "schema"
+          }
+        ]
       }
     },
     "Grenzpunkt_Gueltig": {
@@ -753,10 +907,16 @@
       ],
       "x-interlis": {
         "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Grenzpunkt_Gueltig",
-        "untranslatedConstraints": [
+        "constraints": [
           {
-            "constraint": "CH040601",
-            "reason": "UniqueConstraint is a population-level check, not expressible on one object"
+            "name": "CH040601",
+            "kind": "unique",
+            "reason": "UniqueConstraint is a population-level check, not expressible on one object",
+            "enforcement": "declared",
+            "attributes": [
+              "Geometrie"
+            ],
+            "scope": "global"
           }
         ]
       },
@@ -827,14 +987,27 @@
       ],
       "x-interlis": {
         "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Grundstueck_Gueltig",
-        "untranslatedConstraints": [
+        "constraints": [
           {
-            "constraint": "CH041101",
-            "reason": "UniqueConstraint is a population-level check, not expressible on one object"
+            "name": "CH041101",
+            "kind": "unique",
+            "reason": "UniqueConstraint is a population-level check, not expressible on one object",
+            "enforcement": "declared",
+            "attributes": [
+              "NBIdent",
+              "Nummer"
+            ],
+            "scope": "global"
           },
           {
-            "constraint": "CH041102",
-            "reason": "UniqueConstraint is a population-level check, not expressible on one object"
+            "name": "CH041102",
+            "kind": "unique",
+            "reason": "UniqueConstraint is a population-level check, not expressible on one object",
+            "enforcement": "declared",
+            "attributes": [
+              "EGRID"
+            ],
+            "scope": "global"
           }
         ]
       },
@@ -887,10 +1060,12 @@
       ],
       "x-interlis": {
         "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Liegenschaft_Gueltig",
-        "untranslatedConstraints": [
+        "constraints": [
           {
-            "constraint": "CH041501",
-            "reason": "SetConstraint is a population-level check, not expressible on one object"
+            "name": "CH041501",
+            "kind": "set",
+            "reason": "SetConstraint is a population-level check, not expressible on one object",
+            "enforcement": "declared"
           }
         ]
       },
