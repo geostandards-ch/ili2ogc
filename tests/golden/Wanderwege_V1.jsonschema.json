@@ -27,6 +27,9 @@
         "Bezeichnung",
         "Kategorie"
       ],
+      "x-interlis": {
+        "class": "Wanderwege_V1.Netz.Wegabschnitt"
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -58,6 +61,9 @@
         "Standort",
         "Wegabschnitt"
       ],
+      "x-interlis": {
+        "class": "Wanderwege_V1.Netz.Wegweiser"
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -82,7 +88,10 @@
       "title": "Abschnitt_Wegweiser",
       "required": [
         "Wegabschnitt"
-      ]
+      ],
+      "x-interlis": {
+        "class": "Wanderwege_V1.Netz.Abschnitt_Wegweiser"
+      }
     },
     "Wegabschnitt_MitWegweiser": {
       "type": "object",
@@ -110,6 +119,9 @@
         "Bezeichnung",
         "Kategorie"
       ],
+      "x-interlis": {
+        "class": "Wanderwege_V1.Netz.Wegabschnitt_MitWegweiser"
+      },
       "x-crud": [
         "GET",
         "POST",

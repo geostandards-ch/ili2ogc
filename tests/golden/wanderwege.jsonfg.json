@@ -14,6 +14,10 @@
         "Bezeichnung": "Seeuferweg",
         "Kategorie": "Wanderweg",
         "Belagsart": "Naturbelag"
+      },
+      "x-interlis": {
+        "class": "Wanderwege_V1.Netz.Wegabschnitt",
+        "basket": "b1"
       }
     },
     {
@@ -24,7 +28,26 @@
       "properties": {
         "Standort": "Bahnhofplatz",
         "Hoehe": 512
+      },
+      "x-interlis": {
+        "class": "Wanderwege_V1.Netz.Wegweiser",
+        "basket": "b1"
       }
     }
-  ]
+  ],
+  "x-interlis": {
+    "sender": "test-fixture",
+    "iliVersion": "2.4",
+    "models": [
+      {
+        "name": "Wanderwege_V1"
+      }
+    ],
+    "baskets": [
+      {
+        "bid": "b1",
+        "topic": "Wanderwege_V1.Netz"
+      }
+    ]
+  }
 }

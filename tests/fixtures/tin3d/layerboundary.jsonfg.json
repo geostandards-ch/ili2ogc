@@ -64,9 +64,30 @@
       },
       "properties": {
         "Name": "Test Layer"
+      },
+      "x-interlis": {
+        "class": "GeologicalLayer_V1.Geology.LayerBoundary",
+        "basket": "8a1e1e1e-0005-4000-8000-000000000005"
       }
     }
   ],
+  "x-interlis": {
+    "sender": "test",
+    "iliVersion": "2.3",
+    "models": [
+      {
+        "name": "GeologicalLayer_V1",
+        "version": "2026-09-04",
+        "uri": "https://example.org/models/"
+      }
+    ],
+    "baskets": [
+      {
+        "bid": "8a1e1e1e-0005-4000-8000-000000000005",
+        "topic": "GeologicalLayer_V1.Geology"
+      }
+    ]
+  },
   "featureType": "LayerBoundary",
   "coordRefSys": "http://www.opengis.net/def/crs/EPSG/0/2056"
 }

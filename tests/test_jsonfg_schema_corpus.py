@@ -29,7 +29,16 @@ pytestmark = pytest.mark.skipif(
     not XTF_FILES or not (ROOT / "ili_corpus").is_dir(), reason="xtf_corpus/ and ili_corpus/ are not present"
 )
 
-_VALUE_FACETS = {"minimum", "maximum", "maxLength", "minItems", "maxItems", "format", "pattern"}
+_VALUE_FACETS = {
+    "minimum",
+    "maximum",
+    "maxLength",
+    "minItems",
+    "maxItems",
+    "format",
+    "pattern",
+    "allOf",
+}  # allOf: constraints
 
 
 def _shape_only(node):

@@ -28,6 +28,15 @@
         "Identifikator",
         "NBIdent"
       ],
+      "x-interlis": {
+        "class": "DMAV_ViewPattern_V1.Grundstuecke.GSNachfuehrung",
+        "untranslatedConstraints": [
+          {
+            "constraint": "CH040101",
+            "reason": "UniqueConstraint is a population-level check, not expressible on one object"
+          }
+        ]
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -67,6 +76,9 @@
         "NBIdent",
         "Nummer"
       ],
+      "x-interlis": {
+        "class": "DMAV_ViewPattern_V1.Grundstuecke.Grundstueck"
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -91,7 +103,10 @@
       "title": "Entstehung_Grundstueck",
       "required": [
         "Entstehung"
-      ]
+      ],
+      "x-interlis": {
+        "class": "DMAV_ViewPattern_V1.Grundstuecke.Entstehung_Grundstueck"
+      }
     },
     "Untergang_Grundstueck": {
       "type": "object",
@@ -106,7 +121,10 @@
         }
       },
       "additionalProperties": false,
-      "title": "Untergang_Grundstueck"
+      "title": "Untergang_Grundstueck",
+      "x-interlis": {
+        "class": "DMAV_ViewPattern_V1.Grundstuecke.Untergang_Grundstueck"
+      }
     },
     "Grundstueck_Gueltig": {
       "type": "object",
@@ -130,6 +148,19 @@
         "NBIdent",
         "Nummer"
       ],
+      "x-interlis": {
+        "class": "DMAV_ViewPattern_V1.Grundstuecke.Grundstueck_Gueltig",
+        "untranslatedConstraints": [
+          {
+            "constraint": "CH041101",
+            "reason": "UniqueConstraint is a population-level check, not expressible on one object"
+          },
+          {
+            "constraint": "CH041102",
+            "reason": "UniqueConstraint is a population-level check, not expressible on one object"
+          }
+        ]
+      },
       "x-crud": [
         "GET",
         "POST",

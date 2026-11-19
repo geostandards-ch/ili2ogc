@@ -89,6 +89,9 @@ def _rename_schema_node(node: Any, tr: Translation, owner: str | None) -> Any:
     for key in ("items", "additionalProperties"):
         if isinstance(node.get(key), dict):
             node[key] = _rename_schema_node(node[key], tr, owner)
+    for key in ("if", "then", "else", "not"):
+        if isinstance(node.get(key), dict):
+            node[key] = _rename_schema_node(node[key], tr, owner)
     for key in ("allOf", "anyOf", "oneOf"):
         if isinstance(node.get(key), list):
             node[key] = [_rename_schema_node(x, tr, owner) for x in node[key]]

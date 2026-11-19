@@ -10,7 +10,9 @@ from typing import Any
 import jsonschema
 
 from interlis.builder.forward_refs import SymbolTable
+from interlis.convert.constraint_jsonschema import class_constraint_schemas
 from interlis.convert.geometry_kinds import GEOMETRY_KINDS, geometry_format
+from interlis.convert.temporal import temporal_roles
 from interlis.convert.view_formation import (
     geometry_inspection,
     inspection_reading,
@@ -67,6 +69,23 @@ def _description(instance: MetaInstance | None) -> str | None:
     """The `/** ... */` documentation comment of a class or attribute, as a JSON Schema `description`."""
     texts = getattr(instance, "Documentation", None) or []
     return " ".join(str(t) for t in texts) or None
+
+
+def _interlis_marker(cls: MetaInstance, symbol_table: SymbolTable | None) -> dict[str, Any]:
+    """The qualified INTERLIS name of a class, the one it extends and whether it is abstract."""
+    if symbol_table is None:
+        return {}
+    marker: dict[str, Any] = {}
+    qualified = symbol_table.qualified_name_of(cls)
+    if qualified:
+        marker["class"] = qualified
+    parent = getattr(cls, "Super", None)
+    parent_name = symbol_table.qualified_name_of(parent) if isinstance(parent, MetaInstance) else None
+    if parent_name:
+        marker["extends"] = parent_name
+    if getattr(cls, "Abstract", False):
+        marker["abstract"] = True
+    return marker
 
 
 def _unit_name(type_instance: MetaInstance) -> str | None:
@@ -193,6 +212,25 @@ def _reference_type_schema(resolved: ResolvedAttribute) -> dict[str, Any]:
 _concrete_subclasses = concrete_structure_subclasses
 
 
+TYPE_KEY = "@type"
+"""Key naming the concrete structure of an occurrence, as in ili2db's JSON; INTERLIS names cannot start with `@`."""
+
+
+def is_polymorphic_structure(cls: MetaInstance | None, symbol_table: SymbolTable | None) -> bool:
+    """Whether a structure is abstract, extends a structure, or is extended by one: its occurrences carry `@type`."""
+    if cls is None or getattr(cls, "Kind", None) != "Structure" or symbol_table is None:
+        return False
+    if bool(getattr(cls, "Abstract", False)) or getattr(getattr(cls, "Super", None), "Kind", None) == "Structure":
+        return True
+    return bool(_concrete_subclasses(cls, symbol_table))
+
+
+def structure_discriminant(cls: MetaInstance, symbol_table: SymbolTable | None) -> str:
+    """The `@type` value of a structure: its qualified INTERLIS name, else its short name."""
+    qualified = symbol_table.qualified_name_of(cls) if symbol_table is not None else None
+    return qualified or str(getattr(cls, "Name", None))
+
+
 def _class_ref_or_marker(
     class_instance: MetaInstance | None,
     ref_keys: dict[int, str],
@@ -203,9 +241,11 @@ def _class_ref_or_marker(
     With a `symbol_table`, an ABSTRACT structure becomes an `anyOf` over its concrete subclasses.
     """
     if class_instance is not None:
-        if symbol_table is not None and bool(getattr(class_instance, "Abstract", False)):
-            concrete = _concrete_subclasses(class_instance, symbol_table)
-            refs = sorted(ref_keys[id(c)] for c in concrete if id(c) in ref_keys)
+        if symbol_table is not None and is_polymorphic_structure(class_instance, symbol_table):
+            members = _concrete_subclasses(class_instance, symbol_table)
+            if not getattr(class_instance, "Abstract", False):
+                members = [class_instance, *members]
+            refs = sorted(ref_keys[id(c)] for c in members if id(c) in ref_keys)
             if refs:
                 return {"anyOf": [{"$ref": f"#/$defs/{r}"} for r in refs]}
         ref = ref_keys.get(id(class_instance))
@@ -435,9 +475,16 @@ def class_to_json_schema(
                 properties[name]["format"] = fmt
         if resolved.mandatory:
             required.append(name)
+    if is_feature:
+        direct = {name: resolve_attribute(attr) for name, attr in members.items() if name in properties}
+        for name, role in temporal_roles(direct).items():
+            properties[name][ROLE_KEY] = role
     spatial = [name for name, prop in properties.items() if is_spatial_schema(prop)]
     if len(spatial) == 1:
         properties[spatial[0]][ROLE_KEY] = PRIMARY_GEOMETRY
+    if is_polymorphic_structure(class_instance, symbol_table) and not getattr(class_instance, "Abstract", False):
+        properties = {TYPE_KEY: {"const": structure_discriminant(class_instance, symbol_table)}, **properties}
+        required.append(TYPE_KEY)
     schema: dict[str, Any] = {"type": "object", "properties": properties, "additionalProperties": False}
     class_name = getattr(class_instance, "Name", None)
     if class_name:
@@ -447,6 +494,15 @@ def class_to_json_schema(
     description = _description(class_instance)
     if description:
         schema["description"] = description
+    interlis = _interlis_marker(class_instance, symbol_table)
+    outside = frozenset(name for name, prop in properties.items() if is_spatial_schema(prop))
+    fragments, untranslated = class_constraint_schemas(class_instance, outside=outside)
+    if fragments:
+        schema["allOf"] = fragments
+    if untranslated:
+        interlis["untranslatedConstraints"] = [{"constraint": label, "reason": why} for label, why in untranslated]
+    if interlis:
+        schema["x-interlis"] = interlis
     class_meta = _meta_marker(class_instance)
     if class_meta:
         schema["x-meta"] = class_meta
@@ -489,13 +545,15 @@ def collection_schema(schema: dict[str, Any], key: str, *, schema_id: str | None
 def property_validator(schema: dict[str, Any], key: str, *, closed: bool = False) -> jsonschema.Draft202012Validator:
     """A validator of one feature's `properties` against `$defs[key]`; its spatial properties are not required.
 
-    `closed=False` ignores `additionalProperties`: `validate-jsonfg` reports an unknown property as a warning itself.
+    `closed=False` ignores `additionalProperties` and the constraint fragments: `validate-jsonfg` reports an unknown
+    property as a warning and evaluates the constraints itself.
 
     Geometry travels outside `properties` in JSON-FG (`place`), so the `format: geometry-*` properties
     are left to a geometry check.
     """
+    open_keys = ("additionalProperties", "allOf")  # `validate-jsonfg` evaluates the constraints itself
     defs = {
-        k: d if closed else {n: v for n, v in d.items() if n != "additionalProperties"}
+        k: d if closed else {n: v for n, v in d.items() if n not in open_keys}
         for k, d in schema.get("$defs", {}).items()
     }
     entry = dict(defs[key])

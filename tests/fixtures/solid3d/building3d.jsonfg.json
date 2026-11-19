@@ -115,9 +115,30 @@
       },
       "properties": {
         "Name": "Test Tetrahedron"
+      },
+      "x-interlis": {
+        "class": "Building3D_V1.Buildings.Building",
+        "basket": "8a1e1e1e-0001-4000-8000-000000000001"
       }
     }
   ],
+  "x-interlis": {
+    "sender": "test",
+    "iliVersion": "2.3",
+    "models": [
+      {
+        "name": "Building3D_V1",
+        "version": "2026-09-03",
+        "uri": "https://example.org/models/"
+      }
+    ],
+    "baskets": [
+      {
+        "bid": "8a1e1e1e-0001-4000-8000-000000000001",
+        "topic": "Building3D_V1.Buildings"
+      }
+    ]
+  },
   "featureType": "Building",
   "coordRefSys": "http://www.opengis.net/def/crs/EPSG/0/2056"
 }

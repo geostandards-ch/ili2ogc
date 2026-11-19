@@ -29,6 +29,9 @@
       "required": [
         "Name"
       ],
+      "x-interlis": {
+        "class": "MinimalTest.MainTopic.Person"
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -49,6 +52,9 @@
       "required": [
         "Name"
       ],
+      "x-interlis": {
+        "class": "MinimalTest.MainTopic.Company"
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -70,7 +76,10 @@
         }
       },
       "additionalProperties": false,
-      "title": "WorksFor"
+      "title": "WorksFor",
+      "x-interlis": {
+        "class": "MinimalTest.MainTopic.WorksFor"
+      }
     }
   }
 }

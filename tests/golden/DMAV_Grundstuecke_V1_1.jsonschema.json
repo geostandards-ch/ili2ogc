@@ -50,6 +50,15 @@
         "Grundstueck",
         "Qualitaetsstandard"
       ],
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Liegenschaft",
+        "untranslatedConstraints": [
+          {
+            "constraint": "CH041201",
+            "reason": "expression node IlisMeta16.ModelData.FunctionCall needs THIS/PARENT/aggregate/function context"
+          }
+        ]
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -93,6 +102,15 @@
         "Geometrie",
         "Grundstueck"
       ],
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.SelbstaendigesDauerndesRecht",
+        "untranslatedConstraints": [
+          {
+            "constraint": "CH041601",
+            "reason": "expression node IlisMeta16.ModelData.FunctionCall needs THIS/PARENT/aggregate/function context"
+          }
+        ]
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -133,6 +151,15 @@
         "Geometrie",
         "Grundstueck"
       ],
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Bergwerk",
+        "untranslatedConstraints": [
+          {
+            "constraint": "CH042001",
+            "reason": "expression node IlisMeta16.ModelData.FunctionCall needs THIS/PARENT/aggregate/function context"
+          }
+        ]
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -186,6 +213,15 @@
         "Mutationsart",
         "NBIdent"
       ],
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.GSNachfuehrung",
+        "untranslatedConstraints": [
+          {
+            "constraint": "CH040101",
+            "reason": "UniqueConstraint is a population-level check, not expressible on one object"
+          }
+        ]
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -280,6 +316,42 @@
         "Lagegenauigkeit",
         "Punktzeichen"
       ],
+      "allOf": [
+        {
+          "description": "INTERLIS constraint: CH040203",
+          "anyOf": [
+            {
+              "properties": {
+                "IstExaktDefiniert": {
+                  "not": {
+                    "const": false
+                  }
+                }
+              }
+            },
+            {
+              "properties": {
+                "Punktzeichen": {
+                  "const": "unversichert"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Grenzpunkt",
+        "untranslatedConstraints": [
+          {
+            "constraint": "CH040201",
+            "reason": "operand UnaryExpr is arithmetic or needs context beyond one object's properties"
+          },
+          {
+            "constraint": "CH040202",
+            "reason": "operand UnaryExpr is arithmetic or needs context beyond one object's properties"
+          }
+        ]
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -304,7 +376,10 @@
       "title": "Entstehung_Grenzpunkt",
       "required": [
         "Entstehung"
-      ]
+      ],
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Entstehung_Grenzpunkt"
+      }
     },
     "Untergang_Grenzpunkt": {
       "type": "object",
@@ -319,7 +394,10 @@
         }
       },
       "additionalProperties": false,
-      "title": "Untergang_Grenzpunkt"
+      "title": "Untergang_Grenzpunkt",
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Untergang_Grenzpunkt"
+      }
     },
     "Grundstueck": {
       "type": "object",
@@ -387,6 +465,15 @@
         "NBIdent",
         "Nummer"
       ],
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Grundstueck",
+        "untranslatedConstraints": [
+          {
+            "constraint": "CH040701",
+            "reason": "operand UnaryExpr is arithmetic or needs context beyond one object's properties"
+          }
+        ]
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -411,7 +498,10 @@
       "title": "Entstehung_Grundstueck",
       "required": [
         "Entstehung"
-      ]
+      ],
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Entstehung_Grundstueck"
+      }
     },
     "Untergang_Grundstueck": {
       "type": "object",
@@ -426,7 +516,10 @@
         }
       },
       "additionalProperties": false,
-      "title": "Untergang_Grundstueck"
+      "title": "Untergang_Grundstueck",
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Untergang_Grundstueck"
+      }
     },
     "GrundstueckLiegenschaft": {
       "type": "object",
@@ -444,7 +537,30 @@
       "title": "GrundstueckLiegenschaft",
       "required": [
         "Grundstueck"
-      ]
+      ],
+      "allOf": [
+        {
+          "description": "INTERLIS constraint: CH041301",
+          "properties": {
+            "Grundstueck": {
+              "properties": {
+                "Grundstuecksart": {
+                  "const": "Liegenschaft"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.GrundstueckLiegenschaft",
+        "untranslatedConstraints": [
+          {
+            "constraint": "CH041302",
+            "reason": "comparison of two attributes (or of two constants) cannot be expressed in JSON Schema"
+          }
+        ]
+      }
     },
     "GrundstueckSelbstaendigesDauerndesRecht": {
       "type": "object",
@@ -462,7 +578,45 @@
       "title": "GrundstueckSelbstaendigesDauerndesRecht",
       "required": [
         "Grundstueck"
-      ]
+      ],
+      "allOf": [
+        {
+          "description": "INTERLIS constraint: CH041701",
+          "properties": {
+            "Grundstueck": {
+              "properties": {
+                "Grundstuecksart": {
+                  "const": "SelbstaendigesDauerndesRecht"
+                }
+              }
+            }
+          }
+        },
+        {
+          "description": "INTERLIS constraint: CH041702",
+          "not": {
+            "required": [
+              "Grundstueck"
+            ],
+            "properties": {
+              "Grundstueck": {
+                "type": "object",
+                "required": [
+                  "Fiktiv"
+                ],
+                "properties": {
+                  "Fiktiv": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.GrundstueckSelbstaendigesDauerndesRecht"
+      }
     },
     "GrundstueckBergwerk": {
       "type": "object",
@@ -480,7 +634,45 @@
       "title": "GrundstueckBergwerk",
       "required": [
         "Grundstueck"
-      ]
+      ],
+      "allOf": [
+        {
+          "description": "INTERLIS constraint: CH042101",
+          "properties": {
+            "Grundstueck": {
+              "properties": {
+                "Grundstuecksart": {
+                  "const": "Bergwerk"
+                }
+              }
+            }
+          }
+        },
+        {
+          "description": "INTERLIS constraint: CH042102",
+          "not": {
+            "required": [
+              "Grundstueck"
+            ],
+            "properties": {
+              "Grundstueck": {
+                "type": "object",
+                "required": [
+                  "Fiktiv"
+                ],
+                "properties": {
+                  "Fiktiv": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.GrundstueckBergwerk"
+      }
     },
     "Grenzpunkt_Gueltig": {
       "type": "object",
@@ -559,6 +751,15 @@
         "Lagegenauigkeit",
         "Punktzeichen"
       ],
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Grenzpunkt_Gueltig",
+        "untranslatedConstraints": [
+          {
+            "constraint": "CH040601",
+            "reason": "UniqueConstraint is a population-level check, not expressible on one object"
+          }
+        ]
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -624,6 +825,19 @@
         "NBIdent",
         "Nummer"
       ],
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Grundstueck_Gueltig",
+        "untranslatedConstraints": [
+          {
+            "constraint": "CH041101",
+            "reason": "UniqueConstraint is a population-level check, not expressible on one object"
+          },
+          {
+            "constraint": "CH041102",
+            "reason": "UniqueConstraint is a population-level check, not expressible on one object"
+          }
+        ]
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -671,6 +885,15 @@
         "Geometrie",
         "Qualitaetsstandard"
       ],
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Liegenschaft_Gueltig",
+        "untranslatedConstraints": [
+          {
+            "constraint": "CH041501",
+            "reason": "SetConstraint is a population-level check, not expressible on one object"
+          }
+        ]
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -709,6 +932,9 @@
         "Flaechenmass",
         "Geometrie"
       ],
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.SelbstaendigesDauerndesRecht_Gueltig"
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -744,6 +970,9 @@
         "Flaechenmass",
         "Geometrie"
       ],
+      "x-interlis": {
+        "class": "DMAV_Grundstuecke_V1_1.Grundstuecke.Bergwerk_Gueltig"
+      },
       "x-crud": [
         "GET",
         "POST",

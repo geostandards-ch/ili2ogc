@@ -31,9 +31,30 @@
       },
       "properties": {
         "Name": "Test Scan"
+      },
+      "x-interlis": {
+        "class": "LidarScan_V1.Scans.LidarScan",
+        "basket": "8a1e1e1e-0007-4000-8000-000000000007"
       }
     }
   ],
+  "x-interlis": {
+    "sender": "test",
+    "iliVersion": "2.3",
+    "models": [
+      {
+        "name": "LidarScan_V1",
+        "version": "2026-09-04",
+        "uri": "https://example.org/models/"
+      }
+    ],
+    "baskets": [
+      {
+        "bid": "8a1e1e1e-0007-4000-8000-000000000007",
+        "topic": "LidarScan_V1.Scans"
+      }
+    ]
+  },
   "featureType": "LidarScan",
   "coordRefSys": "http://www.opengis.net/def/crs/EPSG/0/2056"
 }

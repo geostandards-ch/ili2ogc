@@ -11,6 +11,9 @@
       },
       "additionalProperties": false,
       "title": "Point",
+      "x-interlis": {
+        "class": "GeomTest.MainTopic.Point"
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -29,6 +32,9 @@
       },
       "additionalProperties": false,
       "title": "MultiPoint",
+      "x-interlis": {
+        "class": "GeomTest.MainTopic.MultiPoint"
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -47,6 +53,9 @@
       },
       "additionalProperties": false,
       "title": "Way",
+      "x-interlis": {
+        "class": "GeomTest.MainTopic.Way"
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -65,6 +74,9 @@
       },
       "additionalProperties": false,
       "title": "DirectedWay",
+      "x-interlis": {
+        "class": "GeomTest.MainTopic.DirectedWay"
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -83,6 +95,9 @@
       },
       "additionalProperties": false,
       "title": "MultiWay",
+      "x-interlis": {
+        "class": "GeomTest.MainTopic.MultiWay"
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -101,6 +116,9 @@
       },
       "additionalProperties": false,
       "title": "Zone",
+      "x-interlis": {
+        "class": "GeomTest.MainTopic.Zone"
+      },
       "x-crud": [
         "GET",
         "POST",

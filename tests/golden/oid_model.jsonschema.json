@@ -10,6 +10,9 @@
       },
       "additionalProperties": false,
       "title": "Plain",
+      "x-interlis": {
+        "class": "OidTest.NoClause.Plain"
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -27,6 +30,9 @@
       },
       "additionalProperties": false,
       "title": "NoOwnOid",
+      "x-interlis": {
+        "class": "OidTest.BasketOnly.NoOwnOid"
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -44,6 +50,9 @@
       },
       "additionalProperties": false,
       "title": "Inherits",
+      "x-interlis": {
+        "class": "OidTest.ClassDefault.Inherits"
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -61,6 +70,9 @@
       },
       "additionalProperties": false,
       "title": "OwnDomain",
+      "x-interlis": {
+        "class": "OidTest.ClassDefault.OwnDomain"
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -78,6 +90,9 @@
       },
       "additionalProperties": false,
       "title": "Opted",
+      "x-interlis": {
+        "class": "OidTest.ClassDefault.Opted"
+      },
       "x-crud": [
         "GET",
         "POST",
@@ -95,6 +110,9 @@
       },
       "additionalProperties": false,
       "title": "Combined",
+      "x-interlis": {
+        "class": "OidTest.Both.Combined"
+      },
       "x-crud": [
         "GET",
         "POST",

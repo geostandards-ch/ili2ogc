@@ -914,6 +914,7 @@ def _stream_feature_collection(
         root["featureType"] = next(iter(feature_types))
     if len(crs_values) == 1:
         root["coordRefSys"] = next(iter(crs_values))
+    root[_jsonfg_mod.INTERLIS_KEY] = _jsonfg_mod.transfer_header(read_skeleton(xtf_path))
     hoisted = [key for key in ("featureType", "coordRefSys") if key in root]
 
     with open(output, "w", encoding="utf-8") if output else contextlib.nullcontext(sys.stdout) as out:

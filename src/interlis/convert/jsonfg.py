@@ -25,7 +25,14 @@ from interlis.convert.geometry_kinds import (
     is_pointcloud3d,
     is_solid3d,
 )
-from interlis.convert.jsonschema import class_schema_keys, convertible_roots
+from interlis.convert.jsonschema import (
+    TYPE_KEY,
+    class_schema_keys,
+    convertible_roots,
+    is_polymorphic_structure,
+    structure_discriminant,
+)
+from interlis.convert.temporal import temporal_roles, time_member
 from interlis.convert.view_formation import (
     LINE_GEOMETRY,
     LINE_SEGMENT,
@@ -248,7 +255,10 @@ def _structure_value(
     if wrapper is None or not isinstance(resolved.type_instance, MetaInstance):
         return {}
     structure = _concrete_structure(resolved.type_instance, wrapper.tag, symbol_table)
-    return members_value(structure, group_by_tag(wrapper.children), symbol_table=symbol_table)
+    value = members_value(structure, group_by_tag(wrapper.children), symbol_table=symbol_table)
+    if is_polymorphic_structure(structure, symbol_table):
+        return {TYPE_KEY: structure_discriminant(structure, symbol_table), **value}
+    return value
 
 
 def _concrete_structure(declared: MetaInstance, tag: str, symbol_table: SymbolTable | None) -> MetaInstance:
@@ -996,6 +1006,9 @@ def _object_to_feature(
     feature["featureType"] = feature_type
     if standalone and schema_url is not None:
         feature["featureSchema"] = _feature_schema_ref(schema_url, feature_type)
+    time = time_member(temporal_roles(resolved_attrs), properties)
+    if time is not None:
+        feature["time"] = time
     feature["geometry"] = fallback_geometry(place, crs_uri)
     if place is not None:
         feature["place"] = place
@@ -2110,7 +2123,7 @@ def _object_features(
             continue
         # The declaring model's table holds the associations embedding a role on `cls`.
         cls_table = home_symbol_table(obj.qualified_class, symbol_table=symbol_table, repository=repository)
-        yield object_to_feature(
+        feature = object_to_feature(
             obj,
             cls,
             standalone=False,
@@ -2119,6 +2132,8 @@ def _object_features(
             omit_multivalue=include_child_rows,
             feature_type=type_keys.get(id(cls)),
         )
+        feature[INTERLIS_KEY] = {"class": obj.qualified_class, **({"basket": obj.basket} if obj.basket else {})}
+        yield feature
         if include_child_rows:
             with _feature_scope(getattr(cls, "Name", None) or obj.qualified_class, obj.tid):
                 yield from _child_row_features(obj, cls, symbol_table=symbol_table)
@@ -2188,6 +2203,7 @@ def _transfer_to_feature_collection(
         "conformsTo": conforms_to,
         "features": features,
     }
+    collection[INTERLIS_KEY] = transfer_header(transfer)
     feature_types = {f["featureType"] for f in features}
     if len(feature_types) == 1:
         collection["featureType"] = next(iter(feature_types))
@@ -2207,6 +2223,27 @@ def _transfer_to_feature_collection(
             f.pop("coordRefSys", None)
 
     return collection
+
+
+INTERLIS_KEY = "x-interlis"
+"""Foreign member for what JSON-FG has no member for: a Feature's INTERLIS class and basket, the transfer header."""
+
+
+def transfer_header(transfer: XtfTransfer) -> dict[str, Any]:
+    """The `x-interlis` member of the collection: sender, INTERLIS version, models and baskets of the transfer."""
+    header: dict[str, Any] = {}
+    if transfer.sender:
+        header["sender"] = transfer.sender
+    if transfer.ili_version:
+        header["iliVersion"] = transfer.ili_version
+    header["models"] = [
+        {k: v for k, v in (("name", m.name), ("version", m.version), ("uri", m.uri)) if v} for m in transfer.models
+    ]
+    header["baskets"] = [
+        {k: v for k, v in (("bid", b.bid), ("topic", b.qualified_topic), ("kind", b.kind)) if v}
+        for b in transfer.baskets
+    ]
+    return header
 
 
 def view_skip_diagnostic(view: MetaInstance, *, file: str | None = None):

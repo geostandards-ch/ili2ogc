@@ -15,6 +15,10 @@
         "Identifikator": "D-100",
         "GueltigerEintrag": "2020-01-10",
         "Grundbucheintrag": "2020-02-14"
+      },
+      "x-interlis": {
+        "class": "DMAV_ViewPattern_V1.Grundstuecke.GSNachfuehrung",
+        "basket": "b1"
       }
     },
     {
@@ -27,6 +31,10 @@
         "Nummer": "100",
         "EGRID": "CH100000000001",
         "Entstehung": "n1"
+      },
+      "x-interlis": {
+        "class": "DMAV_ViewPattern_V1.Grundstuecke.Grundstueck",
+        "basket": "b1"
       }
     },
     {
@@ -39,6 +47,10 @@
         "Identifikator": "D-200e",
         "GueltigerEintrag": "2019-01-10",
         "Grundbucheintrag": "2019-02-14"
+      },
+      "x-interlis": {
+        "class": "DMAV_ViewPattern_V1.Grundstuecke.GSNachfuehrung",
+        "basket": "b1"
       }
     },
     {
@@ -51,6 +63,10 @@
         "Identifikator": "D-200u",
         "GueltigerEintrag": "2022-01-10",
         "Grundbucheintrag": "2022-02-14"
+      },
+      "x-interlis": {
+        "class": "DMAV_ViewPattern_V1.Grundstuecke.GSNachfuehrung",
+        "basket": "b1"
       }
     },
     {
@@ -64,6 +80,10 @@
         "EGRID": "CH100000000002",
         "Entstehung": "n2e",
         "Untergang": "n2u"
+      },
+      "x-interlis": {
+        "class": "DMAV_ViewPattern_V1.Grundstuecke.Grundstueck",
+        "basket": "b1"
       }
     },
     {
@@ -75,6 +95,10 @@
         "NBIdent": "CH0000001",
         "Identifikator": "D-300",
         "GueltigerEintrag": "2024-01-10"
+      },
+      "x-interlis": {
+        "class": "DMAV_ViewPattern_V1.Grundstuecke.GSNachfuehrung",
+        "basket": "b1"
       }
     },
     {
@@ -87,6 +111,10 @@
         "Nummer": "300",
         "EGRID": "CH100000000003",
         "Entstehung": "n3"
+      },
+      "x-interlis": {
+        "class": "DMAV_ViewPattern_V1.Grundstuecke.Grundstueck",
+        "basket": "b1"
       }
     },
     {
@@ -100,5 +128,20 @@
         "EGRID": "CH100000000001"
       }
     }
-  ]
+  ],
+  "x-interlis": {
+    "sender": "test-fixture",
+    "iliVersion": "2.4",
+    "models": [
+      {
+        "name": "DMAV_ViewPattern_V1"
+      }
+    ],
+    "baskets": [
+      {
+        "bid": "b1",
+        "topic": "DMAV_ViewPattern_V1.Grundstuecke"
+      }
+    ]
+  }
 }

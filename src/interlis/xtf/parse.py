@@ -73,6 +73,8 @@ class XtfObject:
     operation: str | None = None
     """The upper-cased `OPERATION` (`INSERT`/`UPDATE`/`DELETE`) of an incremental transfer, `None` when absent
     (an `INSERT`)."""
+    basket: str | None = None
+    """The BID of the basket the object was read from."""
 
 
 @dataclass
@@ -178,6 +180,7 @@ def _walk(path: Path) -> Iterator[tuple[str, Any]]:
                     qualified_class=qualified_class,
                     attributes={},
                     operation=operation,
+                    basket=current_basket.bid,
                 )
             elif parent_role == "object":
                 role = "attribute"
