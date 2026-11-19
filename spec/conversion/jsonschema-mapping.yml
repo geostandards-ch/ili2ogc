@@ -109,63 +109,38 @@ BlackboxType:
       source: {field: Kind}
       note: "only for Kind=Binary -> \"base64\" (eCH-0118 SS6.15.6's xsd:base64Binary) - omitted for Kind=Xml"
 
-# A COORD/MULTICOORD attribute -> a GeoJSON/JSON-FG-style position tuple.
-# Chosen to already match the eventual .xtf -> JSON-FG position encoding.
+# A COORD/MULTICOORD attribute: the value is not in `properties` of a JSON-FG Feature (it is its `place`), so the schema
+# only names the geometry kind with the OGC API Features Part 5 `format: geometry-*`.
 CoordType:
   qualified_name: IlisMeta16.ModelData.CoordType
   json_schema:
-    type:
-      value: array
+    format:
+      source: {function: "convert.geometry_kinds.geometry_format(type_kind, type_instance, feature_level)"}
       note: >
-        `Multi` (own BOOLEAN, MULTICOORD) is structural, not a keyword:
-        when true, the whole position schema described below is wrapped
-        in one more `{"type": "array", "items": <position>}` level
-        (_wrap_multi) rather than being surfaced as a marker - the
-        nesting alone is a complete, lossless representation.
-    prefixItems:
-      source: {function: "xtf.schema.coord_axes(type_instance)"}
-      note: >
-        One entry per axis (association AxisSpec, role Axis - NOT a
-        class attribute, hence "function" not "field" here), each a
-        NumType instance fed straight into _num_type_schema (reused,
-        not duplicated).
-    items:
-      value: false
-      note: "forbid a coordinate beyond what prefixItems declares"
-    minItems:
-      source: {function: "len(xtf.schema.coord_axes(type_instance))"}
-    maxItems:
-      source: {function: "len(xtf.schema.coord_axes(type_instance))"}
+        `geometry-point` (`geometry-multipoint` when `Multi` is true; a 3D COORD is the same kind, the third ordinate
+        travels in the position). Inside a structure the position array has no `place` to go to, so a structure-level
+        geometry keeps a plain `format` without the feature-level naming.
   not_mapped:
-    NullAxis: "rotation/axis-order metadata (ROTATION clause) - irrelevant to the plain position-tuple shape"
+    NullAxis: "rotation/axis-order metadata (ROTATION clause)"
     PiHalfAxis: "see NullAxis"
-    Multi: "structural (wraps the whole schema in one more array level), not a keyword - see the type note above"
 
 # A POLYLINE/DIRECTED POLYLINE/SURFACE/AREA (+ MULTI* variants) attribute.
 LineType:
   qualified_name: IlisMeta16.ModelData.LineType
   json_schema:
-    type:
-      value: array
-    items:
-      source: {function: "xtf.schema.line_coord_type(type_instance)"}
+    format:
+      source: {function: "convert.geometry_kinds.geometry_format(type_kind, type_instance, feature_level)"}
       note: >
-        Kind in {Polyline, DirectedPolyline}: one CoordType-shaped
-        position per array item. Kind in {Surface, Area}: one more
-        array level (boundary rings) - each ring itself an array of
-        positions. line_coord_type (association LineCoord, walks the
-        EXTENDS chain) is reused directly for vertex shape, deliberately
-        via _position_schema rather than CoordType's own mapping above
-        (a vertex is never itself Multi).
-    x-boundary-order:
-      value: outer-first
-      note: >
-        Surface/Area only - the first boundary ring is the outer
-        contour, the rest are holes (eCH-0031). No native JSON Schema
-        keyword expresses "first item is special".
+        `geometry-linestring`, `geometry-multilinestring`, `geometry-polygon` or `geometry-multipolygon`; AREA is read
+        as SURFACE. A line whose `WITH (...)` admits ARCS is `geometry-any` (the value may be a curve, and Part 5 names
+        only the six simple types).
   not_mapped:
     MaxOverlap: "WITHOUT OVERLAPS > X threshold - a data-quality tolerance, irrelevant to the geometry's JSON shape"
-    Multi: "structural (wraps the whole schema in one more array level, MULTIPOLYLINE/MULTISURFACE/MULTIAREA), not a keyword - same as CoordType.Multi above"
+    Multi: "structural: selects the MULTI* kind above"
+
+# `/** ... */` documentation comments are read with the same lex-only pass as the `!!@` meta-attributes
+# (runtime.parse.meta_attribute_comments) and attached by the builder to the first following construct as
+# `Documentation`; the schema carries them as `description`.
 
 # Class.Documentation exists on the metamodel (inherited from MetaElement)
 # but is never populated by InterlisModelBuilder - INTERLIS `/** ... */`
@@ -181,6 +156,12 @@ Class:
       value: object
     title:
       source: {field: Name}
+    description:
+      source: {field: Documentation}
+      note: "the `/** ... */` comments joined by a space; omitted when there is none"
+    additionalProperties:
+      value: false
+      note: "INTERLIS has no extra attributes; `validate-jsonfg` ignores the keyword to keep its own warning"
     properties:
       source: {function: "xtf.schema.attributes_of(class_instance)"}
       note: >
@@ -195,12 +176,9 @@ Class:
     required:
       source: {function: "resolve_attribute(attr).mandatory"}
       note: >
-        One entry per attribute where mandatory is true. Known gap
-        (pre-existing in xtf.schema.resolve_attribute, not fixed here -
-        see mappings/ilismeta16-to-jsonschema-rules.yml StructureNesting
-        note): a structure-typed attribute's `mandatory` is always False,
-        since `Class` (unlike `DomainType`) has no own `Mandatory`
-        attribute for resolve_attribute to read.
+        One entry per attribute where mandatory is true, a structure-typed
+        attribute included (checked on a model with a MANDATORY structure
+        attribute).
 
 View:
   qualified_name: IlisMeta16.ModelData.View
