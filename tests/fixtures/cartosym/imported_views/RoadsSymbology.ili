@@ -1,0 +1,40 @@
+INTERLIS 2.4;
+
+!! GRAPHICs based on VIEWs of an imported model (RoadsViews).
+
+MODEL RoadsSymbology (en)
+AT "https://example.org/models/" VERSION "2026-11-20" =
+
+  IMPORTS StandardSymbology;
+  IMPORTS RoadsViews;
+
+  SIGN BASKET Signs ~ StandardSymbology.StandardSigns
+    OBJECTS OF PolylineSign: MainRoad;
+
+  TOPIC Graphics =
+    DEPENDS ON RoadsViews.Main, RoadsViews.Second;
+
+    GRAPHIC Main_Graphics BASED ON RoadsViews.Main.roads =
+      RoadRule OF StandardSymbology.StandardSigns.PolylineSign: (
+          Sign := {MainRoad};
+          Geometry := geometry;
+          Priority := 1);
+    END Main_Graphics;
+
+    GRAPHIC Second_Graphics BASED ON RoadsViews.Second.roads =
+      RoadRule OF StandardSymbology.StandardSigns.PolylineSign: (
+          Sign := {MainRoad};
+          Geometry := geometry;
+          Priority := 1);
+    END Second_Graphics;
+
+    GRAPHIC Lanes_Graphics BASED ON RoadsViews.Second.lanes =
+      LaneRule OF StandardSymbology.StandardSigns.PolylineSign: (
+          Sign := {MainRoad};
+          Geometry := geometry;
+          Priority := 1);
+    END Lanes_Graphics;
+
+  END Graphics;
+
+END RoadsSymbology.

@@ -872,6 +872,22 @@ def feature_type_keys(symbol_table: SymbolTable) -> dict[int, str]:
     return _TYPE_KEYS[1]
 
 
+def feature_type_of(
+    instance: MetaInstance, symbol_table: SymbolTable, repository: ModelRepository | None = None
+) -> str | None:
+    """The `featureType` the JSON-FG conversion gives `instance`, a class or VIEW of this table or an imported model.
+
+    A VIEW that a `GRAPHIC` names from another model lives in that model's own table (`repository.loaded_models()`),
+    so the keys are computed there, as `convert-jsonfg` does for the model that declares it; the short `Name` is the
+    fallback when no table knows the instance.
+    """
+    tables = [symbol_table, *(repository.loaded_models().values() if repository is not None else ())]
+    for table in tables:
+        if table.qualified_name_of(instance) is not None and (key := feature_type_keys(table).get(id(instance))):
+            return key
+    return getattr(instance, "Name", None)
+
+
 def _feature_schema_ref(schema_url: str, feature_type: str) -> str:
     """A `$defs` entry of a `model_to_json_schema` document, addressed by URI fragment.
 
