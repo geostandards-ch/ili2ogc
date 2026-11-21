@@ -38,7 +38,7 @@ from interlis.builder.forward_refs import SymbolTable
 from interlis.builder.repository import ModelRepository
 from interlis.convert.color import lch_to_srgb
 from interlis.convert.cql2 import to_cql2
-from interlis.convert.jsonfg import read_arc, read_coord
+from interlis.convert.jsonfg import feature_type_of, read_arc, read_coord
 from interlis.metamodel.instance import MetaInstance
 from interlis.xtf.parse import RawNode, XtfBasket, XtfObject
 from interlis.xtf.schema import attributes_of, schema_members_of
@@ -1028,12 +1028,23 @@ def _add_visualization_passes(styling_rules: list[StylingRule]) -> None:
         rule.selector = _and_selector(rule.selector, pass_eq)
 
 
-def graphic_to_style(graphic: MetaInstance, sign_library: SignLibrary | None = None) -> Style:
+def graphic_to_style(
+    graphic: MetaInstance,
+    sign_library: SignLibrary | None = None,
+    symbol_table: SymbolTable | None = None,
+    repository: ModelRepository | None = None,
+) -> Style:
     """Build one pycartosym `Style` from a built INTERLIS `GRAPHIC`, one `StylingRule` per `DrawingRule`.
 
-    Rules are sorted by `Priority` ascending, and each distinct Priority becomes a `viz.pass`.
+    Rules are sorted by `Priority` ascending, and each distinct Priority becomes a `viz.pass`. With `symbol_table`
+    (and `repository` for a base in an imported model) `dataLayer.id` is the base's JSON-FG `featureType`
+    (`Name_2` on a name collision), else its short `Name`.
     """
-    feature_type = getattr(getattr(graphic, "Base", None), "Name", None)
+    base = getattr(graphic, "Base", None)
+    if base is not None and symbol_table is not None:
+        feature_type = feature_type_of(base, symbol_table, repository)
+    else:
+        feature_type = getattr(base, "Name", None)
     drawing_rules = graphic.DrawingRule if isinstance(graphic.DrawingRule, list) else [graphic.DrawingRule]
     styling_rules = [
         styling_rule_from_drawing_rule(rule, sign_library=sign_library, feature_type=feature_type)

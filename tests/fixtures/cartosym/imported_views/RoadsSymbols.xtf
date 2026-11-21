@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- Synthetic sign data for RoadsSymbology.ili (one green solid PolylineSign). -->
+
+<ili:transfer xmlns:ili="http://www.interlis.ch/xtf/2.4/INTERLIS"
+  xmlns="http://www.interlis.ch/xtf/2.4/StandardSymbology">
+  <ili:headersection>
+    <ili:models>
+      <ili:model>RoadsSymbology</ili:model>
+    </ili:models>
+    <ili:sender>ili2ogc test fixture</ili:sender>
+  </ili:headersection>
+  <ili:datasection>
+    <StandardSigns ili:bid="Signs00000001">
+      <Color ili:tid="1">
+        <Name>green</Name>
+        <L>87.7</L>
+        <C>119.8</C>
+        <H>136.02</H>
+        <T>1.0</T>
+      </Color>
+      <LineStyle_Solid ili:tid="41">
+        <Name>MainRoadSolid</Name>
+        <Color ili:ref="1"></Color>
+      </LineStyle_Solid>
+      <PolylineSign ili:tid="101">
+        <ili:Name>MainRoad</ili:Name>
+        <Style ili:ref="41">
+          <PolylineSignLineStyleAssoc>
+            <Offset>0.0</Offset>
+          </PolylineSignLineStyleAssoc>
+        </Style>
+      </PolylineSign>
+    </StandardSigns>
+  </ili:datasection>
+</ili:transfer>

@@ -1268,7 +1268,8 @@ def cmd_convert_sld(args: argparse.Namespace) -> int:
                 if not args.paper_units
                 else _cartosym_mod.paper_as_millimetres()
             ):
-                rendered[name] = _cartosym_mod.write_sld(_cartosym_mod.graphic_to_style(graphic, sign_library))
+                style = _cartosym_mod.graphic_to_style(graphic, sign_library, builder.symbol_table, repository)
+                rendered[name] = _cartosym_mod.write_sld(style)
         except (NotImplementedError, _cartosym_mod.ScaleRangeError) as exc:
             _warn(f"GRAPHIC {name!r}: {exc} - skipped")
     if refused and not rendered:

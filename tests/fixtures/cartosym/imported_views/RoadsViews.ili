@@ -1,0 +1,42 @@
+INTERLIS 2.4;
+
+!! The VIEWs live in a model of their own. `roads` is declared in two VIEW TOPICs, so the JSON-FG conversion keys
+!! the second one `roads_2`.
+
+MODEL RoadsViews (en)
+AT "https://example.org/models/" VERSION "2026-11-20" =
+
+  IMPORTS RoadsBase;
+
+  VIEW TOPIC Main EXTENDS RoadsBase.Roads =
+
+    VIEW roads
+      PROJECTION OF R ~ RoadsBase.Roads.Road;
+      =
+      ATTRIBUTE
+        kind := R -> RoadKind;
+        geometry := R -> Geometry;
+    END roads;
+
+  END Main;
+
+  VIEW TOPIC Second EXTENDS RoadsBase.Roads =
+
+    VIEW roads
+      PROJECTION OF R ~ RoadsBase.Roads.Road;
+      =
+      ATTRIBUTE
+        kind := R -> RoadKind;
+        geometry := R -> Geometry;
+    END roads;
+
+    VIEW lanes
+      PROJECTION OF R ~ RoadsBase.Roads.Road;
+      =
+      ATTRIBUTE
+        geometry := R -> Geometry;
+    END lanes;
+
+  END Second;
+
+END RoadsViews.
